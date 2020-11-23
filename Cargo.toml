@@ -1,0 +1,11 @@
+[package]
+name = "riscv-emulator"
+version = "0.1.0"
+authors = ["Joe Thornber <ejt@redhat.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+elf = '0.0.10'
+
