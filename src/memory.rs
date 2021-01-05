@@ -1,11 +1,28 @@
+use std::fmt;
 use std::result;
+use thiserror::Error;
+
+use crate::primitive::Primitive;
 
 /// An address used within the guest.
-pub struct Addr(u32);
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Addr(pub u64);
+
+impl fmt::LowerHex for Addr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let val = self.0;
+        fmt::LowerHex::fmt(&val, f)
+    }
+}
 
 /// Indicates memory errors such as referencing unallocated memory.  Or bad permissions.
+#[derive(Error, Debug)]
 pub enum MemErr {
+    #[error("Bad memory permissions at {0:?}, wanted {1}")]
     BadPerms(Addr, u8),
+
+    #[error("Address out of bounds")]
     OutOfBounds,
 }
 
@@ -25,7 +42,7 @@ pub struct Memory {
 
 // FIXME: implement snapshotting.
 impl Memory {
-    pub fn new(len: u32) -> Self {
+    pub fn new(len: u64) -> Self {
         Memory {
             perms: vec![0u8; len as usize],
             mem: vec![0u8; len as usize],
@@ -33,7 +50,7 @@ impl Memory {
     }
 
     /// Overwrites the perms for the address range.
-    pub fn set_perms(&mut self, start: &Addr, len: u32, perms: u8) -> Result<()> {
+    pub fn set_perms(&mut self, start: Addr, len: u64, perms: u8) -> Result<()> {
         for b in start.0..(start.0 + len) {
             self.perms[b as usize] = perms;
         }
@@ -42,7 +59,7 @@ impl Memory {
     }
 
     /// Or's in the perms.
-    pub fn add_perms(&mut self, start: &Addr, len: u32, perms: u8) -> Result<()> {
+    pub fn add_perms(&mut self, start: Addr, len: u64, perms: u8) -> Result<()> {
         for b in start.0..(start.0 + len) {
             self.perms[b as usize] |= perms;
         }
@@ -52,7 +69,7 @@ impl Memory {
 
     /// Confirms that all the bits in 'perm' are set for every byte
     /// in the given range.
-    pub fn check_perms(&self, start: &Addr, len: u32, perm: u8) -> Result<()> {
+    pub fn check_perms(&self, start: Addr, len: u64, perm: u8) -> Result<()> {
         let end = start.0.checked_add(len);
         if end.is_none() {
             return Err(MemErr::OutOfBounds);
@@ -68,21 +85,32 @@ impl Memory {
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
     /// not set for any byte in the range.
-    pub fn read(&self, start: &Addr, len: u32, perm: u8) -> Result<&[u8]> {
-        self.check_perms(start, len, perm)?;
-        Ok(&self.mem[(start.0 as usize)..((start.0 + len) as usize)])
+    pub fn read(&self, start: Addr, bytes: &mut [u8], perm: u8) -> Result<()> {
+        self.check_perms(start, bytes.len() as u64, perm)?;
+        bytes.copy_from_slice(
+            &self.mem[(start.0 as usize)..((start.0 + bytes.len() as u64) as usize)],
+        );
+        Ok(())
     }
 
-    //// Writes bytes to a memory range.  Fails in the bits in 'perms' are
+    /// Writes bytes to a memory range.  Fails in the bits in 'perms' are
     /// not set for any byte in the range.
-    pub fn write(&mut self, start: &Addr, bytes: &[u8], perm: u8) -> Result<()> {
-        self.check_perms(start, bytes.len() as u32, perm)?;
-        self.mem[(start.0 as usize)..((start.0 + bytes.len() as u32) as usize)].copy_from_slice(bytes);
+    pub fn write(&mut self, start: Addr, bytes: &[u8], perm: u8) -> Result<()> {
+        self.check_perms(start, bytes.len() as u64, perm)?;
+        self.mem[(start.0 as usize)..((start.0 + bytes.len() as u64) as usize)]
+            .copy_from_slice(bytes);
 
         // FIXME: checking perms and adding in the WRITTEN flag could be
         // done in a single pass.  Alternatively wait until we're using
         // page level perms.
-        self.add_perms(start, bytes.len() as u32, PERM_WRITTEN)
+        self.add_perms(start, bytes.len() as u64, PERM_WRITTEN)
+    }
+
+    /// Accesses a primitive, loc must be 4 byte aligned.  `perm` checked.
+    pub fn read_into<T: Primitive>(&mut self, loc: Addr, perm: u8) -> Result<T> {
+        let mut dest = [0u8; 16];
+        self.read(loc, &mut dest[..::core::mem::size_of::<T>()], perm)?;
+
+        Ok(unsafe { core::ptr::read_unaligned(dest.as_ptr() as *const T) })
     }
 }
-

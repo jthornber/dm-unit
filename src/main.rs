@@ -1,60 +1,101 @@
-pub mod memory;
+extern crate riscv_emulator;
 
+use anyhow::{anyhow, Result};
+use clap::{App, Arg};
 use elf;
-use std::result;
-use memory::Memory;
+use elf::types::*;
+use riscv_emulator::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
+use riscv_emulator::vm::*;
+use std::path::{Path, PathBuf};
 
 /// Emulator for riscv32i
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(usize)]
-enum Reg {
-    Zero = 0,
-    Ra,
-    Sp,
-    Gp,
-    Tp,
-    T0,
-    T1,
-    T2,
-    S0,
-    S1,
-    A0,
-    A1,
-    A2,
-    A3,
-    A4,
-    A5,
-    A6,
-    A7,
-    S2,
-    S3,
-    S4,
-    S5,
-    S6,
-    S7,
-    S8,
-    S9,
-    S10,
-    S11,
-    T3,
-    T4,
-    T5,
-    T6,
+//--------------------------
+
+fn has_flag(flags: SectionFlag, item: SectionFlag) -> bool {
+    (flags.0 & item.0) != 0
 }
 
-struct VM {
-    registers: Vec<u32>,
-    mem: Memory,
-}
-
-impl VM {
-    pub fn new(mem: u32) -> Self {
-        todo!();
+fn fmt_perm(perm: u8) -> String {
+    let mut out = String::new();
+    if perm & PERM_READ != 0 {
+        out.push('R');
     }
+    if perm & PERM_WRITE != 0{
+        out.push('W');
+    }
+    if perm &PERM_EXEC != 0 {
+        out.push('X');
+    }
+    out
 }
 
-fn main() {
-    let _mem = Memory::new(1 * 1024 * 1024);
-    println!("Hello, world!");
+/// Loads an elf format file into memory.  Returns the entry point.
+fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<Addr> {
+    let file = elf::File::open_path(&path).map_err(|_e| anyhow!("couldn't read elf file"))?;
+
+    for section in &file.sections {
+        // FIXME: must be a better way of ignoring info sections
+        if section.data.len() == 0 || section.shdr.addr == 0 {
+            continue;
+        }
+
+        let flags = section.shdr.flags;
+        let mut perm = 0;
+
+        if has_flag(flags, SHF_WRITE) {
+            perm |= PERM_WRITE;
+        }
+
+        if has_flag(flags, SHF_ALLOC) {
+            perm |= PERM_READ;
+        }
+
+        if has_flag(flags, SHF_EXECINSTR) {
+            perm |= PERM_EXEC;
+        }
+
+        println!("Loading {} at {:#x}, {}", section.shdr.name, section.shdr.addr, fmt_perm(perm));
+
+        mem.write(Addr(section.shdr.addr as u64), &section.data, 0u8)
+            .map_err(|_e| anyhow!("couldn't load binary to memory"))?;
+
+        mem.set_perms(
+            Addr(section.shdr.addr as u64),
+            section.data.len() as u64,
+            perm,
+        )
+        .map_err(|_e| anyhow!("couldn't set memory permissions"))?;
+    }
+
+    Ok(Addr(file.ehdr.entry as u64))
+}
+
+//--------------------------
+
+fn main() -> Result<()> {
+    let parser = App::new("risc-emulator")
+        .version("0")
+        .about("simple emulator, still under development")
+        .arg(
+            Arg::with_name("INPUT")
+                .help("RISCV32i binary to run")
+                .required(true)
+                .index(1),
+        );
+
+    let matches = parser.get_matches();
+    let bin = Path::new(matches.value_of("INPUT").unwrap());
+
+    let mut vm = VM::new(1 * 1024 * 1024);
+    let entry = load_elf(&mut vm.mem, PathBuf::from(bin))?;
+    
+    println!("Entry point: {:#x}", entry);
+    vm.set_pc(entry);
+
+    loop {
+        vm.step()?;
+    }
+
+    // Ok(())
 }

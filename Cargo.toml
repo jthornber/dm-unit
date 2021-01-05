@@ -7,5 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.35"
+clap = '2.33'
 elf = '0.0.10'
+thiserror = "1.0"
 
