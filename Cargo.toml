@@ -10,5 +10,7 @@ edition = "2018"
 anyhow = "1.0.35"
 clap = '2.33'
 elf = '0.0.10'
+fixedbitset = "0.3.1"
+intrusive-collections = "0.9"
 thiserror = "1.0"
 

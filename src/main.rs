@@ -41,31 +41,22 @@ fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<Addr> {
         }
 
         let flags = section.shdr.flags;
-        let mut perm = 0;
+        let mut perms = 0;
 
         if has_flag(flags, SHF_WRITE) {
-            perm |= PERM_WRITE;
+            perms |= PERM_WRITE;
         }
 
         if has_flag(flags, SHF_ALLOC) {
-            perm |= PERM_READ;
+            perms |= PERM_READ;
         }
 
         if has_flag(flags, SHF_EXECINSTR) {
-            perm |= PERM_EXEC;
+            perms |= PERM_EXEC;
         }
 
-        println!("Loading {} at {:#x}, {}", section.shdr.name, section.shdr.addr, fmt_perm(perm));
-
-        mem.write(Addr(section.shdr.addr as u64), &section.data, 0u8)
-            .map_err(|_e| anyhow!("couldn't load binary to memory"))?;
-
-        mem.set_perms(
-            Addr(section.shdr.addr as u64),
-            section.data.len() as u64,
-            perm,
-        )
-        .map_err(|_e| anyhow!("couldn't set memory permissions"))?;
+        println!("Loading {} at {:#x}, {}", section.shdr.name, section.shdr.addr, fmt_perm(perms));
+        mem.mmap_bytes(Addr(section.shdr.addr as u64), &section.data, perms).map_err(|_e| anyhow!("couldn't mmap section"))?;
     }
 
     Ok(Addr(file.ehdr.entry as u64))
@@ -87,7 +78,7 @@ fn main() -> Result<()> {
     let matches = parser.get_matches();
     let bin = Path::new(matches.value_of("INPUT").unwrap());
 
-    let mut vm = VM::new(1 * 1024 * 1024);
+    let mut vm = VM::new();
     let entry = load_elf(&mut vm.mem, PathBuf::from(bin))?;
     
     println!("Entry point: {:#x}", entry);

@@ -264,15 +264,15 @@ impl From<u32> for JType {
 }
 
 impl VM {
-    pub fn new(mem: u64) -> Self {
-        // FIXME: set up the stack
+    pub fn new() -> Self {
         VM {
             reg: vec![0; 33],
-            mem: Memory::new(mem),
+            mem: Memory::new(),
         }
     }
 
     pub fn setup_stack(&mut self, size: u64) -> Result<()> {
+        /*
         // Let's put the stack right at the top of the address space
         // FIXME: we need to sort out a proper allocator
         self.set_reg(Sp, self.mem.len() as u64);
@@ -280,6 +280,8 @@ impl VM {
         // Set read/write permissions for the whole stack
         self.mem.set_perms(Addr(self.mem.len() - size), size, PERM_READ | PERM_WRITE).map_err(|e| VmErr::BadAccess(e))?;
         Ok(())
+        */
+        todo!();
     }
 
     pub fn push(&mut self, v: u64) -> Result<()> {
