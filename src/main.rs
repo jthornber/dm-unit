@@ -93,8 +93,23 @@ fn main() -> Result<()> {
     println!("Entry point: {:#x}", entry);
     vm.set_pc(entry);
 
+    // Setup the stack containing our environment
+    vm.setup_stack(64 * 1024)?;
+    vm.push(0u64)?; // auxp
+    vm.push(0u64)?; // envp
+
+    // FIXME: need to add progname
+    vm.push(0u64)?; // argv end
+    vm.push(0u64)?; // argc
+
     loop {
-        vm.step()?;
+        match vm.step() {
+            Ok(_) => { /* carry on */ }
+            Err(e) => {
+                eprintln!("{}", vm);
+                Err(e)?;
+            }
+        }
     }
 
     // Ok(())

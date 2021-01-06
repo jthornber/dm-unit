@@ -1,6 +1,8 @@
 use crate::memory::*;
 use thiserror::Error;
 
+use std::fmt;
+
 //------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,8 +63,57 @@ pub struct VM {
     pub mem: Memory,
 }
 
+impl fmt::Display for VM {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f,
+r#"zero {:016x} ra {:016x} sp  {:016x} gp  {:016x}
+tp   {:016x} t0 {:016x} t1  {:016x} t2  {:016x}
+s0   {:016x} s1 {:016x} a0  {:016x} a1  {:016x}
+a2   {:016x} a3 {:016x} a4  {:016x} a5  {:016x}
+a6   {:016x} a7 {:016x} s2  {:016x} s3  {:016x}
+s4   {:016x} s5 {:016x} s6  {:016x} s7  {:016x}
+s8   {:016x} s9 {:016x} s10 {:016x} s11 {:016x}
+t3   {:016x} t4 {:016x} t5  {:016x} t6  {:016x}
+pc   {:016x}"#,
+        self.reg(Zero),
+        self.reg(Ra),
+        self.reg(Sp),
+        self.reg(Gp),
+        self.reg(Tp),
+        self.reg(T0),
+        self.reg(T1),
+        self.reg(T2),
+        self.reg(S0),
+        self.reg(S1),
+        self.reg(A0),
+        self.reg(A1),
+        self.reg(A2),
+        self.reg(A3),
+        self.reg(A4),
+        self.reg(A5),
+        self.reg(A6),
+        self.reg(A7),
+        self.reg(S2),
+        self.reg(S3),
+        self.reg(S4),
+        self.reg(S5),
+        self.reg(S6),
+        self.reg(S7),
+        self.reg(S8),
+        self.reg(S9),
+        self.reg(S10),
+        self.reg(S11),
+        self.reg(T3),
+        self.reg(T4),
+        self.reg(T5),
+        self.reg(T6),
+        self.reg(PC))
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum VmErr {
+    // FIXME: rename to MemoryError
     #[error("Bad memory access: {0:?}")]
     BadAccess(MemErr),
 
@@ -221,6 +272,24 @@ impl VM {
         }
     }
 
+    pub fn setup_stack(&mut self, size: u64) -> Result<()> {
+        // Let's put the stack right at the top of the address space
+        // FIXME: we need to sort out a proper allocator
+        self.set_reg(Sp, self.mem.len() as u64);
+
+        // Set read/write permissions for the whole stack
+        self.mem.set_perms(Addr(self.mem.len() - size), size, PERM_READ | PERM_WRITE).map_err(|e| VmErr::BadAccess(e))?;
+        Ok(())
+    }
+
+    pub fn push(&mut self, v: u64) -> Result<()> {
+        let sp = self.reg(Reg::Sp) - 8;
+        let bytes = v.to_le_bytes();
+        self.mem.write(Addr(sp), &bytes, 0).map_err(|e| VmErr::BadAccess(e))?;
+        self.set_reg(Sp, sp);
+        Ok(())
+    }
+
     pub fn reg(&self, r: Reg) -> u64 {
         if r == Zero {
             0u64
@@ -253,7 +322,7 @@ impl VM {
             .mem
             .read_into::<u32>(pc, PERM_EXEC)
             .map_err(|e| VmErr::BadAccess(e))?;
-        eprintln!("{pc:#x}: {inst}", pc = pc, inst = inst);
+        eprintln!("{pc:08x}: {inst:08x}", pc = pc, inst = inst);
 
         // Opcode is in the first 7 bits of the instruction
         let opcode = inst & 0b1111111;
@@ -356,6 +425,7 @@ impl VM {
                     }
                     0b011 => {
                         // LD
+                        eprintln!("in LD, rs = {:?}, imm = {}, src = {:?}", inst.rs, inst.imm, src);
                         let mut bytes = [0u8; 8];
                         self.mem
                             .read(src, &mut bytes, PERM_READ)

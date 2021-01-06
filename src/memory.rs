@@ -24,14 +24,18 @@ pub enum MemErr {
 
     #[error("Address out of bounds")]
     OutOfBounds,
+
+    #[error("Unable to allocate enough space")]
+    OutOfSpace,
 }
 
 pub type Result<T> = result::Result<T, MemErr>;
 
+// FIXME: use an enum, or bitset or something
 pub const PERM_READ: u8 = 1;
 pub const PERM_WRITE: u8 = 1 << 1;
 pub const PERM_EXEC: u8 = 1 << 2;
-pub const PERM_WRITTEN: u8 = 1 << 3;
+pub const PERM_WRITTEN: u8 = 1 << 3;   // FIXME: this is more of a flag than a perm
 
 /// Manages memory for the vm.  Tracks permissions at the byte level.
 /// Checks memory has been initialised before it's read.
@@ -47,6 +51,10 @@ impl Memory {
             perms: vec![0u8; len as usize],
             mem: vec![0u8; len as usize],
         }
+    }
+
+    pub fn len(&self) -> u64 {
+        self.mem.len() as u64
     }
 
     /// Overwrites the perms for the address range.
@@ -113,4 +121,37 @@ impl Memory {
 
         Ok(unsafe { core::ptr::read_unaligned(dest.as_ptr() as *const T) })
     }
+
+/*
+    fn find_free(&mut self, size: u64, align: u64) -> Result<Addr> {
+        let mut i = 0;
+        'outer: loop {
+            if i > self.mem.len() {
+                break;
+            }
+            
+            if self.perms[i] == 0 {
+                // make sure we're aligned.
+                
+                // see if the block is big enough
+                
+                
+                
+
+            } else {
+                i = i + 1;
+            }
+        }
+
+        Err(MemErr::OutOfSpace)
+    }
+    
+    /// Alloc searches for a block of memory that doesn't have any perms set.
+    /// This is very inefficiently implemented atm.   
+    pub fn alloc(&mut self, size: u64, align: u64, perm: u8) -> Result<Addr> {
+        let ptr = self.find_free(size, align)?;
+        self.set_perms(ptr, size, perm);
+        Ok(ptr)
+    }
+    */
 }
