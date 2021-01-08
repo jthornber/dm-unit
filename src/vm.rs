@@ -272,16 +272,18 @@ impl VM {
     }
 
     pub fn setup_stack(&mut self, size: u64) -> Result<()> {
-        /*
-        // Let's put the stack right at the top of the address space
-        // FIXME: we need to sort out a proper allocator
-        self.set_reg(Sp, self.mem.len() as u64);
-
-        // Set read/write permissions for the whole stack
-        self.mem.set_perms(Addr(self.mem.len() - size), size, PERM_READ | PERM_WRITE).map_err(|e| VmErr::BadAccess(e))?;
+        // We put the stack just below the 4G mark.
+        let top = 0xffffffff;
+        let base = top - size;
+        self.mem.mmap_zeroes(Addr(base), Addr(top), PERM_READ | PERM_WRITE).map_err(|e| VmErr::BadAccess(e))?;
+        self.set_reg(Sp, top);
         Ok(())
-        */
-        todo!();
+    }
+
+    pub fn setup_heap(&mut self, size: u64) -> Result<Heap> {
+        let begin = 1024 * 1024 * 1024 * 3;
+        let end = begin + size;
+        self.mem.create_heap(Addr(begin), Addr(end)).map_err(|e| VmErr::BadAccess(e))
     }
 
     pub fn push(&mut self, v: u64) -> Result<()> {
@@ -310,12 +312,20 @@ impl VM {
         self.reg[PC as usize] = loc.0;
     }
 
-    pub fn inc_pc(&mut self) {
-        self.reg[PC as usize] = self.pc().0.wrapping_add(4);
+    pub fn inc_pc(&mut self, delta: u64) {
+        self.reg[PC as usize] = self.pc().0.wrapping_add(delta);
     }
 
     pub fn pc(&self) -> Addr {
         Addr(self.reg[PC as usize])
+    }
+
+    /// Decompresses the instruction if it's one of the 16 bit 'c'
+    /// instructions.  Otherwise returns the instruction unchanged.
+    /// Returns (instruction, pc delta).
+    fn decompress_instruction(&self, inst: u32) -> (u32, u64) {
+        // FIXME: implement
+        (inst, 4)
     }
 
     pub fn step(&mut self) -> Result<()> {
@@ -326,6 +336,8 @@ impl VM {
             .map_err(|e| VmErr::BadAccess(e))?;
         eprintln!("{pc:08x}: {inst:08x}", pc = pc, inst = inst);
 
+        let (inst, pc_increment) = self.decompress_instruction(inst);
+
         // Opcode is in the first 7 bits of the instruction
         let opcode = inst & 0b1111111;
 
@@ -334,13 +346,13 @@ impl VM {
                 // LUI
                 let inst = UType::from(inst);
                 self.set_reg(inst.rd, inst.imm as i64 as u64);
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0010111 => {
                 // AUIPC
                 let inst = UType::from(inst);
                 self.set_reg(inst.rd, pc.0.wrapping_add(inst.imm as i64 as u64));
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b1101111 => {
                 // JAL
@@ -348,7 +360,6 @@ impl VM {
                 let dest = pc.0.wrapping_add(inst.imm as i64 as u64);
                 let ret = pc.0.wrapping_add(4);
 
-                assert!((dest & 3) == 0);
                 self.set_reg(PC, dest);
                 self.set_reg(inst.rd, ret);
             }
@@ -360,7 +371,6 @@ impl VM {
                         let dest = self.reg(inst.rs).wrapping_add(inst.imm as i64 as u64);
                         let ret = pc.0.wrapping_add(4);
 
-                        assert!((dest & 3) == 0);
                         self.set_reg(inst.rd, ret);
                         self.set_reg(PC, dest);
                     }
@@ -373,7 +383,6 @@ impl VM {
                 // Conditional branches
                 let inst = BType::from(inst);
                 let dest = self.pc().0.wrapping_add(inst.imm as i64 as u64);
-                assert!((dest & 3) == 0);
                 let rs1 = inst.rs1;
                 let rs2 = inst.rs2;
 
@@ -392,7 +401,7 @@ impl VM {
                 if pred {
                     self.set_reg(PC, dest);
                 } else {
-                    self.inc_pc();
+                    self.inc_pc(pc_increment);
                 }
             }
             0b0000011 => {
@@ -462,7 +471,7 @@ impl VM {
                         return Err(VmErr::UnknownInstruction);
                     }
                 }
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0100011 => {
                 // Stores
@@ -498,7 +507,7 @@ impl VM {
                         return Err(VmErr::UnknownInstruction);
                     }
                 }
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0010011 => {
                 // Immediate arithmetic
@@ -569,7 +578,7 @@ impl VM {
                         return Err(VmErr::UnknownInstruction);
                     }
                 }
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0110011 => {
                 // Register arithmetic
@@ -629,7 +638,7 @@ impl VM {
                         return Err(VmErr::UnknownInstruction);
                     }
                 }
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0011011 => {
                 let inst = IType::from(inst);
@@ -675,7 +684,7 @@ impl VM {
                         return Err(VmErr::UnknownInstruction);
                     }
                 }
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0111011 => {
                 let inst = RType::from(inst);
@@ -710,11 +719,11 @@ impl VM {
                         return Err(VmErr::UnknownInstruction);
                     }
                 }
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b0001111 => {
                 // Fence
-                self.inc_pc();
+                self.inc_pc(pc_increment);
             }
             0b1110011 => {
                 // Environment

@@ -1,3 +1,5 @@
+#![feature(map_first_last)]
+
 extern crate clap;
 extern crate elf;
 extern crate thiserror;

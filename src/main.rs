@@ -84,14 +84,22 @@ fn main() -> Result<()> {
     println!("Entry point: {:#x}", entry);
     vm.set_pc(entry);
 
-    // Setup the stack containing our environment
-    vm.setup_stack(64 * 1024)?;
+    // Setup the stack and heap
+    vm.setup_stack(8 * 1024)?;
+    let mut heap = vm.setup_heap(64 * 1024)?;
+
+    // We need a progname.
+    let progname = heap.alloc(6)?;
+    let buf = b"a.out";
+    vm.mem.write(progname, buf, PERM_WRITE)?;
+
+
     vm.push(0u64)?; // auxp
     vm.push(0u64)?; // envp
 
-    // FIXME: need to add progname
     vm.push(0u64)?; // argv end
-    vm.push(0u64)?; // argc
+    vm.push(progname.0)?;
+    vm.push(1u64)?; // argc
 
     loop {
         match vm.step() {
