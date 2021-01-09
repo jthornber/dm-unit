@@ -523,6 +523,7 @@ impl Heap {
         Ok(())
     }
 
+/*
     // It's important that we have no bugs in this allocator
     // because it would put all the test results into question.
     // These methods are just for use by the unit tests.
@@ -533,6 +534,7 @@ impl Heap {
     fn is_free(&self, ptr: Addr, order: usize) -> bool {
         todo!();
     }
+    */
 }
 
 #[test]
