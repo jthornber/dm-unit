@@ -1,0 +1,799 @@
+use std::fmt;
+
+//-------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
+pub enum Reg {
+    Zero = 0,
+    Ra,
+    Sp,
+    Gp,
+    Tp,
+    T0,
+    T1,
+    T2,
+    S0,
+    S1,
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    A7,
+    S2,
+    S3,
+    S4,
+    S5,
+    S6,
+    S7,
+    S8,
+    S9,
+    S10,
+    S11,
+    T3,
+    T4,
+    T5,
+    T6,
+    PC,
+}
+
+impl fmt::Display for Reg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Reg::*;
+        match self {
+            Zero => write!(f, "zero"),
+            Ra => write!(f, "ra"),
+            Sp => write!(f, "sp"),
+            Gp => write!(f, "gp"),
+            Tp => write!(f, "tp"),
+            T0 => write!(f, "t0"),
+            T1 => write!(f, "t1"),
+            T2 => write!(f, "t2"),
+            S0 => write!(f, "s0"),
+            S1 => write!(f, "s1"),
+            A0 => write!(f, "a0"),
+            A1 => write!(f, "a1"),
+            A2 => write!(f, "a2"),
+            A3 => write!(f, "a3"),
+            A4 => write!(f, "a4"),
+            A5 => write!(f, "a5"),
+            A6 => write!(f, "a6"),
+            A7 => write!(f, "a7"),
+            S2 => write!(f, "s2"),
+            S3 => write!(f, "s3"),
+            S4 => write!(f, "s4"),
+            S5 => write!(f, "s5"),
+            S6 => write!(f, "s6"),
+            S7 => write!(f, "s7"),
+            S8 => write!(f, "s8"),
+            S9 => write!(f, "s9"),
+            S10 => write!(f, "s10"),
+            S11 => write!(f, "s11"),
+            T3 => write!(f, "t3"),
+            T4 => write!(f, "t4"),
+            T5 => write!(f, "t5"),
+            T6 => write!(f, "t6"),
+            PC => write!(f, "pc"),
+        }
+    }
+}
+
+impl From<u32> for Reg {
+    fn from(v: u32) -> Self {
+        assert!(v < 33);
+        unsafe { core::ptr::read_unaligned(&(v as usize) as *const usize as *const Reg) }
+    }
+}
+
+// Extracts the register from an instruction, pass in the first/lowest
+// bit of the register field.
+fn reg_at(inst: u32, bit: usize) -> Reg {
+    Reg::from((inst >> bit) & 0b11111)
+}
+
+#[derive(Debug)]
+pub enum Inst {
+    LUI { rd: Reg, imm: i32 },
+    AUIPC { rd: Reg, imm: i32 },
+
+    JAL { rd: Reg, imm: i32 },
+    JALR { rd: Reg, rs: Reg, imm: i32 },
+
+    BEQ { rs1: Reg, rs2: Reg, imm: i32 },
+    BNE { rs1: Reg, rs2: Reg, imm: i32 },
+    BLT { rs1: Reg, rs2: Reg, imm: i32 },
+    BGE { rs1: Reg, rs2: Reg, imm: i32 },
+    BLTU { rs1: Reg, rs2: Reg, imm: i32 },
+    BGEU { rs1: Reg, rs2: Reg, imm: i32 },
+
+    LB { rd: Reg, rs: Reg, imm: i32 },
+    LH { rd: Reg, rs: Reg, imm: i32 },
+    LW { rd: Reg, rs: Reg, imm: i32 },
+    LWU { rd: Reg, rs: Reg, imm: i32 },
+    LD { rd: Reg, rs: Reg, imm: i32 },
+
+    LBU { rd: Reg, rs: Reg, imm: i32 },
+    LHU { rd: Reg, rs: Reg, imm: i32 },
+
+    SB { rs1: Reg, rs2: Reg, imm: i32 },
+    SH { rs1: Reg, rs2: Reg, imm: i32 },
+    SW { rs1: Reg, rs2: Reg, imm: i32 },
+    SD { rs1: Reg, rs2: Reg, imm: i32 },
+
+    ADDI { rd: Reg, rs: Reg, imm: i32 },
+    ADDIW { rd: Reg, rs: Reg, imm: i32 },
+    SLTI { rd: Reg, rs: Reg, imm: i32 },
+    SLTIU { rd: Reg, rs: Reg, imm: i32 },
+    XORI { rd: Reg, rs: Reg, imm: i32 },
+    ORI { rd: Reg, rs: Reg, imm: i32 },
+    ANDI { rd: Reg, rs: Reg, imm: i32 },
+    ANDIW { rd: Reg, rs: Reg, imm: i32 },
+    SLLI { rd: Reg, rs: Reg, shamt: i32 },
+    SLLIW { rd: Reg, rs: Reg, shamt: u32 },
+    SRLI { rd: Reg, rs: Reg, shamt: u32 },
+    SRLIW { rd: Reg, rs: Reg, shamt: u32 },
+    SRAIW { rd: Reg, rs: Reg, shamt: u32 },
+    SRAI { rd: Reg, rs: Reg, shamt: u32 },
+
+    ADD { rd: Reg, rs1: Reg, rs2: Reg },
+    ADDW { rd: Reg, rs1: Reg, rs2: Reg },
+    SUB { rd: Reg, rs1: Reg, rs2: Reg },
+    SUBW { rd: Reg, rs1: Reg, rs2: Reg },
+    SLL { rd: Reg, rs1: Reg, rs2: Reg },
+    SLLW { rd: Reg, rs1: Reg, rs2: Reg },
+    SRLW { rd: Reg, rs1: Reg, rs2: Reg },
+    SRAW { rd: Reg, rs1: Reg, rs2: Reg },
+    SLT { rd: Reg, rs1: Reg, rs2: Reg },
+    SLTU { rd: Reg, rs1: Reg, rs2: Reg },
+
+    XOR { rd: Reg, rs1: Reg, rs2: Reg },
+    SRL { rd: Reg, rs1: Reg, rs2: Reg },
+    SRA { rd: Reg, rs1: Reg, rs2: Reg },
+    OR { rd: Reg, rs1: Reg, rs2: Reg },
+    AND { rd: Reg, rs1: Reg, rs2: Reg },
+
+    FENCE,
+    FENCEI,
+
+    ECALL,
+    EBREAK,
+    // FIXME: add atomics, csr and mul
+}
+
+impl fmt::Display for Inst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Inst::*;
+        match self {
+            LUI { rd, imm } => write!(f, "lui\t{},0x{:x}", rd, imm),
+            AUIPC { rd, imm } => write!(f, "auipc\t{},0x{:x}", rd, imm),
+
+            JAL { rd, imm } => write!(f, "jal\t{},0x{:x}", rd, imm),
+            JALR { rd, rs, imm } => write!(f, "jalr\t{},{},0x{:x}", rd, rs, imm),
+
+            BEQ { rs1, rs2, imm } => write!(f, "beq\t{},{},{}", rs1, rs2, imm),
+            BNE { rs1, rs2, imm } => write!(f, "bne\t{},{},{}", rs1, rs2, imm),
+            BLT { rs1, rs2, imm } => write!(f, "blt\t{},{},{}", rs1, rs2, imm),
+            BGE { rs1, rs2, imm } => write!(f, "bge\t{},{},{}", rs1, rs2, imm),
+            BLTU { rs1, rs2, imm } => write!(f, "bltu\t{},{},{}", rs1, rs2, imm),
+            BGEU { rs1, rs2, imm } => write!(f, "bgeu\t{},{},{}", rs1, rs2, imm),
+
+            LB { rd, rs, imm } => write!(f, "lb\t{},{}({})", rd, imm, rs),
+            LH { rd, rs, imm } => write!(f, "lh\t{},{}({})", rd, imm, rs),
+            LW { rd, rs, imm } => write!(f, "lw\t{},{}({})", rd, imm, rs),
+            LWU { rd, rs, imm } => write!(f, "lwu\t{},{}({})", rd, imm, rs),
+            LD { rd, rs, imm } => write!(f, "ld\t{},{}({})", rd, imm, rs),
+
+            LBU { rd, rs, imm } => write!(f, "lbu\t{},{}({})", rd, imm, rs),
+            LHU { rd, rs, imm } => write!(f, "lhu\t{},{}({})", rd, imm, rs),
+
+            SB { rs1, rs2, imm } => write!(f, "sb\t{},{},{}", rs1, rs2, imm),
+            SH { rs1, rs2, imm } => write!(f, "sh\t{},{},{}", rs1, rs2, imm),
+            SW { rs1, rs2, imm } => write!(f, "sw\t{},{},{}", rs1, rs2, imm),
+            SD { rs1, rs2, imm } => write!(f, "sd\t{},{},{}", rs1, rs2, imm),
+
+            ADDI { rd, rs, imm } => write!(f, "addi\t{},{},{}", rd, rs, imm),
+            ADDIW { rd, rs, imm } => write!(f, "addiw\t{},{},{}", rd, rs, imm),
+            SLTI { rd, rs, imm } => write!(f, "slti\t{},{},{}", rd, rs, imm),
+            SLTIU { rd, rs, imm } => write!(f, "sltiu\t{},{},{}", rd, rs, imm),
+            XORI { rd, rs, imm } => write!(f, "xori\t{},{},{}", rd, rs, imm),
+            ORI { rd, rs, imm } => write!(f, "ori\t{},{},{}", rd, rs, imm),
+            ANDI { rd, rs, imm } => write!(f, "andi\t{},{},{}", rd, rs, imm),
+            ANDIW { rd, rs, imm } => write!(f, "andiw\t{},{},{}", rd, rs, imm),
+            SLLI { rd, rs, shamt } => write!(f, "slli\t{},{},{}", rd, rs, shamt),
+            SLLIW { rd, rs, shamt } => write!(f, "slliw\t{},{},{}", rd, rs, shamt),
+            SRLI { rd, rs, shamt } => write!(f, "srli\t{},{},{}", rd, rs, shamt),
+            SRLIW { rd, rs, shamt } => write!(f, "srliw\t{},{},{}", rd, rs, shamt),
+            SRAIW { rd, rs, shamt } => write!(f, "sraiw\t{},{},{}", rd, rs, shamt),
+            SRAI { rd, rs, shamt } => write!(f, "srai\t{},{},{}", rd, rs, shamt),
+
+            ADD { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            ADDW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SUB { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SUBW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SLL { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SLLW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SRLW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SRAW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SLT { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SLTU { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+
+            XOR { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SRL { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            SRA { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            OR { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            AND { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+
+            FENCE => write!(f, "fence"),
+            FENCEI => write!(f, "fence_i"),
+
+            ECALL => write!(f, "ecall"),
+            EBREAK => write!(f, "ebreak"),
+        }
+    }
+}
+
+/// There are 6 instruction encodings (see spec 2.3)
+#[derive(Debug)]
+struct RType {
+    rd: Reg,
+    rs1: Reg,
+    rs2: Reg,
+
+    func7: u32,
+    func3: u32,
+}
+
+impl From<u32> for RType {
+    fn from(inst: u32) -> Self {
+        let rd = reg_at(inst, 7);
+        let rs1 = reg_at(inst, 15);
+        let rs2 = reg_at(inst, 20);
+        let func7 = (inst >> 25) & 0b1111111;
+        let func3 = (inst >> 12) & 0b111;
+
+        RType {
+            rd,
+            rs1,
+            rs2,
+            func7,
+            func3,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct IType {
+    rd: Reg,
+    rs: Reg,
+    imm: i32,
+
+    func: u32,
+}
+
+impl From<u32> for IType {
+    fn from(inst: u32) -> Self {
+        let rd = reg_at(inst, 7);
+        let rs = reg_at(inst, 15);
+        let imm = (inst as i32) >> 20;
+        let func = ((inst >> 12) & 0b111) as u32;
+
+        IType { rd, rs, imm, func }
+    }
+}
+
+#[derive(Debug)]
+struct SType {
+    rs1: Reg,
+    rs2: Reg,
+    imm: i32,
+
+    func: u32,
+}
+
+impl From<u32> for SType {
+    fn from(inst: u32) -> Self {
+        let rs1 = reg_at(inst, 15);
+        let rs2 = reg_at(inst, 20);
+        let func = (inst >> 12) & 0b111;
+        let imm_11_5 = (inst >> 25) & 0b1111111;
+        let imm_4_0 = (inst >> 7) & 0b11111;
+        let imm = (imm_11_5 << 5) | imm_4_0;
+        let imm = (imm as i32) << 20 >> 20;
+
+        SType {
+            rs1,
+            rs2,
+            imm,
+            func,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct BType {
+    rs1: Reg,
+    rs2: Reg,
+    imm: i32,
+
+    func: u32,
+}
+
+impl From<u32> for BType {
+    fn from(inst: u32) -> Self {
+        let rs1 = reg_at(inst, 15);
+        let rs2 = reg_at(inst, 20);
+
+        let func = (inst >> 21) & 0b111;
+        let imm_12 = (inst >> 31) & 0b1;
+        let imm_10_5 = (inst >> 25) & 0b111111;
+        let imm_4_1 = (inst >> 8) & 0b1111;
+        let imm_11 = (inst >> 7) & 0b1;
+        let imm = (imm_12 << 12) | (imm_11 << 11) | (imm_10_5 << 5) | (imm_4_1 << 1);
+        let imm = ((imm as i32) << 19) >> 19;
+
+        BType {
+            rs1,
+            rs2,
+            imm,
+            func,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct UType {
+    rd: Reg,
+    imm: i32,
+}
+
+impl From<u32> for UType {
+    fn from(inst: u32) -> Self {
+        let rd = reg_at(inst, 7);
+
+        // We could shift << 12 since the two instructions that
+        // use this format (LUI and AUIPC) want that, but then
+        // the disassembly will not match objdump.
+        let imm = (inst as i32) >> 12;
+
+        UType { rd, imm }
+    }
+}
+
+#[derive(Debug)]
+struct JType {
+    rd: Reg,
+    imm: i32,
+}
+
+impl From<u32> for JType {
+    fn from(inst: u32) -> Self {
+        let rd = reg_at(inst, 7);
+        let imm_20 = (inst >> 31) & 0b1;
+        let imm_10_1 = (inst >> 21) & 0b1111111111;
+        let imm_11 = (inst >> 20) & 0b1;
+        let imm_19_12 = (inst >> 12) & 0b11111111;
+
+        let imm = (imm_20 << 20) | (imm_19_12 << 12) | (imm_11 << 11) | (imm_10_1 << 1);
+        let imm = ((imm as i32) << 11) >> 11;
+
+        JType { rd, imm }
+    }
+}
+
+fn decode_32bit_instr(bits: u32) -> Option<Inst> {
+    use Inst::*;
+
+    // Opcode is in the first 7 bits of the instruction
+    let opcode = bits & 0b1111111;
+
+    let inst = match opcode {
+        0b0110111 => {
+            let inst = UType::from(bits);
+            LUI {
+                rd: inst.rd,
+                imm: inst.imm,
+            }
+        }
+        0b0010111 => {
+            let inst = UType::from(bits);
+            AUIPC {
+                rd: inst.rd,
+                imm: inst.imm,
+            }
+        }
+        0b1101111 => {
+            let inst = JType::from(bits);
+            JAL {
+                rd: inst.rd,
+                imm: inst.imm,
+            }
+        }
+        0b1100111 => {
+            let inst = IType::from(bits);
+            match inst.func {
+                0b000 => JALR {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b1100011 => {
+            // Conditional branches
+            let inst = BType::from(bits);
+
+            match inst.func {
+                0b000 => BEQ {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b001 => BNE {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b100 => BLT {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b101 => BGE {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b110 => BLTU {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b111 => BGEU {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0000011 => {
+            // Loads
+            let inst = IType::from(bits);
+            match inst.func {
+                0b000 => LB {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b001 => LH {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b010 => LW {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b011 => LD {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b100 => LBU {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b101 => LHU {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b110 => LWU {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0100011 => {
+            // Stores
+            let inst = SType::from(bits);
+            match inst.func {
+                0b000 => SB {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b001 => SH {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b010 => SW {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                0b011 => SD {
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                    imm: inst.imm,
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0010011 => {
+            // Immediate arithmetic
+            let inst = IType::from(bits);
+            match inst.func {
+                0b000 => ADDI {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b010 => SLTI {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b011 => SLTIU {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b100 => XORI {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b110 => ORI {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b111 => ANDI {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b001 => {
+                    let mode = (inst.imm >> 6) & 0b111111;
+                    let shamt = inst.imm & 0b111111;
+                    match mode {
+                        0b000000 => SLLI {
+                            rd: inst.rd,
+                            rs: inst.rs,
+                            shamt,
+                        },
+                        _ => {
+                            return None;
+                        }
+                    }
+                }
+                0b101 => {
+                    let mode = (inst.imm >> 6) & 0b111111;
+                    let shamt = inst.imm & 0b111111;
+                    match mode {
+                        0b000000 => SRLI {
+                            rd: inst.rd,
+                            rs: inst.rs,
+                            shamt: shamt as u32,
+                        },
+                        0b010000 => SRAI {
+                            rd: inst.rd,
+                            rs: inst.rs,
+                            shamt: shamt as u32,
+                        },
+                        _ => {
+                            return None;
+                        }
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0110011 => {
+            // Register arithmetic
+            let inst = RType::from(bits);
+            match (inst.func7, inst.func3) {
+                (0b0000000, 0b000) => ADD {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0100000, 0b000) => SUB {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b001) => SLL {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b010) => SLT {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b011) => SLTU {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b100) => XOR {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b101) => SRL {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0100000, 0b101) => SRA {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b110) => OR {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b111) => AND {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0011011 => {
+            let inst = IType::from(bits);
+            match inst.func {
+                0b000 => ADDIW {
+                    rd: inst.rd,
+                    rs: inst.rs,
+                    imm: inst.imm,
+                },
+                0b001 => {
+                    let mode = (inst.imm >> 5) & 0b1111111;
+                    let shamt = (inst.imm & 0b11111) as u32;
+                    match mode {
+                        0b0000000 => SLLIW {
+                            rd: inst.rd,
+                            rs: inst.rs,
+                            shamt,
+                        },
+                        _ => {
+                            return None;
+                        }
+                    }
+                }
+                0b101 => {
+                    let mode = (inst.imm >> 5) & 0b1111111;
+                    let shamt = (inst.imm & 0b11111) as u32;
+                    match mode {
+                        0b0000000 => SLLIW {
+                            rd: inst.rd,
+                            rs: inst.rs,
+                            shamt,
+                        },
+                        0b0100000 => SRAIW {
+                            rd: inst.rd,
+                            rs: inst.rs,
+                            shamt,
+                        },
+                        _ => {
+                            return None;
+                        }
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0111011 => {
+            let inst = RType::from(bits);
+            match (inst.func7, inst.func3) {
+                (0b0000000, 0b000) => ADDW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0100000, 0b000) => SUBW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b001) => SLLW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000000, 0b101) => SRLW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0100000, 0b101) => SRAW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b0001111 => FENCE {},
+        /*
+        0b1110011 => {
+            // Environment
+            todo!();
+        }
+        */
+        _ => {
+            return None;
+        }
+    };
+
+    Some(inst)
+}
+
+fn decode_16bit_instr(_bits: u16) -> Option<Inst> {
+    todo!();
+
+    /*
+     let inst = match bits & 3 {
+         01 => {
+
+         }
+         10 => {
+             // FIXME: use a match
+             if (bits >> 12) == 0b1000 {
+                 Inst {op: ADD, fields: R(RType {
+
+             } else if (bits >> 12) == 0b1001 {
+                 // C.ADD
+                 rd = (bits >> 7) & 0b11111;
+                 rs = (bits >> 2) & 0b11111;
+
+
+         }
+    */
+}
+
+/// Decodes an instruction.  Also returns the width of the decoded
+/// instruction for incrementing the PC.  This allows us to handle
+/// the compressed instructions too.
+pub fn decode_instr(bits: u32) -> Option<(Inst, u64)> {
+    if (bits & 3) == 3 {
+        let inst = decode_32bit_instr(bits)?;
+        Some((inst, 4))
+    } else {
+        let inst = decode_16bit_instr(bits as u16)?;
+        Some((inst, 2))
+    }
+}

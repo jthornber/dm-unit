@@ -90,6 +90,7 @@ fn main() -> Result<()> {
 
     // We need a progname.
     let progname = heap.alloc(6)?;
+    eprintln!("allocated progname at {:?}", progname);
     let buf = b"a.out";
     vm.mem.write(progname, buf, PERM_WRITE)?;
 

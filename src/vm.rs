@@ -4,8 +4,6 @@ use thiserror::Error;
 
 use std::fmt;
 
-//------------------------
-
 //-----------------------------
 
 use Reg::*;
@@ -159,22 +157,31 @@ impl VM {
 
     pub fn step(&mut self) -> Result<()> {
         let pc = self.pc();
-        let inst = self
+        let mut bits = self
             .mem
             .read_into::<u32>(pc, PERM_EXEC)
             .map_err(|e| VmErr::BadAccess(e))?;
-        eprintln!("{pc:08x}: {inst:08x}", pc = pc, inst = inst);
 
-        let (inst, pc_increment) = decode_instr(inst).ok_or(VmErr::DecodeError(inst))?;
+        let (inst, pc_increment) = decode_instr(bits).ok_or(VmErr::DecodeError(bits))?;
+        if pc_increment == 2 {
+            bits = bits & 0xffff;
+        }
+
+        if pc_increment == 2 {
+            // Compressed instruction
+            eprintln!("{:08x}: {:0>4x}\t{}", pc, bits, inst);
+        } else {
+            eprintln!("{:08x}: {:0>8x}\t{}", pc, bits, inst);
+        }
 
         use Inst::*;
         match inst {
             LUI { rd, imm } => {
-                self.set_reg(rd, imm as i64 as u64);
+                self.set_reg(rd, (imm << 12) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             AUIPC { rd, imm } => {
-                self.set_reg(rd, pc.0.wrapping_add(imm as i64 as u64));
+                self.set_reg(rd, pc.0.wrapping_add((imm << 12) as i64 as u64));
                 self.inc_pc(pc_increment);
             }
             JAL { rd, imm } => {

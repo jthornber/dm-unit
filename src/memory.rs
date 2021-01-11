@@ -12,8 +12,14 @@ use crate::primitive::Primitive;
 
 /// An address used within the guest.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Addr(pub u64);
+
+impl fmt::Debug for Addr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "0x{:x}", self.0)
+    }
+}
 
 impl fmt::LowerHex for Addr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -249,9 +255,7 @@ impl Memory {
         let mut indexes = VecDeque::new();
 
         while begin < end {
-            eprintln!("get_indexes: begin = {}", begin);
             if cursor.is_null() {
-                eprintln!("exit 1, begin = {}, end = {}", begin, end);
                 return Err(MemErr::UnmappedRegion(Addr(begin)));
             }
 
@@ -260,12 +264,10 @@ impl Memory {
 
             // begin must be within the region
             if (begin < mm.begin) || (begin >= mm.end) {
-                eprintln!("exit 2");
                 return Err(MemErr::UnmappedRegion(Addr(begin)));
             }
 
             indexes.push_back(mi.index);
-            eprintln!("setting begin to {}", mm.end);
             begin = mm.end;
             cursor.move_next();
         }
@@ -278,11 +280,7 @@ impl Memory {
     pub fn read(&self, begin: Addr, mut bytes: &mut [u8], perms: u8) -> Result<()> {
         let mut begin = begin.0;
         let end = begin + (bytes.len() as u64);
-
-        eprintln!(">>> read, begin = {}, end = {}", begin, end);
-
         let mut indexes = self.get_indexes(begin, end)?;
-        eprintln!("indexes = {:?}", indexes);
 
         while begin < end {
             if indexes.len() == 0 {
@@ -304,7 +302,6 @@ impl Memory {
             begin += len;
         }
 
-        eprintln!("<<< read");
         Ok(())
     }
 
@@ -394,16 +391,7 @@ impl Memory {
 
 //-------------------------------------
 
-const MIN_BLOCK_SIZE: u64 = 8;
-const MIN_BLOCK_SHIFT: u64 = 3;
-const MAX_ORDER: u64 = 13; // 64k will be the largest allocation size
-
-pub struct Heap {
-    base: u64,
-
-    // The minimum block size
-    block_size: usize,
-
+pub struct BuddyAllocator {
     // free_blocks[0] holds blocks of size 'block_size',
     // free_blocks[1]         "            2 * 'block_size' etc.
     //
@@ -418,37 +406,23 @@ fn get_buddy(index: u64, order: usize) -> u64 {
     index ^ (1 << order)
 }
 
-impl Heap {
-    pub fn new(begin: Addr, order: usize) -> Self {
-        let order = order - MIN_BLOCK_SHIFT as usize;
-        eprintln!("order = {}", order);
-        assert!(order <= MAX_ORDER as usize);
-
+impl BuddyAllocator {
+    pub fn new(order: usize) -> Self {
         let mut free_blocks = Vec::new();
-        for _ in MIN_BLOCK_SHIFT..MAX_ORDER {
+        for _ in 0..order {
             free_blocks.push(BTreeSet::new());
         }
 
-        eprintln!("inserting free block at order {}", order);
-        free_blocks[order].insert(begin.0);
+        // we start with a single block of order size
+        free_blocks[order - 1].insert(0);
 
-        Heap {
-            base: begin.0,
-            block_size: MIN_BLOCK_SIZE as usize,
+        BuddyAllocator {
             free_blocks,
             allocated: BTreeMap::new(),
         }
     }
 
-    fn addr_to_index(&self, ptr: Addr) -> u64 {
-        (ptr.0 - self.base) >> MIN_BLOCK_SHIFT
-    }
-
-    fn index_to_addr(&self, index: u64) -> Addr {
-        Addr(self.base + (index << MIN_BLOCK_SHIFT))
-    }
-
-    fn alloc_order(&mut self, order: usize) -> Result<u64> {
+    fn alloc(&mut self, order: usize) -> Result<u64> {
         // We search up through the orders looking for one that
         // contains some free blocks.  We then split this block
         // back down through the orders, until we have one of the
@@ -466,11 +440,6 @@ impl Heap {
             high_order += 1;
         }
 
-        eprintln!(
-            "self.free_blocks[{}].len() = {}",
-            high_order,
-            self.free_blocks[high_order].len()
-        );
         let index = self.free_blocks[high_order].pop_first().unwrap();
 
         // split back down
@@ -482,25 +451,12 @@ impl Heap {
         Ok(index)
     }
 
-    // Allocate a block of memory in the heap.
-    pub fn alloc(&mut self, mut size: usize) -> Result<Addr> {
-        if size < self.block_size {
-            size = self.block_size;
-        }
-        let order = size.next_power_of_two().trailing_zeros() - (MIN_BLOCK_SHIFT as u32);
-        let index = self.alloc_order(order as usize)?;
-        let ptr = self.index_to_addr(index);
-
-        // FIXME: adjust perms in heap here.
-
-        Ok(ptr)
-    }
-
-    pub fn free(&mut self, ptr: Addr) -> Result<()> {
-        let mut index = self.addr_to_index(ptr);
+    pub fn free(&mut self, mut index: u64) -> Result<()> {
         let order = self.allocated.get(&index);
         if order.is_none() {
-            return Err(MemErr::BadFree(ptr));
+            // The heap class intercepts and turns the index into a
+            // ptr.
+            return Err(MemErr::BadFree(Addr(index)));
         }
 
         let mut order = *order.unwrap();
@@ -522,19 +478,58 @@ impl Heap {
         self.free_blocks[order].insert(index);
         Ok(())
     }
+}
 
-/*
-    // It's important that we have no bugs in this allocator
-    // because it would put all the test results into question.
-    // These methods are just for use by the unit tests.
-    fn is_allocated(&self, ptr: Addr, size: usize) -> bool {
-        todo!();
+//-------------------------------------
+
+const MIN_BLOCK_SIZE: usize = 8;
+const MIN_BLOCK_SHIFT: usize = 3;
+
+pub struct Heap {
+    base: u64,
+    allocator: BuddyAllocator,
+}
+
+impl Heap {
+    pub fn new(begin: Addr, order: usize) -> Self {
+        let order = order - MIN_BLOCK_SHIFT;
+        let allocator = BuddyAllocator::new(order);
+
+        Heap {
+            base: begin.0,
+            allocator,
+        }
     }
 
-    fn is_free(&self, ptr: Addr, order: usize) -> bool {
-        todo!();
+    fn addr_to_index(&self, ptr: Addr) -> u64 {
+        (ptr.0 - self.base) >> MIN_BLOCK_SHIFT
     }
-    */
+
+    fn index_to_addr(&self, index: u64) -> Addr {
+        Addr(self.base + (index << MIN_BLOCK_SHIFT))
+    }
+
+    // Allocate a block of memory in the heap.
+    pub fn alloc(&mut self, mut size: usize) -> Result<Addr> {
+        if size < MIN_BLOCK_SIZE {
+            size = MIN_BLOCK_SIZE;
+        }
+        let order = size.next_power_of_two().trailing_zeros() - (MIN_BLOCK_SHIFT as u32);
+        let index = self.allocator.alloc(order as usize)?;
+        let ptr = self.index_to_addr(index);
+
+        // FIXME: adjust perms in heap here.
+
+        Ok(ptr)
+    }
+
+    pub fn free(&mut self, ptr: Addr) -> Result<()> {
+        let index = self.addr_to_index(ptr);
+        match self.allocator.free(index) {
+            Err(MemErr::BadFree(index)) => Err(MemErr::BadFree(index)),
+            r => r
+        }
+    }
 }
 
 #[test]
