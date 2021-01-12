@@ -155,6 +155,66 @@ impl VM {
         }
     }
 
+    fn deref_u32(&self, r: Reg) -> Result<u32> {
+        let src = Addr(self.reg(r));
+        let mut bytes = [0u8; 4];
+        self.mem
+            .read(src, &mut bytes, PERM_READ)
+            .map_err(|e| VmErr::BadAccess(e))?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn deref_u64(&self, r: Reg) -> Result<u64> {
+        let src = Addr(self.reg(r));
+        let mut bytes = [0u8; 8];
+        self.mem
+            .read(src, &mut bytes, PERM_READ)
+            .map_err(|e| VmErr::BadAccess(e))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn set_deref_u32(&mut self, dest: Reg, v: u32) -> Result<()> {
+        let dest = Addr(self.reg(dest));
+        let bytes = v.to_le_bytes();
+        self.mem
+            .write(dest, &bytes, PERM_WRITE)
+            .map_err(|e| VmErr::BadAccess(e))
+    }
+
+    fn set_deref_u64(&mut self, dest: Reg, v: u64) -> Result<()> {
+        let dest = Addr(self.reg(dest));
+        let bytes = v.to_le_bytes();
+        self.mem
+            .write(dest, &bytes, PERM_WRITE)
+            .map_err(|e| VmErr::BadAccess(e))
+    }
+
+    fn amo_op_u32<F: FnOnce(u32, u32) -> u32>(
+        &mut self,
+        rd: Reg,
+        rs1: Reg,
+        rs2: Reg,
+        f: F,
+    ) -> Result<()> {
+        let t = self.deref_u32(rs1)?;
+        self.set_deref_u32(rs1, f(t, self.reg(rs2) as u32))?;
+        self.set_reg(rd, t as i32 as i64 as u64);
+        Ok(())
+    }
+
+    fn amo_op_u64<F: FnOnce(u64, u64) -> u64>(
+        &mut self,
+        rd: Reg,
+        rs1: Reg,
+        rs2: Reg,
+        f: F,
+    ) -> Result<()> {
+        let t = self.deref_u64(rs1)?;
+        self.set_deref_u64(rs1, f(t, self.reg(rs2)))?;
+        self.set_reg(rd, t);
+        Ok(())
+    }
+
     pub fn step(&mut self) -> Result<()> {
         let pc = self.pc();
         let mut bits = self
@@ -298,7 +358,7 @@ impl VM {
                 let v = self.reg(rs2) as u8;
                 let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, 0)
+                    .write(dest, &bytes, PERM_WRITE)
                     .map_err(|e| VmErr::BadAccess(e))?;
                 self.inc_pc(pc_increment);
             }
@@ -307,25 +367,25 @@ impl VM {
                 let v = self.reg(rs2) as u16;
                 let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, 0)
+                    .write(dest, &bytes, PERM_WRITE)
                     .map_err(|e| VmErr::BadAccess(e))?;
                 self.inc_pc(pc_increment);
             }
-            SW { rs1, rs2, imm} => {
+            SW { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u32;
                 let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, 0)
+                    .write(dest, &bytes, PERM_WRITE)
                     .map_err(|e| VmErr::BadAccess(e))?;
                 self.inc_pc(pc_increment);
             }
-            SD { rs1, rs2, imm} => {
+            SD { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2);
                 let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, 0)
+                    .write(dest, &bytes, PERM_WRITE)
                     .map_err(|e| VmErr::BadAccess(e))?;
                 self.inc_pc(pc_increment);
             }
@@ -477,91 +537,99 @@ impl VM {
                 self.set_reg(rd, ((rs1 as i32) >> shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            MUL {rd, rs1, rs2 } => {
+            MUL { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 self.set_reg(rd, rs1.wrapping_mul(rs2));
                 self.inc_pc(pc_increment);
             }
 
-            MULH {rd, rs1, rs2 } => {
+            MULH { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64 as u128;
                 let rs2 = self.reg(rs2) as i64 as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
-            MULHSU {rd, rs1, rs2 } => {
+            MULHSU { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64 as u128;
                 let rs2 = self.reg(rs2) as u64 as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
-            MULHU {rd, rs1, rs2 } => {
+            MULHU { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u64 as u128;
                 let rs2 = self.reg(rs2) as u64 as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
-            DIV {rd, rs1, rs2 } => {
+            DIV { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64;
                 let rs2 = self.reg(rs2) as i64;
-                let v = if rs2 == 0 {-1} else {rs1.wrapping_div(rs2)};
+                let v = if rs2 == 0 { -1 } else { rs1.wrapping_div(rs2) };
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            DIVU {rd, rs1, rs2 } => {
+            DIVU { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
-                let v = if rs2 == 0 {core::u64::MAX} else {rs1.wrapping_div(rs2)};
+                let v = if rs2 == 0 {
+                    core::u64::MAX
+                } else {
+                    rs1.wrapping_div(rs2)
+                };
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
-            REM {rd, rs1, rs2 } => {
+            REM { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64;
                 let rs2 = self.reg(rs2) as i64;
-                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            REMU {rd, rs1, rs2 } => {
+            REMU { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
-                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            MULW {rd, rs1, rs2 } => {
+            MULW { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 let v = (rs1 as u32).wrapping_mul(rs2 as u32);
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            DIVW {rd, rs1, rs2 } => {
+            DIVW { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
-                let v = if rs2 == 0 {-1} else {rs1.wrapping_div(rs2)};
+                let v = if rs2 == 0 { -1 } else { rs1.wrapping_div(rs2) };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            DIVUW {rd, rs1, rs2 } => {
+            DIVUW { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
-                let v = if rs2 == 0 {core::u32::MAX} else {rs1.wrapping_div(rs2)};
+                let v = if rs2 == 0 {
+                    core::u32::MAX
+                } else {
+                    rs1.wrapping_div(rs2)
+                };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            REMW {rd, rs1, rs2 } => {
+            REMW { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
-                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            REMUW {rd, rs1, rs2 } => {
+            REMUW { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
-                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -569,6 +637,101 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             FENCEI {} => {
+                self.inc_pc(pc_increment);
+            }
+
+            LRW { rd, rs } => {
+                self.set_reg(rd, self.deref_u32(rs)? as i32 as i64 as u64);
+                self.inc_pc(pc_increment);
+            }
+            SCW { rd, rs1, rs2 } => {
+                self.set_deref_u32(rs1, self.reg(rs2) as u32)?;
+                self.set_reg(rd, 0);
+                self.inc_pc(pc_increment);
+            }
+            AMOSWAPW { rd, rs1, rs2 } => {
+                let t = self.deref_u32(rs1)?;
+                self.set_deref_u32(rs1, self.reg(rs2) as u32)?;
+                self.set_reg(rd, t as i32 as u32 as u64);
+                self.inc_pc(pc_increment);
+            }
+            AMOADDW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| l + r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOXORW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| l ^ r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOANDW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| l & r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOORW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| l | r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMINW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| i32::min(l as i32, r as i32) as u32)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMAXW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| i32::max(l as i32, r as i32) as u32)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMINUW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| u32::min(l, r))?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMAXUW { rd, rs1, rs2 } => {
+                self.amo_op_u32(rd, rs1, rs2, |l, r| u32::max(l, r))?;
+                self.inc_pc(pc_increment);
+            }
+            LRD { rd, rs } => {
+                self.set_reg(rd, self.deref_u64(rs)? as i64 as u64);
+                self.inc_pc(pc_increment);
+            }
+            SCD { rd, rs1, rs2 } => {
+                self.set_deref_u64(rs1, self.reg(rs2))?;
+                self.set_reg(rd, 0);
+                self.inc_pc(pc_increment);
+            }
+            AMOSWAPD { rd, rs1, rs2 } => {
+                let t = self.deref_u64(rs1)?;
+                self.set_deref_u64(rs1, self.reg(rs2))?;
+                self.set_reg(rd, t);
+                self.inc_pc(pc_increment);
+            }
+            AMOADDD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| l + r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOXORD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| l ^ r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOANDD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| l & r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOORD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| l | r)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMIND { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| i64::min(l as i64, r as i64) as u64)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMAXD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| i64::max(l as i64, r as i64) as u64)?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMINUD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| u64::min(l, r))?;
+                self.inc_pc(pc_increment);
+            }
+            AMOMAXUD { rd, rs1, rs2 } => {
+                self.amo_op_u64(rd, rs1, rs2, |l, r| u64::max(l, r))?;
                 self.inc_pc(pc_increment);
             }
             _ => {

@@ -155,6 +155,7 @@ pub enum Inst {
     OR { rd: Reg, rs1: Reg, rs2: Reg },
     AND { rd: Reg, rs1: Reg, rs2: Reg },
 
+    // mul
     MUL { rd: Reg, rs1: Reg, rs2: Reg },
     MULH { rd: Reg, rs1: Reg, rs2: Reg },
     MULHSU { rd: Reg, rs1: Reg, rs2: Reg },
@@ -174,7 +175,30 @@ pub enum Inst {
 
     ECALL,
     EBREAK,
-    // FIXME: add atomics, csr and mul
+
+    // atomics
+    LRW { rd: Reg, rs: Reg },
+    SCW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOSWAPW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOADDW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOXORW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOANDW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOORW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMINW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMAXW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMINUW { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMAXUW { rd: Reg, rs1: Reg, rs2: Reg },
+    LRD { rd: Reg, rs: Reg },
+    SCD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOSWAPD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOADDD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOXORD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOANDD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOORD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMIND { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMAXD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMINUD { rd: Reg, rs1: Reg, rs2: Reg },
+    AMOMAXUD { rd: Reg, rs1: Reg, rs2: Reg },
 }
 
 impl fmt::Display for Inst {
@@ -259,6 +283,29 @@ impl fmt::Display for Inst {
 
             ECALL => write!(f, "ecall"),
             EBREAK => write!(f, "ebreak"),
+
+            LRW { rd, rs } => write!(f, "lr.w {},{}", rd, rs),
+            SCW { rd, rs1, rs2 } => write!(f, "sc.w {},{},({})", rd, rs1, rs2),
+            AMOSWAPW { rd, rs1, rs2 } => write!(f, "amoswap.w {},{},({})", rd, rs1, rs2),
+            AMOADDW { rd, rs1, rs2 } => write!(f, "amoadd.w {},{},({})", rd, rs1, rs2),
+            AMOXORW { rd, rs1, rs2 } => write!(f, "amoxor.w {},{},({})", rd, rs1, rs2),
+            AMOANDW { rd, rs1, rs2 } => write!(f, "amoand.w {},{},({})", rd, rs1, rs2),
+            AMOORW { rd, rs1, rs2 } => write!(f, "amoor.w {},{},({})", rd, rs1, rs2),
+            AMOMINW { rd, rs1, rs2 } => write!(f, "amomin.w {},{},({})", rd, rs1, rs2),
+            AMOMAXW { rd, rs1, rs2 } => write!(f, "amomax.w {},{},({})", rd, rs1, rs2),
+            AMOMINUW { rd, rs1, rs2 } => write!(f, "amominu.w {},{},({})", rd, rs1, rs2),
+            AMOMAXUW { rd, rs1, rs2 } => write!(f, "amomaxu.w {},{},({})", rd, rs1, rs2),
+            LRD { rd, rs } => write!(f, "lr.d {},{}", rd, rs),
+            SCD { rd, rs1, rs2 } => write!(f, "sc.d {},{},({})", rd, rs1, rs2),
+            AMOSWAPD { rd, rs1, rs2 } => write!(f, "amoswap.d {},{},({})", rd, rs1, rs2),
+            AMOADDD { rd, rs1, rs2 } => write!(f, "amoadd.d {},{},({})", rd, rs1, rs2),
+            AMOXORD { rd, rs1, rs2 } => write!(f, "amoxor.d {},{},({})", rd, rs1, rs2),
+            AMOANDD { rd, rs1, rs2 } => write!(f, "amoand.d {},{},({})", rd, rs1, rs2),
+            AMOORD { rd, rs1, rs2 } => write!(f, "amoor.d {},{},({})", rd, rs1, rs2),
+            AMOMIND { rd, rs1, rs2 } => write!(f, "amomin.d {},{},({})", rd, rs1, rs2),
+            AMOMAXD { rd, rs1, rs2 } => write!(f, "amomax.d {},{},({})", rd, rs1, rs2),
+            AMOMINUD { rd, rs1, rs2 } => write!(f, "amominu.d {},{},({})", rd, rs1, rs2),
+            AMOMAXUD { rd, rs1, rs2 } => write!(f, "amomaxu.d {},{},({})", rd, rs1, rs2),
         }
     }
 }
@@ -847,6 +894,132 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             todo!();
         }
         */
+        0b0101111 => {
+            let inst = RType::from(bits);
+            match inst.func3 {
+                0b010 => match inst.func7 >> 2 {
+                    0b00010 => LRW {
+                        rd: inst.rd,
+                        rs: inst.rs1,
+                    },
+                    0b00011 => SCW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b00001 => AMOSWAPW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b00000 => AMOADDW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b00100 => AMOXORW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b01100 => AMOANDW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b01000 => AMOORW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b10000 => AMOMINW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b10100 => AMOMAXW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b11000 => AMOMINUW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b11100 => AMOMAXUW {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    _ => {
+                        return None;
+                    }
+                },
+                0b011 => match inst.func7 >> 2 {
+                    0b00010 => LRD {
+                        rd: inst.rd,
+                        rs: inst.rs1,
+                    },
+                    0b00011 => SCD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b00001 => AMOSWAPD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b00000 => AMOADDD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b00100 => AMOXORD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b01100 => AMOANDD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b01000 => AMOORD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b10000 => AMOMIND {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b10100 => AMOMAXD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b11000 => AMOMINUD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    0b11100 => AMOMAXUD {
+                        rd: inst.rd,
+                        rs1: inst.rs1,
+                        rs2: inst.rs2,
+                    },
+                    _ => {
+                        return None;
+                    }
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
         _ => {
             return None;
         }
