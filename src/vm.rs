@@ -477,6 +477,94 @@ impl VM {
                 self.set_reg(rd, ((rs1 as i32) >> shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
+            MUL {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1);
+                let rs2 = self.reg(rs2);
+                self.set_reg(rd, rs1.wrapping_mul(rs2));
+                self.inc_pc(pc_increment);
+            }
+
+            MULH {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as i64 as u128;
+                let rs2 = self.reg(rs2) as i64 as u128;
+                self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
+                self.inc_pc(pc_increment);
+            }
+            MULHSU {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as i64 as u128;
+                let rs2 = self.reg(rs2) as u64 as u128;
+                self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
+                self.inc_pc(pc_increment);
+            }
+            MULHU {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as u64 as u128;
+                let rs2 = self.reg(rs2) as u64 as u128;
+                self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
+                self.inc_pc(pc_increment);
+            }
+            DIV {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as i64;
+                let rs2 = self.reg(rs2) as i64;
+                let v = if rs2 == 0 {-1} else {rs1.wrapping_div(rs2)};
+                self.set_reg(rd, v as u64);
+                self.inc_pc(pc_increment);
+            }
+            DIVU {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1);
+                let rs2 = self.reg(rs2);
+                let v = if rs2 == 0 {core::u64::MAX} else {rs1.wrapping_div(rs2)};
+                self.set_reg(rd, v);
+                self.inc_pc(pc_increment);
+            }
+            REM {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as i64;
+                let rs2 = self.reg(rs2) as i64;
+                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                self.set_reg(rd, v as u64);
+                self.inc_pc(pc_increment);
+            }
+            REMU {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1);
+                let rs2 = self.reg(rs2);
+                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                self.set_reg(rd, v as u64);
+                self.inc_pc(pc_increment);
+            }
+            MULW {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1);
+                let rs2 = self.reg(rs2);
+                let v = (rs1 as u32).wrapping_mul(rs2 as u32);
+                self.set_reg(rd, v as i32 as u64);
+                self.inc_pc(pc_increment);
+            }
+            DIVW {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as i32;
+                let rs2 = self.reg(rs2) as i32;
+                let v = if rs2 == 0 {-1} else {rs1.wrapping_div(rs2)};
+                self.set_reg(rd, v as i32 as u64);
+                self.inc_pc(pc_increment);
+            }
+            DIVUW {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as u32;
+                let rs2 = self.reg(rs2) as u32;
+                let v = if rs2 == 0 {core::u32::MAX} else {rs1.wrapping_div(rs2)};
+                self.set_reg(rd, v as i32 as u64);
+                self.inc_pc(pc_increment);
+            }
+            REMW {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1) as i32;
+                let rs2 = self.reg(rs2) as i32;
+                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                self.set_reg(rd, v as i32 as u64);
+                self.inc_pc(pc_increment);
+            }
+            REMUW {rd, rs1, rs2 } => {
+                let rs1 = self.reg(rs1);
+                let rs2 = self.reg(rs2);
+                let v = if rs2 == 0 {rs1} else {rs1.wrapping_rem(rs2)};
+                self.set_reg(rd, v as i32 as u64);
+                self.inc_pc(pc_increment);
+            }
             FENCE {} => {
                 self.inc_pc(pc_increment);
             }

@@ -155,6 +155,20 @@ pub enum Inst {
     OR { rd: Reg, rs1: Reg, rs2: Reg },
     AND { rd: Reg, rs1: Reg, rs2: Reg },
 
+    MUL { rd: Reg, rs1: Reg, rs2: Reg },
+    MULH { rd: Reg, rs1: Reg, rs2: Reg },
+    MULHSU { rd: Reg, rs1: Reg, rs2: Reg },
+    MULHU { rd: Reg, rs1: Reg, rs2: Reg },
+    MULW { rd: Reg, rs1: Reg, rs2: Reg },
+    DIV { rd: Reg, rs1: Reg, rs2: Reg },
+    DIVU { rd: Reg, rs1: Reg, rs2: Reg },
+    DIVW { rd: Reg, rs1: Reg, rs2: Reg },
+    DIVUW { rd: Reg, rs1: Reg, rs2: Reg },
+    REM { rd: Reg, rs1: Reg, rs2: Reg },
+    REMU { rd: Reg, rs1: Reg, rs2: Reg },
+    REMW { rd: Reg, rs1: Reg, rs2: Reg },
+    REMUW { rd: Reg, rs1: Reg, rs2: Reg },
+
     FENCE,
     FENCEI,
 
@@ -225,6 +239,20 @@ impl fmt::Display for Inst {
             SRA { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
             OR { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
             AND { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+
+            MUL { rd, rs1, rs2 } => write!(f, "mul\t{},{},{}", rd, rs1, rs2),
+            MULH { rd, rs1, rs2 } => write!(f, "mulh\t{},{},{}", rd, rs1, rs2),
+            MULHSU { rd, rs1, rs2 } => write!(f, "mulhsu\t{},{},{}", rd, rs1, rs2),
+            MULHU { rd, rs1, rs2 } => write!(f, "mulhu\t{},{},{}", rd, rs1, rs2),
+            MULW { rd, rs1, rs2 } => write!(f, "mulw\t{},{},{}", rd, rs1, rs2),
+            DIV { rd, rs1, rs2 } => write!(f, "div\t{},{},{}", rd, rs1, rs2),
+            DIVU { rd, rs1, rs2 } => write!(f, "divu\t{},{},{}", rd, rs1, rs2),
+            DIVW { rd, rs1, rs2 } => write!(f, "divw\t{},{},{}", rd, rs1, rs2),
+            DIVUW { rd, rs1, rs2 } => write!(f, "divuw\t{},{},{}", rd, rs1, rs2),
+            REM { rd, rs1, rs2 } => write!(f, "rem\t{},{},{}", rd, rs1, rs2),
+            REMU { rd, rs1, rs2 } => write!(f, "remu\t{},{},{}", rd, rs1, rs2),
+            REMW { rd, rs1, rs2 } => write!(f, "remw\t{},{},{}", rd, rs1, rs2),
+            REMUW { rd, rs1, rs2 } => write!(f, "remuw\t{},{},{}", rd, rs1, rs2),
 
             FENCE => write!(f, "fence"),
             FENCEI => write!(f, "fence_i"),
@@ -663,6 +691,46 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
+                (0b0000001, 0b000) => MUL {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b001) => MULH {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b010) => MULHSU {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b011) => MULHU {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b100) => DIV {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b101) => DIVU {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b110) => REM {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b111) => REMU {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
                 _ => {
                     return None;
                 }
@@ -738,6 +806,31 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     rs2: inst.rs2,
                 },
                 (0b0100000, 0b101) => SRAW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b000) => MULW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b100) => DIVW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b101) => DIVUW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b110) => REMW {
+                    rd: inst.rd,
+                    rs1: inst.rs1,
+                    rs2: inst.rs2,
+                },
+                (0b0000001, 0b111) => REMUW {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
