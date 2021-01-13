@@ -88,10 +88,16 @@ impl From<u32> for Reg {
     }
 }
 
-// Extracts the register from an instruction, pass in the first/lowest
-// bit of the register field.
+/// Extracts the register from an instruction, pass in the first/lowest
+/// bit of the register field.
 fn reg_at(inst: u32, bit: usize) -> Reg {
     Reg::from((inst >> bit) & 0b11111)
+}
+
+/// Extracts a register from a _compressed_ bit field. pass in the first/lowest
+/// bit of the field.
+fn creg_at(bits: u16, bit: usize) -> Reg {
+    Reg::from((((bits >> bit) & 0b1111) + 8) as u32)
 }
 
 #[derive(Debug)]
@@ -199,6 +205,11 @@ pub enum Inst {
     AMOMAXD { rd: Reg, rs1: Reg, rs2: Reg },
     AMOMINUD { rd: Reg, rs1: Reg, rs2: Reg },
     AMOMAXUD { rd: Reg, rs1: Reg, rs2: Reg },
+
+    // Hints generally get encoded as instructions with no
+    // side effects (eg, loading into Zero).  But I'm lazy,
+    // so will introduce a new nop instruction.
+    NOP,
 }
 
 impl fmt::Display for Inst {
@@ -306,6 +317,8 @@ impl fmt::Display for Inst {
             AMOMAXD { rd, rs1, rs2 } => write!(f, "amomax.d {},{},({})", rd, rs1, rs2),
             AMOMINUD { rd, rs1, rs2 } => write!(f, "amominu.d {},{},({})", rd, rs1, rs2),
             AMOMAXUD { rd, rs1, rs2 } => write!(f, "amomaxu.d {},{},({})", rd, rs1, rs2),
+
+            NOP => write!(f, "nop"),
         }
     }
 }
@@ -1028,27 +1041,309 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
     Some(inst)
 }
 
-fn decode_16bit_instr(_bits: u16) -> Option<Inst> {
-    todo!();
+fn decode_16bit_instr(bits: u16) -> Option<Inst> {
+    use Inst::*;
+    use Reg::*;
 
-    /*
-     let inst = match bits & 3 {
-         01 => {
+    if bits == 0 {
+        return None;
+    }
 
-         }
-         10 => {
-             // FIXME: use a match
-             if (bits >> 12) == 0b1000 {
-                 Inst {op: ADD, fields: R(RType {
+    let inst = match bits & 0b11 {
+        0b00 => {
+            match bits >> 13 {
+                0b000 => {
+                    // ADDI4SPN
+                    let rd = creg_at(bits, 2);
+                    let imm_3 = (bits >> 5) & 0b1;
+                    let imm_2 = (bits >> 6) & 0b1;
+                    let imm_9_6 = (bits >> 7) & 0b1111;
+                    let imm_5_4 = (bits >> 11) & 0b11;
+                    let imm = (imm_9_6 << 6) | (imm_5_4 << 4) | (imm_3 << 3) | (imm_2 << 2);
+                    let imm = imm as i32;
+                    ADDI { rd, rs: Sp, imm }
+                }
+                0b010 => {
+                    // LW
+                    let rd = creg_at(bits, 2);
+                    let rs = creg_at(bits, 7);
+                    let imm_5_3 = (bits >> 10) & 0b111;
+                    let imm_2 = (bits >> 6) & 0b1;
+                    let imm_6 = (bits >> 5) & 0b1;
+                    let imm = (imm_6 << 6) | (imm_5_3 << 3) | (imm_2 << 2);
+                    let imm = imm as i32;
+                    LW { rd, rs, imm }
+                }
+                0b011 => {
+                    // LD
+                    let rd = creg_at(bits, 2);
+                    let rs = creg_at(bits, 7);
+                    let imm_5_3 = (bits >> 10) & 0b111;
+                    let imm_7_6 = (bits >> 5) & 0b11;
+                    let imm = (imm_7_6 << 6) | (imm_5_3 << 3);
+                    let imm = imm as i32;
+                    LD { rd, rs, imm }
+                }
+                0b110 => {
+                    // SW
+                    let rs2 = creg_at(bits, 2);
+                    let rs1 = creg_at(bits, 7);
+                    let imm_5_3 = (bits >> 10) & 0b111;
+                    let imm_2 = (bits >> 6) & 0b1;
+                    let imm_6 = (bits >> 5) & 0b1;
+                    let imm = (imm_6 << 6) | (imm_5_3 << 3) | (imm_2 << 2);
+                    let imm = imm as i32;
+                    SW { rs1, rs2, imm }
+                }
+                0b111 => {
+                    // SD
+                    let rs2 = creg_at(bits, 2);
+                    let rs1 = creg_at(bits, 7);
+                    let imm_5_3 = (bits >> 10) & 0b111;
+                    let imm_7_6 = (bits >> 5) & 0b11;
+                    let imm = (imm_7_6 << 6) | (imm_5_3 << 3);
+                    let imm = imm as i32;
+                    SD { rs1, rs2, imm }
+                }
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b01 => {
+            match bits >> 13 {
+                0b000 => {
+                    // ADDI
+                    let rd = reg_at(bits as u32, 7);
+                    let imm_5 = (bits >> 12) & 0b1;
+                    let imm_4_0 = (bits >> 2) & 0b11111;
+                    let imm = (imm_5 << 5) | imm_4_0;
+                    let imm = imm as i32;
+                    ADDI { rd, rs: rd, imm }
+                }
+                0b001 => {
+                    // ADDIW
+                    let rd = reg_at(bits as u32, 7);
+                    let imm_5 = (bits >> 12) & 0b1;
+                    let imm_4_0 = (bits >> 2) & 0b11111;
+                    let imm = (imm_5 << 5) | imm_4_0;
+                    let imm = imm as i32;
+                    ADDIW { rd, rs: rd, imm }
+                }
+                0b010 => {
+                    // LI
+                    let rd = reg_at(bits as u32, 7);
+                    let imm_5 = (bits >> 12) & 0b1;
+                    let imm_4_0 = (bits >> 2) & 0b11111;
+                    let imm = (imm_5 << 5) | imm_4_0;
+                    let imm = imm as i32;
+                    ADDI { rd, rs: Zero, imm }
+                }
+                0b011 => {
+                    if ((bits >> 7) & 0b11111) == 2 {
+                        // ADDI16SP
+                        let imm_9 = (bits >> 12) & 0b1;
+                        let imm_5 = (bits >> 2) & 0b1;
+                        let imm_8_7 = (bits >> 3) & 0b11;
+                        let imm_6 = (bits >> 5) & 0b1;
+                        let imm_4 = (bits >> 6) & 0b1;
+                        let imm = (imm_9 << 9)
+                            | (imm_8_7 << 7)
+                            | (imm_6 << 6)
+                            | (imm_5 << 5)
+                            | (imm_4 << 4);
+                        let imm = imm as i32;
+                        ADDI {
+                            rd: Sp,
+                            rs: Sp,
+                            imm,
+                        }
+                    } else {
+                        // LUI
+                        let rd = reg_at(bits as u32, 7);
+                        let imm_17 = (bits >> 12) & 0b1;
+                        let imm_16_12 = (bits >> 2) & 0b11111;
+                        let imm = ((imm_17 as u32) << 17) | ((imm_16_12 as u32) << 12);
+                        let imm = imm as i32;
+                        LUI { rd, imm }
+                    }
+                }
+                0b100 => {
+                    match (bits >> 10) & 0b11 {
+                        0b00 => {
+                            // SRLI
+                            let rd = creg_at(bits, 7);
+                            let imm_5 = (bits >> 12) & 0b1;
+                            let imm_4_0 = (bits >> 2) & 0b11111;
+                            let imm = (imm_5 << 5) | imm_4_0;
+                            let shamt = imm as u32;
+                            SRLI { rd, rs: rd, shamt }
+                        }
+                        0b01 => {
+                            // SRAI
+                            let rd = creg_at(bits, 7);
+                            let imm_5 = (bits >> 12) & 0b1;
+                            let imm_4_0 = (bits >> 2) & 0b11111;
+                            let imm = (imm_5 << 5) | imm_4_0;
+                            let shamt = imm as u32;
+                            SRAI { rd, rs: rd, shamt }
+                        }
+                        0b10 => {
+                            // ANDI
+                            let rd = creg_at(bits, 7);
+                            let imm_5 = (bits >> 12) & 0b1;
+                            let imm_4_0 = (bits >> 2) & 0b11111;
+                            let imm = (imm_5 << 5) | imm_4_0;
+                            let imm = imm as i32;
+                            ANDI { rd, rs: rd, imm }
+                        }
+                        0b11 => {
+                            let rd = creg_at(bits, 7);
+                            let rs2 = creg_at(bits, 2);
+                            match ((bits >> 12) & 0b1, (bits >> 5) & 0b11) {
+                                (0b0, 0b00) => SUB { rd, rs1: rd, rs2 },
+                                (0b0, 0b01) => XOR { rd, rs1: rd, rs2 },
+                                (0b0, 0b10) => OR { rd, rs1: rd, rs2 },
+                                (0b0, 0b11) => AND { rd, rs1: rd, rs2 },
+                                (0b1, 0b00) => SUBW { rd, rs1: rd, rs2 },
+                                (0b1, 0b01) => ADDW { rd, rs1: rd, rs2 },
+                                _ => return None,
+                            }
+                        }
+                        _ => {
+                            return None;
+                        }
+                    }
+                }
+                0b101 => {
+                    // J
+                    let imm_5 = (bits >> 2) & 0b1;
+                    let imm_3_1 = (bits >> 3) & 0b111;
+                    let imm_7 = (bits >> 6) & 0b1;
+                    let imm_6 = (bits >> 7) & 0b1;
+                    let imm_10 = (bits >> 8) & 0b1;
+                    let imm_9_8 = (bits >> 9) & 0b11;
+                    let imm_4 = (bits >> 11) & 0b1;
+                    let imm_11 = (bits >> 12) & 0b1;
+                    let imm = (imm_11 << 11)
+                        | (imm_10 << 10)
+                        | (imm_9_8 << 8)
+                        | (imm_7 << 7)
+                        | (imm_6 << 6)
+                        | (imm_5 << 5)
+                        | (imm_4 << 4)
+                        | (imm_3_1 << 1);
+                    let imm = imm as i32;
+                    JAL { rd: Zero, imm }
+                }
+                0b110 => {
+                    // BEQZ
+                    let rs1 = creg_at(bits, 7);
+                    let imm_5 = (bits >> 2) & 0b1;
+                    let imm_2_1 = (bits >> 3) & 0b11;
+                    let imm_7_6 = (bits >> 5) & 0b11;
+                    let imm_4_3 = (bits >> 10) & 0b11;
+                    let imm_8 = (bits >> 12) & 0b1;
+                    let imm = (imm_8 << 8)
+                        | (imm_7_6 << 6)
+                        | (imm_5 << 5)
+                        | (imm_4_3 << 3)
+                        | (imm_2_1 << 1);
+                    let imm = imm as i32;
+                    BEQ {
+                        rs1,
+                        rs2: Zero,
+                        imm,
+                    }
+                }
+                0b111 => {
+                    // BNEZ
+                    let rs1 = creg_at(bits, 7);
+                    let imm_5 = (bits >> 2) & 0b1;
+                    let imm_2_1 = (bits >> 3) & 0b11;
+                    let imm_7_6 = (bits >> 5) & 0b11;
+                    let imm_4_3 = (bits >> 10) & 0b11;
+                    let imm_8 = (bits >> 12) & 0b1;
+                    let imm = (imm_8 << 8)
+                        | (imm_7_6 << 6)
+                        | (imm_5 << 5)
+                        | (imm_4_3 << 3)
+                        | (imm_2_1 << 1);
+                    let imm = imm as i32;
+                    BEQ {
+                        rs1,
+                        rs2: Zero,
+                        imm,
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            }
+        }
+        0b10 => {
+            match (bits >> 13) & 0b111 {
+                0b000 => {
+                    // SLLI
+                    let rd = reg_at(bits as u32, 7);
+                    let imm_4_0 = (bits >> 2) & 0b11111;
+                    let imm_5 = (bits >> 12) & 0b1;
+                    let imm = (imm_5 << 5) | imm_4_0;
+                    let shamt = imm as i32;
+                    SLLI { rd, rs: rd, shamt }
+                }
+                0b010 => {
+                    // LWSP
+                    let rd = reg_at(bits as u32, 7);
+                    let imm_7_6 = (bits >> 2) & 0b11;
+                    let imm_4_2 = (bits >> 4) & 0b111;
+                    let imm_5 = (bits >> 12) & 0b1;
+                    let imm = (imm_7_6 << 6) | (imm_5 << 5) | (imm_4_2 << 2);
+                    let imm = imm as i32;
+                    LW { rd, rs: Sp, imm }
+                }
+                0b011 => {
+                    // LDSP
+                    let rd = reg_at(bits as u32, 7);
+                    let imm_8_6 = (bits >> 2) & 0b111;
+                    let imm_4_3 = (bits >> 5) & 0b11;
+                    let imm_5 = (bits >> 12) & 0b1;
+                    let imm = (imm_8_6 << 6) | (imm_5 << 5) | (imm_4_3 << 3);
+                    let imm = imm as i32;
+                    LD { rd, rs: Sp, imm }
+                }
+                0b100 => {
+                    todo!();
+                }
+                0b110 => {
+                    // SWSP
+                    let rs2 = reg_at(bits as u32, 2);
+                    let imm_7_6 = (bits >> 7) & 0b11;
+                    let imm_5_2 = (bits >> 9) & 0b1111;
+                    let imm = (imm_7_6 << 6) | (imm_5_2 << 2);
+                    let imm = imm as i32;
+                    SW { rs1: Sp, rs2, imm }
+                }
+                0b111 => {
+                    // SDSP
+                    let rs2 = reg_at(bits as u32, 2);
+                    let imm_8_6 = (bits >> 7) & 0b111;
+                    let imm_5_3 = (bits >> 10) & 0b111;
+                    let imm = (imm_8_6 << 6) | (imm_5_3 << 3);
+                    let imm = imm as i32;
+                    SD { rs1: Sp, rs2, imm }
+                }
+                _ => {
+                    return None;
+                }
+            }
+        }
+        _ => {
+            return None;
+        }
+    };
 
-             } else if (bits >> 12) == 0b1001 {
-                 // C.ADD
-                 rd = (bits >> 7) & 0b11111;
-                 rs = (bits >> 2) & 0b11111;
-
-
-         }
-    */
+    Some(inst)
 }
 
 /// Decodes an instruction.  Also returns the width of the decoded
