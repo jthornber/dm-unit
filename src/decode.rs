@@ -100,6 +100,12 @@ fn creg_at(bits: u16, bit: usize) -> Reg {
     Reg::from((((bits >> bit) & 0b1111) + 8) as u32)
 }
 
+/// Sign extends a given number of bits.
+fn sign_extend(x: i32, nbits: u32) -> i32 {
+    let n = std::mem::size_of_val(&x) as u32 * 8 - nbits;
+    x.wrapping_shl(n).wrapping_shr(n)
+}
+
 #[derive(Debug)]
 pub enum Inst {
     LUI { rd: Reg, imm: i32 },
@@ -215,12 +221,20 @@ pub enum Inst {
 impl fmt::Display for Inst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Inst::*;
+        use Reg::*;
+
         match self {
             LUI { rd, imm } => write!(f, "lui\t{},0x{:x}", rd, imm),
             AUIPC { rd, imm } => write!(f, "auipc\t{},0x{:x}", rd, imm),
 
             JAL { rd, imm } => write!(f, "jal\t{},0x{:x}", rd, imm),
-            JALR { rd, rs, imm } => write!(f, "jalr\t{},{},0x{:x}", rd, rs, imm),
+            JALR { rd, rs, imm } => {
+                if *rd == Zero && *rs == Ra && *imm == 0 {
+                    write!(f, "ret")
+                } else {
+                    write!(f, "jalr\t{},{},0x{:x}", rd, rs, imm)
+                }
+            }
 
             BEQ { rs1, rs2, imm } => write!(f, "beq\t{},{},{}", rs1, rs2, imm),
             BNE { rs1, rs2, imm } => write!(f, "bne\t{},{},{}", rs1, rs2, imm),
@@ -238,10 +252,10 @@ impl fmt::Display for Inst {
             LBU { rd, rs, imm } => write!(f, "lbu\t{},{}({})", rd, imm, rs),
             LHU { rd, rs, imm } => write!(f, "lhu\t{},{}({})", rd, imm, rs),
 
-            SB { rs1, rs2, imm } => write!(f, "sb\t{},{},{}", rs1, rs2, imm),
-            SH { rs1, rs2, imm } => write!(f, "sh\t{},{},{}", rs1, rs2, imm),
-            SW { rs1, rs2, imm } => write!(f, "sw\t{},{},{}", rs1, rs2, imm),
-            SD { rs1, rs2, imm } => write!(f, "sd\t{},{},{}", rs1, rs2, imm),
+            SB { rs1, rs2, imm } => write!(f, "sb\t{},{}({})", rs2, imm, rs1),
+            SH { rs1, rs2, imm } => write!(f, "sh\t{},{}({})", rs2, imm, rs1),
+            SW { rs1, rs2, imm } => write!(f, "sw\t{},{}({})", rs2, imm, rs1),
+            SD { rs1, rs2, imm } => write!(f, "sd\t{},{}({})", rs2, imm, rs1),
 
             ADDI { rd, rs, imm } => write!(f, "addi\t{},{},{}", rd, rs, imm),
             ADDIW { rd, rs, imm } => write!(f, "addiw\t{},{},{}", rd, rs, imm),
@@ -1060,7 +1074,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_9_6 = (bits >> 7) & 0b1111;
                     let imm_5_4 = (bits >> 11) & 0b11;
                     let imm = (imm_9_6 << 6) | (imm_5_4 << 4) | (imm_3 << 3) | (imm_2 << 2);
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 9);
                     ADDI { rd, rs: Sp, imm }
                 }
                 0b010 => {
@@ -1118,7 +1132,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5 = (bits >> 12) & 0b1;
                     let imm_4_0 = (bits >> 2) & 0b11111;
                     let imm = (imm_5 << 5) | imm_4_0;
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 5);
                     ADDI { rd, rs: rd, imm }
                 }
                 0b001 => {
@@ -1136,7 +1150,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5 = (bits >> 12) & 0b1;
                     let imm_4_0 = (bits >> 2) & 0b11111;
                     let imm = (imm_5 << 5) | imm_4_0;
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 5);
                     ADDI { rd, rs: Zero, imm }
                 }
                 0b011 => {
@@ -1152,7 +1166,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                             | (imm_6 << 6)
                             | (imm_5 << 5)
                             | (imm_4 << 4);
-                        let imm = imm as i32;
+                        let imm = sign_extend(imm as i32, 9);
                         ADDI {
                             rd: Sp,
                             rs: Sp,
