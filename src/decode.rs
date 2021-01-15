@@ -1141,7 +1141,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5 = (bits >> 12) & 0b1;
                     let imm_4_0 = (bits >> 2) & 0b11111;
                     let imm = (imm_5 << 5) | imm_4_0;
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 5);
                     ADDIW { rd, rs: rd, imm }
                 }
                 0b010 => {
@@ -1178,7 +1178,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         let imm_17 = (bits >> 12) & 0b1;
                         let imm_16_12 = (bits >> 2) & 0b11111;
                         let imm = ((imm_17 as u32) << 17) | ((imm_16_12 as u32) << 12);
-                        let imm = imm as i32;
+                        let imm = sign_extend(imm as i32, 17);
                         LUI { rd, imm }
                     }
                 }
@@ -1208,7 +1208,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                             let imm_5 = (bits >> 12) & 0b1;
                             let imm_4_0 = (bits >> 2) & 0b11111;
                             let imm = (imm_5 << 5) | imm_4_0;
-                            let imm = imm as i32;
+                            let imm = sign_extend(imm as i32, 5);
                             ANDI { rd, rs: rd, imm }
                         }
                         0b11 => {
@@ -1247,7 +1247,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_5 << 5)
                         | (imm_4 << 4)
                         | (imm_3_1 << 1);
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 11);
                     JAL { rd: Zero, imm }
                 }
                 0b110 => {
@@ -1263,7 +1263,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_5 << 5)
                         | (imm_4_3 << 3)
                         | (imm_2_1 << 1);
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 8);
                     BEQ {
                         rs1,
                         rs2: Zero,
@@ -1283,7 +1283,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_5 << 5)
                         | (imm_4_3 << 3)
                         | (imm_2_1 << 1);
-                    let imm = imm as i32;
+                    let imm = sign_extend(imm as i32, 8);
                     BEQ {
                         rs1,
                         rs2: Zero,
