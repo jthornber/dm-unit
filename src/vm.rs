@@ -229,7 +229,7 @@ impl VM {
 
         if pc_increment == 2 {
             // Compressed instruction
-            eprintln!("{:08x}: {:0>4x}\t{}", pc, bits, inst);
+            eprintln!("{:08x}: {:0>4x}    \t{}", pc, bits, inst);
         } else {
             eprintln!("{:08x}: {:0>8x}\t{}", pc, bits, inst);
         }
@@ -733,6 +733,12 @@ impl VM {
             AMOMAXUD { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| u64::max(l, r))?;
                 self.inc_pc(pc_increment);
+            }
+            ECALL => {
+                return Err(VmErr::ECall);
+            }
+            EBREAK => {
+                return Err(VmErr::EBreak);
             }
             _ => {
                 return Err(VmErr::UnimplementedInstruction(inst));

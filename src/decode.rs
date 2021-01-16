@@ -102,7 +102,7 @@ fn creg_at(bits: u16, bit: usize) -> Reg {
 
 /// Sign extends a given number of bits.
 fn sign_extend(x: i32, nbits: u32) -> i32 {
-    let n = std::mem::size_of_val(&x) as u32 * 8 - nbits;
+    let n = std::mem::size_of_val(&x) as u32 * 8 - nbits - 1;
     x.wrapping_shl(n).wrapping_shr(n)
 }
 
@@ -915,12 +915,15 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             }
         }
         0b0001111 => FENCE {},
-        /*
         0b1110011 => {
-            // Environment
-            todo!();
+            if (bits >> 7) == 0 {
+                ECALL
+            } else if (bits >> 20) == 1 {
+                EBREAK
+            } else {
+                return None;
+            }
         }
-        */
         0b0101111 => {
             let inst = RType::from(bits);
             match inst.func3 {
@@ -1327,7 +1330,29 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     LD { rd, rs: Sp, imm }
                 }
                 0b100 => {
-                    todo!();
+                    let imm12 = (bits >> 12) & 0b1;
+                    let rs1 = reg_at(bits as u32, 7);
+                    let rs2 = reg_at(bits as u32, 2);
+                    match (imm12, rs1, rs2) {
+                        (0, rs, Reg::Zero) => {
+                            JALR {rd: Zero, rs, imm: 0}
+                        }
+                        (0, rd, rs2) => {
+                            ADD {rd, rs1: Zero, rs2}
+                        }
+                        (1, Zero, Zero) => {
+                            EBREAK
+                        }
+                        (1, rs, Zero) => {
+                            JALR {rd: Ra, rs, imm: 0}
+                        }
+                        (1, rd, rs2) => {
+                            ADD {rd, rs1: rd, rs2}
+                        }
+                        _ => {
+                            return None;
+                        }
+                   }
                 }
                 0b110 => {
                     // SWSP
