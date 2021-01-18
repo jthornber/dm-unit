@@ -211,11 +211,6 @@ pub enum Inst {
     AMOMAXD { rd: Reg, rs1: Reg, rs2: Reg },
     AMOMINUD { rd: Reg, rs1: Reg, rs2: Reg },
     AMOMAXUD { rd: Reg, rs1: Reg, rs2: Reg },
-
-    // Hints generally get encoded as instructions with no
-    // side effects (eg, loading into Zero).  But I'm lazy,
-    // so will introduce a new nop instruction.
-    NOP,
 }
 
 impl fmt::Display for Inst {
@@ -337,8 +332,6 @@ impl fmt::Display for Inst {
             AMOMAXD { rd, rs1, rs2 } => write!(f, "amomax.d {},{},({})", rd, rs1, rs2),
             AMOMINUD { rd, rs1, rs2 } => write!(f, "amominu.d {},{},({})", rd, rs1, rs2),
             AMOMAXUD { rd, rs1, rs2 } => write!(f, "amomaxu.d {},{},({})", rd, rs1, rs2),
-
-            NOP => write!(f, "nop"),
         }
     }
 }
@@ -434,13 +427,13 @@ impl From<u32> for BType {
         let rs1 = reg_at(inst, 15);
         let rs2 = reg_at(inst, 20);
 
-        let func = (inst >> 21) & 0b111;
+        let func = (inst >> 12) & 0b111;
         let imm_12 = (inst >> 31) & 0b1;
         let imm_10_5 = (inst >> 25) & 0b111111;
         let imm_4_1 = (inst >> 8) & 0b1111;
         let imm_11 = (inst >> 7) & 0b1;
         let imm = (imm_12 << 12) | (imm_11 << 11) | (imm_10_5 << 5) | (imm_4_1 << 1);
-        let imm = ((imm as i32) << 19) >> 19;
+        let imm = sign_extend(imm as i32, 12);
 
         BType {
             rs1,

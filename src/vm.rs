@@ -421,6 +421,10 @@ impl VM {
                 self.set_reg(rd, self.reg(rs).wrapping_add(imm as i64 as u64));
                 self.inc_pc(pc_increment);
             }
+            ADDIW { rd, rs, imm } => {
+                self.set_reg(rd, self.reg(rs).wrapping_add(imm as i32 as u32 as u64));
+                self.inc_pc(pc_increment);
+            }
             SLTI { rd, rs, imm } => {
                 let v = if (self.reg(rs) as i64) < (imm as i64) {
                     1
@@ -767,9 +771,6 @@ impl VM {
             }
             EBREAK => {
                 return Err(VmErr::EBreak);
-            }
-            _ => {
-                return Err(VmErr::UnimplementedInstruction(inst));
             }
         }
 
