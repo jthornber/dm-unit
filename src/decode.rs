@@ -257,7 +257,13 @@ impl fmt::Display for Inst {
             SW { rs1, rs2, imm } => write!(f, "sw\t{},{}({})", rs2, imm, rs1),
             SD { rs1, rs2, imm } => write!(f, "sd\t{},{}({})", rs2, imm, rs1),
 
-            ADDI { rd, rs, imm } => write!(f, "addi\t{},{},{}", rd, rs, imm),
+            ADDI { rd, rs, imm } => {
+                if *rs == Zero {
+                    write!(f, "li\t{},{}", rd, imm)
+                } else {
+                    write!(f, "addi\t{},{},{}", rd, rs, imm)
+                }
+            }
             ADDIW { rd, rs, imm } => write!(f, "addiw\t{},{},{}", rd, rs, imm),
             SLTI { rd, rs, imm } => write!(f, "slti\t{},{},{}", rd, rs, imm),
             SLTIU { rd, rs, imm } => write!(f, "sltiu\t{},{},{}", rd, rs, imm),

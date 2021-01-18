@@ -479,9 +479,8 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
         PERM_EXEC | PERM_READ,
     )?;
 
-    // FIXME: or we could use ebreak to force people to explicitly choose a stub?
-    // c.jr ra  (ret)
-    let ret: u16 = 0b1000000010000010;
+    // c.ebreak
+    let ret: u16 = 0b1001000000000010;
     let bytes = (ret as u32).to_le_bytes();
 
     for (i, si) in globals.iter().enumerate() {

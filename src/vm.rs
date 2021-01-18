@@ -1,17 +1,27 @@
 use crate::decode::*;
 use crate::memory::*;
-use thiserror::Error;
 
-use std::fmt;
 use log::debug;
+use std::collections::BTreeMap;
+use std::fmt;
+use thiserror::Error;
 
 //-----------------------------
 
 use Reg::*;
 
+/// A breakpoint can be set at a particular address.  Before executing
+/// the instruction at that address the breakpoint will be executed, and
+/// may alter the vm itself (eg, changing the PC).  Using this mechanism
+/// we can stub out code or set counters.
+pub trait Breakpoint {
+    fn exec(&mut self, vm: &mut VM) -> Result<()>;
+}
+
 pub struct VM {
     reg: Vec<u64>,
     pub mem: Memory,
+    bps: BTreeMap<Addr, Box<dyn Breakpoint>>,
 }
 
 impl fmt::Display for VM {
@@ -90,6 +100,7 @@ impl VM {
         VM {
             reg: vec![0; 33],
             mem: Memory::new(),
+            bps: BTreeMap::new(),
         }
     }
 
@@ -216,7 +227,23 @@ impl VM {
         Ok(())
     }
 
+    // executes an ad-hoc 'ret' instruction.  Useful for breakpoints.
+    pub fn ret(&mut self) {
+        self.set_reg(PC, self.reg(Ra))
+    }
+
     pub fn step(&mut self) -> Result<()> {
+        // FIXME: What if the bp changes the pc, and that pc has a bp also?
+        let pc = self.pc();
+        let mut bps = BTreeMap::new();
+
+        std::mem::swap(&mut bps, &mut self.bps);
+        if let Some(bp) = bps.get_mut(&pc) {
+            debug!("executing breakpoint at {:?}", pc);
+            bp.exec(self)?;
+        }
+        std::mem::swap(&mut bps, &mut self.bps);
+
         let pc = self.pc();
         let mut bits = self
             .mem
@@ -753,6 +780,14 @@ impl VM {
         loop {
             self.step()?;
         }
+    }
+
+    pub fn add_breakpoint(&mut self, loc: Addr, bp: Box<dyn Breakpoint>) {
+        self.bps.insert(loc, bp);
+    }
+
+    pub fn rm_breakpoint(&mut self, loc: Addr) -> Option<Box<dyn Breakpoint>> {
+        self.bps.remove(&loc)
     }
 }
 

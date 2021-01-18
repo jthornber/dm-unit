@@ -1,11 +1,12 @@
 extern crate dm_unit;
 extern crate log;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::{App, Arg};
 use dm_unit::decode::Reg;
 use dm_unit::loader::*;
 use dm_unit::memory::{Addr, Heap, PERM_EXEC};
+use dm_unit::vm;
 use dm_unit::vm::*;
 use log::info;
 use std::collections::BTreeMap;
@@ -20,6 +21,18 @@ struct Fixture {
     heap: Heap,
 }
 
+struct RetBP {
+    v: u64,
+}
+
+impl Breakpoint for RetBP {
+    fn exec(&mut self, vm: &mut VM) -> vm::Result<()> {
+        vm.set_reg(Reg::A0, self.v);
+        vm.ret();
+        Ok(())
+    }
+}
+
 impl Fixture {
     fn new<P: AsRef<Path>>(module: P) -> Result<Self> {
         let mut vm = VM::new();
@@ -32,7 +45,18 @@ impl Fixture {
         Ok(Fixture { vm, symbols, heap })
     }
 
+    fn lookup_fn(&self, func: &str) -> Result<Addr> {
+        if let Some(addr) = self.symbols.get(func) {
+            Ok(Addr(addr.value))
+        } else {
+            Err(anyhow!("couldn't lookup symbol '{}'", func))
+        }
+    }
+
     fn call(&mut self, func: &str) -> Result<()> {
+        let entry = self.lookup_fn(func)?;
+        info!("Entry point: {:#x}", entry);
+
         let vm = &mut self.vm;
 
         // We need an ebreak instruction to return control to us.
@@ -41,9 +65,6 @@ impl Fixture {
         vm.mem
             .mmap_bytes(exit_addr, &ebreak_inst.to_le_bytes(), PERM_EXEC)?;
         vm.set_reg(Reg::Ra, exit_addr.0);
-
-        let entry = Addr(self.symbols.get(func).unwrap().value);
-        info!("Entry point: {:#x}", entry);
         vm.set_pc(entry);
 
         match vm.run() {
@@ -64,6 +85,13 @@ impl Fixture {
                 Err(e)?
             }
         }
+    }
+
+    // Stubs a function to just return a particular value.
+    fn stub(&mut self, func: &str, v: u64) -> Result<()> {
+        self.vm
+            .add_breakpoint(self.lookup_fn(func)?, Box::new(RetBP { v }));
+        Ok(())
     }
 }
 
@@ -88,7 +116,8 @@ fn main() -> Result<()> {
     let global = fix.symbols.get(sym).unwrap();
     info!("{} = {}", sym, global);
 
+    fix.stub("crc32c", 123)?;
     fix.call("test1")?;
-    info!("{}", fix.vm);
+    //   info!("{}", fix.vm);
     Ok(())
 }
