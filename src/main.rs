@@ -1,11 +1,11 @@
-extern crate riscv_emulator;
+extern crate dm_unit;
 
 use anyhow::Result;
 use clap::{App, Arg};
-use riscv_emulator::decode::Reg;
-use riscv_emulator::loader::*;
-use riscv_emulator::memory::{Addr, Heap, PERM_EXEC};
-use riscv_emulator::vm::*;
+use dm_unit::decode::Reg;
+use dm_unit::loader::*;
+use dm_unit::memory::{Addr, Heap, PERM_EXEC};
+use dm_unit::vm::*;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

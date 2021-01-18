@@ -84,6 +84,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dm-unit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "elf",
+ "fixedbitset",
+ "intrusive-collections",
+ "nom",
+ "thiserror",
+]
+
+[[package]]
 name = "elf"
 version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -191,19 +204,6 @@ name = "radium"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "941ba9d78d8e2f7ce474c015eea4d9c6d25b6a3327f9832ee29a4de27f91bbb8"
-
-[[package]]
-name = "riscv-emulator"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "elf",
- "fixedbitset",
- "intrusive-collections",
- "nom",
- "thiserror",
-]
 
 [[package]]
 name = "ryu"
