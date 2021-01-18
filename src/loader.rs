@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use elf;
 use elf::types::Symbol;
 use elf::types::*;
+use log::debug;
 use nom::{number::complete::*, IResult};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -34,7 +35,7 @@ fn load_sections(
 ) -> Result<()> {
     let mut len = 0;
     for s in ss {
-        eprintln!("loading section {} at {:x}", s.shdr.name, base.0 + len);
+        debug!("loading section {} at {:x}", s.shdr.name, base.0 + len);
 
         let begin = Addr(base.0 + len);
         if s.data.len() == 0 {
@@ -436,15 +437,15 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
     // One meg per segment should be ample
     let meg = 1024 * 1024;
     let text_base = Addr(meg);
-    eprintln!("loading text sections");
+    debug!("loading text sections");
     load_sections(text_base, mem, text_sections, PERM_EXEC, &mut bases)?;
 
     let ro_base = Addr(2 * meg);
-    eprintln!("loading ro sections");
+    debug!("loading ro sections");
     load_sections(ro_base, mem, ro_sections, PERM_READ, &mut bases)?;
 
     let rw_base = Addr(3 * meg);
-    eprintln!("loading rw sections");
+    debug!("loading rw sections");
     load_sections(
         rw_base,
         mem,
@@ -463,7 +464,7 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
         } else {
             if let Some(section_name) = indexes.get(&sym.shndx) {
                 if let Some(base) = bases.get(section_name) {
-                    // eprintln!("adjusting {}: {} += {}, section '{}'", sym.name, sym.value, base.0, section_name);
+                    // info!("adjusting {}: {} += {}, section '{}'", sym.name, sym.value, base.0, section_name);
                     sym.value += base.0;
                 }
             }

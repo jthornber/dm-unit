@@ -1,4 +1,5 @@
 extern crate dm_unit;
+extern crate log;
 
 use anyhow::Result;
 use clap::{App, Arg};
@@ -6,6 +7,7 @@ use dm_unit::decode::Reg;
 use dm_unit::loader::*;
 use dm_unit::memory::{Addr, Heap, PERM_EXEC};
 use dm_unit::vm::*;
+use log::info;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -41,7 +43,7 @@ impl Fixture {
         vm.set_reg(Reg::Ra, exit_addr.0);
 
         let entry = Addr(self.symbols.get(func).unwrap().value);
-        println!("Entry point: {:#x}", entry);
+        info!("Entry point: {:#x}", entry);
         vm.set_pc(entry);
 
         match vm.run() {
@@ -66,9 +68,11 @@ impl Fixture {
 }
 
 fn main() -> Result<()> {
-    let parser = App::new("risc-emulator")
+    env_logger::init();
+
+    let parser = App::new("dm-unit")
         .version("0")
-        .about("simple emulator, still under development")
+        .about("Unit test framework for device mapper kernel modules")
         .arg(
             Arg::with_name("INPUT")
                 .help("RISCV64imac kernel module to load (must be dm-persistent-data.ko)")
@@ -82,9 +86,9 @@ fn main() -> Result<()> {
 
     let sym = "crc32c";
     let global = fix.symbols.get(sym).unwrap();
-    eprintln!("{} = {}", sym, global);
+    info!("{} = {}", sym, global);
 
     fix.call("test1")?;
-    eprintln!("{}", fix.vm);
+    info!("{}", fix.vm);
     Ok(())
 }

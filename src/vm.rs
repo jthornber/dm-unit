@@ -3,6 +3,7 @@ use crate::memory::*;
 use thiserror::Error;
 
 use std::fmt;
+use log::debug;
 
 //-----------------------------
 
@@ -229,9 +230,9 @@ impl VM {
 
         if pc_increment == 2 {
             // Compressed instruction
-            eprintln!("{:08x}: {:0>4x}    \t{}", pc, bits, inst);
+            debug!("{:08x}: {:0>4x}    \t{}", pc, bits, inst);
         } else {
-            eprintln!("{:08x}: {:0>8x}\t{}", pc, bits, inst);
+            debug!("{:08x}: {:0>8x}\t{}", pc, bits, inst);
         }
 
         use Inst::*;
