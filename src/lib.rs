@@ -6,8 +6,11 @@ extern crate log;
 extern crate nom;
 extern crate thiserror;
 
+pub mod breakpoint;
 pub mod decode;
 pub mod loader;
 pub mod memory;
-pub mod vm;
 pub mod primitive;
+pub mod test_runner;
+pub mod tests;
+pub mod vm;
