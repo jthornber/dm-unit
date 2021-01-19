@@ -6,7 +6,7 @@ use crate::vm::*;
 use crate::test_runner::*;
 
 use anyhow::{anyhow, Result};
-use log::{debug, info};
+use log::{info};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -39,7 +39,7 @@ impl Fixture {
         }
     }
 
-    fn call(&mut self, func: &str) -> Result<()> {
+    fn call(&mut self, func: &str) -> Result<u64> {
         let entry = self.lookup_fn(func)?;
         let vm = &mut self.vm;
 
@@ -58,7 +58,7 @@ impl Fixture {
             Err(VmErr::EBreak) => {
                 if vm.reg(Reg::PC) == exit_addr.0 {
                     // Successfully returned from the fn
-                    return Ok(());
+                    return Ok(self.vm.reg(Reg::A0));
                 } else {
                     eprintln!("{}", vm);
                     Err(VmErr::EBreak)?
@@ -85,18 +85,7 @@ impl Fixture {
 fn test_test1(mut fix: Fixture) -> Result<()> {
     fix.stub("crc32c", 123)?;
     fix.call("test1")?;
-    Ok(())
-}
-
-fn test_test2(mut fix: Fixture) -> Result<()> {
-    fix.stub("crc32c", 123)?;
-    fix.call("test1")?;
-    Ok(())
-}
-
-fn test_test3(mut fix: Fixture) -> Result<()> {
-    fix.stub("crc32c", 123)?;
-    fix.call("test1")?;
+    assert!(fix.vm.reg(Reg::A0) == 123);
     Ok(())
 }
 
@@ -111,7 +100,7 @@ impl TestSuite for BTreeRemoveSuite {
              "/pdata/btree/remove/test3"].iter().map(|s| s.to_string()).collect()
     }
 
-    fn exec(&self, p: &TestPath) -> Result<()> {
+    fn exec(&self, _p: &TestPath) -> Result<()> {
         let fix = Fixture::new(self.module_path.clone())?;
         test_test1(fix)
     }

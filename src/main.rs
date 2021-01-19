@@ -1,19 +1,12 @@
 extern crate dm_unit;
 extern crate log;
 
-use dm_unit::breakpoint::Stub;
-use dm_unit::decode::Reg;
-use dm_unit::loader::*;
-use dm_unit::memory::{Addr, Heap, PERM_EXEC};
 use dm_unit::test_runner::*;
 use dm_unit::tests::btree_remove;
-use dm_unit::vm::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::{App, Arg};
-use log::{debug, info};
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 //-------------------------------
 
