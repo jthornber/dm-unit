@@ -8,7 +8,7 @@ use dm_unit::loader::*;
 use dm_unit::memory::{Addr, Heap, PERM_EXEC};
 use dm_unit::vm;
 use dm_unit::vm::*;
-use log::info;
+use log::debug;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -22,11 +22,22 @@ struct Fixture {
 }
 
 struct RetBP {
+    name: String,
     v: u64,
+}
+
+impl RetBP {
+    fn new(name: &str, v: u64) -> Self {
+        RetBP {
+            name: name.to_string(),
+            v,
+        }
+    }
 }
 
 impl Breakpoint for RetBP {
     fn exec(&mut self, vm: &mut VM) -> vm::Result<()> {
+        debug!("stubbed '{}' returning {}", self.name, self.v);
         vm.set_reg(Reg::A0, self.v);
         vm.ret();
         Ok(())
@@ -55,8 +66,6 @@ impl Fixture {
 
     fn call(&mut self, func: &str) -> Result<()> {
         let entry = self.lookup_fn(func)?;
-        info!("Entry point: {:#x}", entry);
-
         let vm = &mut self.vm;
 
         // We need an ebreak instruction to return control to us.
@@ -90,7 +99,7 @@ impl Fixture {
     // Stubs a function to just return a particular value.
     fn stub(&mut self, func: &str, v: u64) -> Result<()> {
         self.vm
-            .add_breakpoint(self.lookup_fn(func)?, Box::new(RetBP { v }));
+            .add_breakpoint(self.lookup_fn(func)?, Box::new(RetBP::new(func, v)));
         Ok(())
     }
 }
@@ -112,12 +121,7 @@ fn main() -> Result<()> {
     let module = Path::new(matches.value_of("INPUT").unwrap());
     let mut fix = Fixture::new(PathBuf::from(module))?;
 
-    let sym = "crc32c";
-    let global = fix.symbols.get(sym).unwrap();
-    info!("{} = {}", sym, global);
-
     fix.stub("crc32c", 123)?;
     fix.call("test1")?;
-    //   info!("{}", fix.vm);
     Ok(())
 }
