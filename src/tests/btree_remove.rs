@@ -202,6 +202,36 @@ impl Fixture {
 
 //-------------------------------
 
+fn kmalloc(fix: &mut Fixture) -> Result<()> {
+    let len = fix.vm.reg(Reg::A0);
+    let ptr = fix.alloc(len as usize)?;
+    fix.vm.ret(ptr.0);
+    Ok(())
+}
+
+fn kfree(fix: &mut Fixture) -> Result<()> {
+    let ptr = Addr(fix.vm.reg(Reg::A0));
+    fix.free(ptr)?;
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn memset(fix: &mut Fixture) -> Result<()> {
+    use Reg::*;
+    let base = Addr(fix.vm.reg(A0));
+    let v = fix.vm.reg(A1) as u8;
+    let len = fix.vm.reg(A2) as usize;
+    let mut bytes = vec![0u8; len];
+    for b in &mut bytes {
+        *b = v;
+    }
+    fix.vm.mem.write(base, &mut bytes, PERM_WRITE)?;
+    fix.vm.ret(0);
+    Ok(())
+}
+
+//-------------------------------
+
 // pretend tests
 struct Test1 {}
 
@@ -219,42 +249,7 @@ struct Test2 {}
 
 impl Test for Test2 {
     fn exec(&self, kernel_dir: &PathBuf) -> Result<()> {
-        use decode::Reg::*;
-
         let mut fix = Fixture::new(kernel_dir)?;
-        let kmalloc = {
-            move |fix: &mut Fixture| {
-                let len = fix.vm.reg(Reg::A0);
-                let ptr = fix.alloc(len as usize)?;
-                fix.vm.ret(ptr.0);
-                Ok(())
-            }
-        };
-
-        let memset = {
-            move |fix: &mut Fixture| {
-                let base = Addr(fix.vm.reg(A0));
-                let v = fix.vm.reg(A1) as u8;
-                let len = fix.vm.reg(A2) as usize;
-                let mut bytes = vec![0u8; len];
-                for b in &mut bytes {
-                    *b = v;
-                }
-                fix.vm.mem.write(base, &mut bytes, PERM_WRITE)?;
-                fix.vm.ret(0);
-                Ok(())
-            }
-        };
-
-        let kfree = {
-            move |fix: &mut Fixture| {
-                let ptr = Addr(fix.vm.reg(A0));
-                fix.free(ptr)?;
-                fix.vm.ret(0);
-                Ok(())
-            }
-        };
-
         fix.at_func("__kmalloc", Box::new(kmalloc))?;
         fix.at_func("memset", Box::new(memset))?;
         fix.at_func("kfree", Box::new(kfree))?;
