@@ -1,3 +1,4 @@
+use crate::decode;
 use crate::decode::Reg;
 use crate::loader::*;
 use crate::memory::{Addr, Heap, PERM_EXEC, PERM_READ, PERM_WRITE};
@@ -6,7 +7,7 @@ use crate::vm::*;
 
 use anyhow::{anyhow, Result};
 use elf::types::Symbol;
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -39,7 +40,7 @@ impl Fixture {
         vm.setup_stack(8 * 1024)?;
 
         let heap_base = Addr(1024 * 1024 * 1024 * 3);
-        let heap_end = 64 * 1024;
+        let heap_end = Addr(heap_base.0 + (64 * 1024));
         let heap = Heap::new(heap_base, heap_end);
 
         let allocations = BTreeMap::new();
@@ -55,7 +56,6 @@ impl Fixture {
     }
 
     pub fn alloc(&mut self, len: usize) -> Result<Addr> {
-        eprintln!("in alloc");
         // We allocate an extra word before and after the block to
         // detect overwrites.
         let extra_len = len + 8;
@@ -72,10 +72,10 @@ impl Fixture {
     }
 
     pub fn free(&mut self, ptr: Addr) -> Result<()> {
-        let ptr = Addr(ptr.0 - 4);
+        let heap_ptr = Addr(ptr.0 - 4);
 
-        if let Some(_len) = self.allocations.remove(&ptr.0) {
-            self.heap.free(ptr)?;
+        if let Some(_len) = self.allocations.remove(&heap_ptr.0) {
+            self.heap.free(heap_ptr)?;
             self.vm.mem.unmap(ptr)?;
             Ok(())
         } else {
@@ -111,9 +111,7 @@ impl Fixture {
                     let mut bps = BTreeMap::new();
                     std::mem::swap(&mut bps, &mut self.breakpoints);
                     if let Some(callback) = bps.get_mut(&loc) {
-                        eprintln!(">>> callback");
                         (*callback)(self)?;
-                        eprintln!("<<< callback");
                     } else {
                         return Err(anyhow!(
                             "Breakpoint at {:?} without callback",
@@ -153,7 +151,6 @@ impl Fixture {
 
             let callback = move |_fix: &mut Fixture| {
                 let mut completed = completed.lock().unwrap();
-                eprintln!("in call() callback");
                 *completed = true;
                 Err(anyhow!("call complete, exiting"))
             };
@@ -162,7 +159,6 @@ impl Fixture {
         }
 
         let result = self.run_vm();
-        eprintln!("run_vm() completed");
         match result {
             Ok(_) => {
                 // Not sure how we can get here
@@ -223,10 +219,11 @@ struct Test2 {}
 
 impl Test for Test2 {
     fn exec(&self, kernel_dir: &PathBuf) -> Result<()> {
+        use decode::Reg::*;
+
         let mut fix = Fixture::new(kernel_dir)?;
         let kmalloc = {
             move |fix: &mut Fixture| {
-                eprintln!("in kmalloc");
                 let len = fix.vm.reg(Reg::A0);
                 let ptr = fix.alloc(len as usize)?;
                 fix.vm.ret(ptr.0);
@@ -234,7 +231,33 @@ impl Test for Test2 {
             }
         };
 
+        let memset = {
+            move |fix: &mut Fixture| {
+                let base = Addr(fix.vm.reg(A0));
+                let v = fix.vm.reg(A1) as u8;
+                let len = fix.vm.reg(A2) as usize;
+                let mut bytes = vec![0u8; len];
+                for b in &mut bytes {
+                    *b = v;
+                }
+                fix.vm.mem.write(base, &mut bytes, PERM_WRITE)?;
+                fix.vm.ret(0);
+                Ok(())
+            }
+        };
+
+        let kfree = {
+            move |fix: &mut Fixture| {
+                let ptr = Addr(fix.vm.reg(A0));
+                fix.free(ptr)?;
+                fix.vm.ret(0);
+                Ok(())
+            }
+        };
+
         fix.at_func("__kmalloc", Box::new(kmalloc))?;
+        fix.at_func("memset", Box::new(memset))?;
+        fix.at_func("kfree", Box::new(kfree))?;
         fix.call("test2")?;
         Ok(())
     }

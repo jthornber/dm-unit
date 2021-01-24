@@ -1,6 +1,7 @@
 use fixedbitset::FixedBitSet;
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
+use log::{debug, info, warn};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::result;
@@ -419,6 +420,7 @@ fn get_buddy(index: u64, order: usize) -> u64 {
 
 impl BuddyAllocator {
     pub fn new(order: usize) -> Self {
+        assert!(order <= 32);
         let mut free_blocks = Vec::new();
         for _ in 0..order {
             free_blocks.push(BTreeSet::new());
@@ -459,20 +461,19 @@ impl BuddyAllocator {
             self.free_blocks[high_order].insert(get_buddy(index, high_order));
         }
 
+        self.allocated.insert(index, order);
         Ok(index)
     }
 
     pub fn free(&mut self, mut index: u64) -> Result<()> {
-        let order = self.allocated.get(&index);
+        let order = self.allocated.remove(&index);
         if order.is_none() {
             // The heap class intercepts and turns the index into a
             // ptr.
             return Err(MemErr::BadFree(Addr(index)));
         }
 
-        let mut order = *order.unwrap();
-        self.allocated.remove(&index);
-
+        let mut order = order.unwrap();
         loop {
             let buddy = get_buddy(index, order);
             if !self.allocated.contains_key(&buddy) {
@@ -483,6 +484,10 @@ impl BuddyAllocator {
 
             if buddy < index {
                 index = buddy;
+            }
+
+            if order == self.free_blocks.len() - 1 {
+                break;
             }
         }
 
@@ -505,7 +510,10 @@ pub struct Heap {
 }
 
 impl Heap {
-    pub fn new(begin: Addr, order: usize) -> Self {
+    pub fn new(begin: Addr, end: Addr) -> Self {
+        let len = end.0 - begin.0;
+        assert!(len.count_ones() == 1);
+        let order = len.trailing_zeros() as usize;
         let order = order - MIN_BLOCK_SHIFT;
         let allocator = BuddyAllocator::new(order);
 
@@ -540,7 +548,7 @@ impl Heap {
     pub fn free(&mut self, ptr: Addr) -> Result<()> {
         let index = self.addr_to_index(ptr);
         match self.allocator.free(index) {
-            Err(MemErr::BadFree(index)) => Err(MemErr::BadFree(index)),
+            Err(MemErr::BadFree(_)) => Err(MemErr::BadFree(ptr)),
             r => r,
         }
     }
@@ -589,7 +597,7 @@ fn test_adjacent_mmap() -> Result<()> {
 
 #[test]
 fn test_heap_create() -> Result<()> {
-    let h = Heap::new(Addr(0x1000), 12);
+    let h = Heap::new(Addr(0x1000), Addr(0x1000 + (1 << 12)));
     drop(h);
 
     Ok(())
@@ -597,7 +605,7 @@ fn test_heap_create() -> Result<()> {
 
 #[test]
 fn test_heap_alloc() -> Result<()> {
-    let mut h = Heap::new(Addr(0x1000), 12);
+    let mut h = Heap::new(Addr(0x1000), Addr(0x1000 + (1 << 12)));
     let block = h.alloc(23)?;
     eprintln!("allocated block at {:?}", block);
     Ok(())
