@@ -5,25 +5,13 @@ use std::path::{Path, PathBuf};
 
 //-------------------------------
 
-/// A test suite gathers a group of tests together that all
-/// use the same fixture.  The tests all have paths associated
-/// with them which are used in the user interface.  Test suites
-/// are not visible to the user.
-
-pub type TestPath = String;
-
-pub trait TestSuite {
-    fn get_paths(&self) -> Vec<TestPath>;
-    fn exec(&self, p: &TestPath) -> Result<()>;
+pub trait Test {
+    fn exec(&self, kdir: &PathBuf) -> Result<()>;
 }
 
 pub struct TestRunner {
     kernel_dir: PathBuf,
-    suites: Vec<Box<dyn TestSuite>>,
-
-    // Maps paths to the index of the test suite that
-    // contains it.
-    paths: BTreeMap<TestPath, usize>,
+    tests: BTreeMap<String, Box<dyn Test>>,
 }
 
 impl TestRunner {
@@ -33,8 +21,7 @@ impl TestRunner {
         
         TestRunner {
             kernel_dir: path,
-            suites: Vec::new(),
-            paths: BTreeMap::new(),
+            tests: BTreeMap::new(),
         }
     }
 
@@ -42,23 +29,17 @@ impl TestRunner {
         &self.kernel_dir
     }
 
-    pub fn register_suite(&mut self, s: Box<dyn TestSuite>) {
-        let paths = s.get_paths();
-        let index = self.suites.len();
-        for p in paths {
-            self.paths.insert(p, index);
-        }
-        self.suites.push(s);
+    pub fn register_test(&mut self, path: &str, t: Box<dyn Test>) {
+        self.tests.insert(path.to_string(), t);
     }
 
     pub fn exec(&self)  -> (usize, usize) {
         let mut pass = 0;
         let mut fail = 0;
 
-        for (p, sindex) in &self.paths {
+        for (p, t) in &self.tests{
             info!(">>> {}", p);
-            let suite = &self.suites[*sindex];
-            if let Err(e) = suite.exec(p) {
+            if let Err(e) = t.exec(&self.kernel_dir) {
                 fail += 1;
                 info!("<<< {}: FAIL, {}", p, e);
             } else {
@@ -66,9 +47,8 @@ impl TestRunner {
                 info!("<<< {}: PASS", p);
             }
         }
+        
         (pass, fail)
-
-
     }
 }
 

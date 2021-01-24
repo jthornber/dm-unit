@@ -199,7 +199,9 @@ impl<'a> KeyAdapter<'a> for MMapAdapter {
 /// Checks memory has been initialised before it's read.
 pub struct Memory {
     index: RBTree<MMapAdapter>,
-    mmaps: Vec<MMap>,
+
+    nr_allocations: usize,
+    mmaps: BTreeMap<usize, MMap>,
 }
 
 // FIXME: implement snapshotting.
@@ -208,16 +210,32 @@ impl Memory {
     pub fn new() -> Self {
         Memory {
             index: RBTree::new(MMapAdapter::new()),
-            mmaps: Vec::new(),
+            nr_allocations: 0,
+            mmaps: BTreeMap::new(),
         }
     }
 
     /// Inserts a MMap into both the mmaps vec, and the index rbtree.
     fn insert_mm(&mut self, mm: MMap) {
-        let index = self.mmaps.len();
+        let index = self.nr_allocations;
+        self.nr_allocations += 1;
         let begin = mm.begin;
-        self.mmaps.push(mm);
+        self.mmaps.insert(index, mm);
         self.index.insert(Box::new(MMapIndex::new(begin, index)));
+    }
+
+    /// Remove an mmapped area.
+    pub fn unmap(&mut self, begin: Addr) -> Result<()> {
+        let mut cur = self.index.find_mut(&begin.0);
+
+        if cur.is_null() {
+            Err(MemErr::BadFree(begin))
+        } else {
+            let index = cur.get().unwrap().index;
+            cur.remove();
+            self.mmaps.remove(&index);
+            Ok(())
+        }
     }
 
     /// Creates a new mapped region of memory with the specified perms.  The
@@ -260,7 +278,7 @@ impl Memory {
             }
 
             let mi = cursor.get().unwrap();
-            let mm = &self.mmaps[mi.index];
+            let mm = &self.mmaps.get(&mi.index).unwrap();
 
             // begin must be within the region
             if (begin < mm.begin) || (begin >= mm.end) {
@@ -288,7 +306,7 @@ impl Memory {
             }
 
             let index = indexes.pop_front().unwrap();
-            let mm = &self.mmaps[index];
+            let mm = &self.mmaps.get(&index).unwrap();
 
             // begin must be within mm, otherwise we have a gap.
             if begin >= mm.end {
@@ -313,7 +331,7 @@ impl Memory {
 
         let mut indexes = self.get_indexes(begin, end)?;
 
-        let mut mmaps = Vec::new();
+        let mut mmaps = BTreeMap::new();
         std::mem::swap(&mut mmaps, &mut self.mmaps);
 
         while begin < end {
@@ -322,7 +340,7 @@ impl Memory {
             }
 
             let index = indexes.pop_front().unwrap();
-            let mm = &mut mmaps[index];
+            let mm = &mut mmaps.get_mut(&index).unwrap();
 
             // begin must be within mm, otherwise we have a gap.
             if begin >= mm.end {
@@ -348,7 +366,7 @@ impl Memory {
 
         let mut indexes = self.get_indexes(begin, end)?;
 
-        let mut mmaps = Vec::new();
+        let mut mmaps = BTreeMap::new();
         std::mem::swap(&mut mmaps, &mut self.mmaps);
 
         while begin < end {
@@ -357,7 +375,7 @@ impl Memory {
             }
 
             let index = indexes.pop_front().unwrap();
-            let mm = &mut mmaps[index];
+            let mm = &mut mmaps.get_mut(&index).unwrap();
 
             // begin must be within mm, otherwise we have a gap.
             if begin >= mm.end {
@@ -379,13 +397,6 @@ impl Memory {
         self.read(loc, &mut dest[..::core::mem::size_of::<T>()], perm)?;
 
         Ok(unsafe { core::ptr::read_unaligned(dest.as_ptr() as *const T) })
-    }
-
-    pub fn create_heap(&mut self, begin: Addr, end: Addr) -> Result<Heap> {
-        let size = end.0 - begin.0;
-        assert!(size.count_ones() == 1);
-        self.mmap_zeroes(begin, end, PERM_READ | PERM_WRITE)?;
-        Ok(Heap::new(begin, size.trailing_zeros() as usize))
     }
 }
 
@@ -485,6 +496,9 @@ impl BuddyAllocator {
 const MIN_BLOCK_SIZE: usize = 8;
 const MIN_BLOCK_SHIFT: usize = 3;
 
+/// A simple buddy allocator.  This is not attached to the memory directly
+/// so the layer above this needs to allocate via this heap, and then mmap
+/// the new chunk of memory.  Likewise the caller of free needs to unmap.
 pub struct Heap {
     base: u64,
     allocator: BuddyAllocator,
@@ -527,7 +541,7 @@ impl Heap {
         let index = self.addr_to_index(ptr);
         match self.allocator.free(index) {
             Err(MemErr::BadFree(index)) => Err(MemErr::BadFree(index)),
-            r => r
+            r => r,
         }
     }
 }

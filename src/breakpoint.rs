@@ -1,11 +1,10 @@
-use crate::decode::Reg;
 use crate::vm;
 use crate::vm::*;
 
 use log::debug;
 
 //-------------------------------
-
+/*
 pub struct Stub {
     name: String,
     v: u64,
@@ -23,10 +22,9 @@ impl Stub {
 impl Breakpoint for Stub {
     fn exec(&mut self, vm: &mut VM) -> vm::Result<()> {
         debug!("stubbed '{}' returning {}", self.name, self.v);
-        vm.set_reg(Reg::A0, self.v);
-        vm.ret();
+        vm.ret(self.v);
         Ok(())
     }
 }
-
+*/
 //-------------------------------

@@ -2,7 +2,7 @@ use crate::decode::*;
 use crate::memory::*;
 
 use log::debug;
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use thiserror::Error;
 
@@ -10,18 +10,10 @@ use thiserror::Error;
 
 use Reg::*;
 
-/// A breakpoint can be set at a particular address.  Before executing
-/// the instruction at that address the breakpoint will be executed, and
-/// may alter the vm itself (eg, changing the PC).  Using this mechanism
-/// we can stub out code or set counters.
-pub trait Breakpoint {
-    fn exec(&mut self, vm: &mut VM) -> Result<()>;
-}
-
 pub struct VM {
     reg: Vec<u64>,
     pub mem: Memory,
-    bps: BTreeMap<Addr, Box<dyn Breakpoint>>,
+    breakpoints: BTreeSet<Addr>,
 }
 
 impl fmt::Display for VM {
@@ -91,6 +83,9 @@ pub enum VmErr {
 
     #[error("ebreak")]
     EBreak,
+
+    #[error("User defined breakpoint")]
+    Breakpoint,
 }
 
 pub type Result<T> = std::result::Result<T, VmErr>;
@@ -100,7 +95,7 @@ impl VM {
         VM {
             reg: vec![0; 33],
             mem: Memory::new(),
-            bps: BTreeMap::new(),
+            breakpoints: BTreeSet::new(),
         }
     }
 
@@ -113,14 +108,6 @@ impl VM {
             .map_err(|e| VmErr::BadAccess(e))?;
         self.set_reg(Sp, top);
         Ok(())
-    }
-
-    pub fn setup_heap(&mut self, size: u64) -> Result<Heap> {
-        let begin = 1024 * 1024 * 1024 * 3;
-        let end = begin + size;
-        self.mem
-            .create_heap(Addr(begin), Addr(end))
-            .map_err(|e| VmErr::BadAccess(e))
     }
 
     pub fn push(&mut self, v: u64) -> Result<()> {
@@ -227,24 +214,18 @@ impl VM {
         Ok(())
     }
 
-    // executes an ad-hoc 'ret' instruction.  Useful for breakpoints.
-    pub fn ret(&mut self) {
+    // executes an ad-hoc 'ret' instruction after putting a return value in A0.  Useful for breakpoints.
+    pub fn ret(&mut self, v: u64) {
+        self.set_reg(A0, v);
         self.set_reg(PC, self.reg(Ra))
     }
 
     pub fn step(&mut self) -> Result<()> {
-        // FIXME: What if the bp changes the pc, and that pc has a bp also?
         let pc = self.pc();
-        let mut bps = BTreeMap::new();
-
-        std::mem::swap(&mut bps, &mut self.bps);
-        if let Some(bp) = bps.get_mut(&pc) {
-            debug!("executing breakpoint at {:?}", pc);
-            bp.exec(self)?;
+        if self.breakpoints.contains(&pc) {
+            return Err(VmErr::Breakpoint);
         }
-        std::mem::swap(&mut bps, &mut self.bps);
 
-        let pc = self.pc();
         let mut bits = self
             .mem
             .read_into::<u32>(pc, PERM_EXEC)
@@ -783,12 +764,12 @@ impl VM {
         }
     }
 
-    pub fn add_breakpoint(&mut self, loc: Addr, bp: Box<dyn Breakpoint>) {
-        self.bps.insert(loc, bp);
+    pub fn add_breakpoint(&mut self, loc: Addr) {
+        self.breakpoints.insert(loc);
     }
 
-    pub fn rm_breakpoint(&mut self, loc: Addr) -> Option<Box<dyn Breakpoint>> {
-        self.bps.remove(&loc)
+    pub fn rm_breakpoint(&mut self, loc: Addr) -> bool {
+        self.breakpoints.remove(&loc)
     }
 }
 

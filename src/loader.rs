@@ -277,7 +277,7 @@ enum CompoundRel {
     Pair(Relocation, Relocation),
 }
 
-fn build_compound_rels(rlocs: Vec<Relocation>) -> Result<Vec<CompoundRel>> {
+fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
     use RelocationType::*;
 
     let mut i = 0;
@@ -304,7 +304,7 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Result<Vec<CompoundRel>> {
         }
     }
 
-    Ok(compound)
+    compound
 }
 
 fn exec_relocations(
@@ -323,7 +323,7 @@ fn exec_relocations(
         let index = r.shdr.info as u16;
         let base = bases.get(indexes.get(&index).unwrap()).unwrap();
 
-        for crel in build_compound_rels(rlocs)? {
+        for crel in build_compound_rels(rlocs) {
             match crel {
                 CompoundRel::Simple(rloc) => {
                     // This is the location of the instruction that needs adjusting.
@@ -344,6 +344,8 @@ fn exec_relocations(
                     let sym_index = hi_rloc.sym as usize;
                     let sym = &syms[sym_index];
 
+                    debug!("{} relocating to {:?}", sym.name, Addr(sym.value));
+                    
                     // Do the hi20 relocation
                     relocate(
                         mem,
@@ -473,10 +475,12 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
 
     // Each global becomes a single 'ret' instruction.
     let globals_base = Addr(4 * meg);
+    let globals_end = Addr(globals_base.0 + globals.len() as u64 * 4);
+    debug!("globals at {:?} -> {:?}", globals_base, globals_end);
     mem.mmap_zeroes(
         globals_base,
-        Addr(globals_base.0 + globals.len() as u64 * 4),
-        PERM_EXEC | PERM_READ,
+        globals_end,
+        PERM_EXEC | PERM_READ | PERM_WRITE,
     )?;
 
     // c.ebreak
@@ -487,6 +491,7 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
         let sym = &mut syms[*si];
         if sym.shndx == 0 {
             let addr = Addr(globals_base.0 + (i as u64 * 4));
+            debug!("mapping {} to {:?}", sym.name, addr);
             mem.write(addr, &bytes, 0)?;
             sym.value = addr.0;
         }
