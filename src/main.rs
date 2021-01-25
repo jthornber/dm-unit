@@ -3,6 +3,7 @@ extern crate log;
 
 use dm_unit::test_runner::*;
 use dm_unit::tests::btree_remove;
+use dm_unit::tests::block_manager;
 
 use anyhow::Result;
 use clap::{App, Arg};
@@ -10,6 +11,12 @@ use regex::Regex;
 use std::path::Path;
 
 //-------------------------------
+
+fn register_tests(runner: &mut TestRunner) -> Result<()> {
+    btree_remove::register_tests(runner)?;
+    block_manager::register_tests(runner)?;
+    Ok(())
+}
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -40,8 +47,8 @@ fn main() -> Result<()> {
         let rx = Regex::new(pattern)?;
         runner.set_filter(rx);
     }
+    register_tests(&mut runner)?;
 
-    btree_remove::register_tests(&mut runner)?;
     let (pass, fail) = runner.exec()?;
 
     if fail == 0 {

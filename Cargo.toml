@@ -8,8 +8,9 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.35"
-clap = '2.33'
-elf = '0.0.10'
+clap = "2.33"
+libc = "0.2.82"
+elf = "0.0.10"
 fixedbitset = "0.3.1"
 intrusive-collections = "0.9"
 log = "0.4"

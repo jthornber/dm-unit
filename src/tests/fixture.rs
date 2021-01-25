@@ -5,14 +5,17 @@ use crate::vm::*;
 
 use anyhow::{anyhow, Result};
 use elf::types::Symbol;
-use log::warn;
+use log::{debug, warn};
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use Reg::*;
+
 //-------------------------------
 
-type FixCallback = Box<dyn FnMut(&mut Fixture) -> Result<()>>;
+type FixCallback = Box<dyn Fn(&mut Fixture) -> Result<()>>;
 
 #[allow(dead_code)]
 pub struct Fixture {
@@ -24,7 +27,12 @@ pub struct Fixture {
     // Maps allocation block to len.
     allocations: BTreeMap<u64, usize>,
 
-    breakpoints: BTreeMap<u64, FixCallback>,
+    // Associates breakpoint addresses with callback functions.
+    // FIXME: make private
+    pub breakpoints: BTreeMap<u64, FixCallback>,
+
+    // Associates an address in the vm with rust user data.
+    user_data: BTreeMap<u64, Box<dyn Any>>,
 }
 
 impl Fixture {
@@ -52,6 +60,7 @@ impl Fixture {
             heap,
             allocations,
             breakpoints: BTreeMap::new(),
+            user_data: BTreeMap::new(),
         })
     }
 
@@ -101,6 +110,17 @@ impl Fixture {
         None
     }
 
+    fn with_breakpoints<F: Fn(&mut Fixture, &BTreeMap<u64, FixCallback>) -> Result<()>>(
+        &mut self,
+        action: F,
+    ) -> Result<()> {
+        let mut bps = BTreeMap::new();
+        std::mem::swap(&mut bps, &mut self.breakpoints);
+        let r = action(self, &bps);
+        std::mem::swap(&mut bps, &mut self.breakpoints);
+        r
+    }
+
     // Runs the vm, handling any breakpoints.
     fn run_vm(&mut self) -> Result<()> {
         loop {
@@ -108,17 +128,16 @@ impl Fixture {
                 Ok(()) => return Ok(()),
                 Err(VmErr::Breakpoint) => {
                     let loc = self.vm.reg(Reg::PC);
-                    let mut bps = BTreeMap::new();
-                    std::mem::swap(&mut bps, &mut self.breakpoints);
-                    if let Some(callback) = bps.get_mut(&loc) {
-                        (*callback)(self)?;
-                    } else {
-                        return Err(anyhow!(
-                            "Breakpoint at {:?} without callback",
-                            self.vm.reg(Reg::PC)
-                        ));
-                    }
-                    std::mem::swap(&mut bps, &mut self.breakpoints);
+                    self.with_breakpoints(move |fix, bps| {
+                        if let Some(callback) = bps.get(&loc) {
+                            (*callback)(fix)
+                        } else {
+                            Err(anyhow!(
+                                "Breakpoint at {:x?} without callback",
+                                fix.vm.reg(PC)
+                            ))
+                        }
+                    })?;
                 }
                 Err(VmErr::EBreak) => {
                     if let Some(global) = self.symbol_rmap(self.vm.reg(Reg::PC)) {
@@ -133,10 +152,12 @@ impl Fixture {
         }
     }
 
+    // Call a named function in the vm.  Returns the contents of Ra.
     pub fn call(&mut self, func: &str) -> Result<u64> {
         let entry = self.lookup_fn(func)?;
 
         // We need an ebreak instruction to return control to us.
+        // FIXME: why not put on stack?
         let exit_addr = Addr(0x100);
         let ebreak_inst = 0b00000000000100000000000001110011u32; // FIXME: write an assembler
         self.vm
@@ -159,6 +180,7 @@ impl Fixture {
         }
 
         let result = self.run_vm();
+        self.vm.mem.unmap(exit_addr)?;
         match result {
             Ok(_) => {
                 // Not sure how we can get here
@@ -182,7 +204,7 @@ impl Fixture {
 
     pub fn at_func(&mut self, name: &str, callback: FixCallback) -> Result<()> {
         let func_addr = self.lookup_fn(name)?;
-        self.at_addr(func_addr, Box::new(callback));
+        self.at_addr(func_addr, callback);
         Ok(())
     }
 
@@ -193,6 +215,17 @@ impl Fixture {
             Ok(())
         };
         self.at_func(func, Box::new(callback))
+    }
+
+    /// Attaches a standard set of global implementations.
+    /// eg, kmalloc, kfree.
+    pub fn standard_globals(&mut self) -> Result<()> {
+        self.at_func("__kmalloc", Box::new(kmalloc))?;
+        self.at_func("memset", Box::new(memset))?;
+        self.at_func("kfree", Box::new(kfree))?;
+        self.at_func("dm_bufio_client_create", Box::new(bufio_create))?;
+        self.at_func("dm_bufio_client_destroy", Box::new(bufio_destroy))?;
+        Ok(())
     }
 }
 
@@ -213,7 +246,6 @@ pub fn kfree(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn memset(fix: &mut Fixture) -> Result<()> {
-    use Reg::*;
     let base = Addr(fix.vm.reg(A0));
     let v = fix.vm.reg(A1) as u8;
     let len = fix.vm.reg(A2) as usize;
@@ -223,6 +255,78 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
     }
     fix.vm.mem.write(base, &mut bytes, PERM_WRITE)?;
     fix.vm.ret(0);
+    Ok(())
+}
+
+//-------------------------------
+
+#[allow(dead_code)]
+struct Bufio {
+    ptr: Addr,
+
+    bdev: u64,
+    block_size: u64,
+    reserved_buffers: u64,
+    aux_size: u64,
+    alloc_cb: Addr,
+    write_cb: Addr,
+}
+
+impl Bufio {
+    fn new(fix: &mut Fixture) -> Result<Self> {
+        let bdev = fix.vm.reg(A0);
+        let block_size = fix.vm.reg(A1);
+        let reserved_buffers = fix.vm.reg(A2);
+        let aux_size = fix.vm.reg(A3);
+        let alloc_cb = fix.vm.reg(A4);
+        let write_cb = fix.vm.reg(A5);
+
+        assert!(block_size == 4096);
+        assert!(aux_size == 16);
+
+        let ptr = fix.alloc(4)?;
+
+        Ok(Bufio {
+            ptr,
+            bdev,
+            block_size,
+            reserved_buffers,
+            aux_size,
+            alloc_cb: Addr(alloc_cb),
+            write_cb: Addr(write_cb),
+        })
+    }
+}
+
+pub fn bufio_create(fix: &mut Fixture) -> Result<()> {
+    let bufio = Bufio::new(fix)?;
+
+    let ptr = bufio.ptr.clone();
+    fix.user_data.insert(bufio.ptr.0, Box::new(bufio));
+    fix.vm.ret(ptr.0);
+
+    Ok(())
+}
+
+pub fn bufio_destroy(fix: &mut Fixture) -> Result<()> {
+    let ptr = fix.vm.reg(A0);
+
+    // FIXME: make this a utility fn
+    let user_data = fix
+        .user_data
+        .remove(&ptr)
+        .expect("couldn't look up bufio user data");
+    match user_data.downcast_ref::<Bufio>() {
+        Some(_bufio) => {
+            debug!("found user data");
+            fix.free(Addr(ptr))?;
+            fix.vm.ret(0);
+        }
+        None => {
+            return Err(anyhow!("Incorrect user data type, expected bufio"));
+        }
+    }
+
     Ok(())
 }
 
