@@ -2,16 +2,15 @@ use anyhow::Result;
 use log::info;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use crate::tests::fixture::*;
 
 //-------------------------------
 
-pub trait Test {
-    fn exec(&self, kdir: &PathBuf) -> Result<()>;
-}
+pub type TestFn = Box<dyn FnMut(&mut Fixture) -> Result<()>>;
 
 pub struct TestRunner {
     kernel_dir: PathBuf,
-    tests: BTreeMap<String, Box<dyn Test>>,
+    tests: BTreeMap<String, TestFn>,
 }
 
 impl TestRunner {
@@ -29,17 +28,18 @@ impl TestRunner {
         &self.kernel_dir
     }
 
-    pub fn register_test(&mut self, path: &str, t: Box<dyn Test>) {
+    pub fn register_test(&mut self, path: &str, t: TestFn) {
         self.tests.insert(path.to_string(), t);
     }
 
-    pub fn exec(&self)  -> (usize, usize) {
+    pub fn exec(&mut self)  -> Result<(usize, usize)> {
         let mut pass = 0;
         let mut fail = 0;
 
-        for (p, t) in &self.tests{
+        for (p, t) in &mut self.tests{
             info!(">>> {}", p);
-            if let Err(e) = t.exec(&self.kernel_dir) {
+            let mut fix = Fixture::new(&self.kernel_dir)?;
+            if let Err(e) = (*t)(&mut fix) {
                 fail += 1;
                 info!("<<< {}: FAIL, {}", p, e);
             } else {
@@ -48,7 +48,7 @@ impl TestRunner {
             }
         }
         
-        (pass, fail)
+        Ok((pass, fail))
     }
 }
 

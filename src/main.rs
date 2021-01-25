@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     let mut runner = TestRunner::new(module);
 
     btree_remove::register_tests(&mut runner)?;
-    let (pass, fail) = runner.exec();
+    let (pass, fail) = runner.exec()?;
 
     if fail == 0 {
         println!("All tests passed: {}", pass);
