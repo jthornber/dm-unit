@@ -29,8 +29,20 @@ fn test2(fix: &mut Fixture) -> Result<()> {
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     info!("registered /pdata/btree/remove tests");
 
-    runner.register_test("/pdata/btree/remove/test1", Box::new(test1));
-    runner.register_test("/pdata/btree/remove/test2", Box::new(test2));
+    runner.register("/pdata/btree/remove/test1", Box::new(test1));
+    runner.register("/pdata/btree/remove/test2", Box::new(test2));
+
+    // registering lots of fake tests to test formatting of paths
+    runner.register("/pdata/btree/remove/test3", Box::new(test2));
+    runner.register("/pdata/btree/remove/test4", Box::new(test2));
+    runner.register("/pdata/block-manager/create", Box::new(test2));
+    runner.register("/pdata/block-manager/get", Box::new(test2));
+    runner.register("/pdata/block-manager/dirty", Box::new(test2));
+    runner.register("/pdata/space-map/metadata/thing1", Box::new(test2));
+    runner.register("/pdata/space-map/metadata/thing2", Box::new(test2));
+    runner.register("/pdata/space-map/data/thing1", Box::new(test2));
+    runner.register("/pdata/space-map/data/thin2", Box::new(test2));
+    runner.register("/pdata/space-map/data/thing3", Box::new(test2));
 
     Ok(())
 }
