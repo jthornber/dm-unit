@@ -1,7 +1,6 @@
 use fixedbitset::FixedBitSet;
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
-use log::{debug, info, warn};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::result;
