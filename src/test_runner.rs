@@ -1,13 +1,15 @@
 use crate::tests::fixture::*;
 use anyhow::Result;
 use log::info;
+use regex::Regex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 //-------------------------------
 
-pub struct TestRunner {
+pub struct TestRunner<'a> {
     kernel_dir: PathBuf,
+    filter_fn: Box<dyn Fn(&str) -> bool + 'a>,
     tests: BTreeMap<String, TestFn>,
 }
 
@@ -78,15 +80,22 @@ impl PathFormatter {
 
 pub type TestFn = Box<dyn FnMut(&mut Fixture) -> Result<()>>;
 
-impl TestRunner {
+impl<'a> TestRunner<'a> {
     pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Self {
         let mut path = PathBuf::new();
         path.push(kernel_dir);
 
+        let filter_fn = Box::new(move |_: &str| true);
+
         TestRunner {
             kernel_dir: path,
+            filter_fn,
             tests: BTreeMap::new(),
         }
+    }
+
+    pub fn set_filter(&mut self, filter: Regex) {
+        self.filter_fn = Box::new(move |p| filter.is_match(p));
     }
 
     pub fn get_kernel_dir(&self) -> &Path {
@@ -103,6 +112,11 @@ impl TestRunner {
         let mut formatter = PathFormatter::new();
 
         for (p, t) in &mut self.tests {
+            if !(*self.filter_fn)(p) {
+                info!("skipping {} due to filter", p);
+                continue;
+            }
+
             info!(">>> {}", p);
             let components = path_components(p);
             formatter.print(&components);

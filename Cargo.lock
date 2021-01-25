@@ -104,6 +104,7 @@ dependencies = [
  "intrusive-collections",
  "log",
  "nom",
+ "regex",
  "thiserror",
 ]
 

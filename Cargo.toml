@@ -15,5 +15,6 @@ intrusive-collections = "0.9"
 log = "0.4"
 env_logger = "0.8.2"
 nom = "6.0.1"
+regex = "1"
 thiserror = "1.0"
 
