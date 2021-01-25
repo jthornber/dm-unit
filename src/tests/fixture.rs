@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 
 //-------------------------------
 
+type FixCallback = Box<dyn FnMut(&mut Fixture) -> Result<()>>;
+
 #[allow(dead_code)]
 pub struct Fixture {
     pub vm: VM,
@@ -22,7 +24,7 @@ pub struct Fixture {
     // Maps allocation block to len.
     allocations: BTreeMap<u64, usize>,
 
-    breakpoints: BTreeMap<u64, Box<dyn FnMut(&mut Fixture) -> Result<()>>>,
+    breakpoints: BTreeMap<u64, FixCallback>,
 }
 
 impl Fixture {
@@ -173,16 +175,12 @@ impl Fixture {
         }
     }
 
-    pub fn at_addr(&mut self, loc: Addr, callback: Box<dyn FnMut(&mut Fixture) -> Result<()>>) {
+    pub fn at_addr(&mut self, loc: Addr, callback: FixCallback) {
         self.vm.add_breakpoint(loc);
         self.breakpoints.insert(loc.0, callback);
     }
 
-    pub fn at_func(
-        &mut self,
-        name: &str,
-        callback: Box<dyn FnMut(&mut Fixture) -> Result<()>>,
-    ) -> Result<()> {
+    pub fn at_func(&mut self, name: &str, callback: FixCallback) -> Result<()> {
         let func_addr = self.lookup_fn(name)?;
         self.at_addr(func_addr, Box::new(callback));
         Ok(())
