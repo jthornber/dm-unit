@@ -64,7 +64,8 @@ impl Fixture {
         })
     }
 
-    pub fn alloc(&mut self, len: usize) -> Result<Addr> {
+    // Allocates a block on the heap with specific permissions.
+    pub fn alloc_perms(&mut self, len: usize, perms: u8) -> Result<Addr> {
         // We allocate an extra word before and after the block to
         // detect overwrites.
         let extra_len = len + 8;
@@ -75,9 +76,15 @@ impl Fixture {
         let ptr = Addr(ptr.0 + 4);
         self.vm
             .mem
-            .mmap(ptr, Addr(ptr.0 + len as u64), PERM_READ | PERM_WRITE)?;
+            .mmap(ptr, Addr(ptr.0 + len as u64), perms)?;
 
         Ok(ptr)
+    }
+
+    // Allocates a block on the heap with read/write permissions.  The
+    // common case.
+    pub fn alloc(&mut self, len: usize) -> Result<Addr> {
+        self.alloc_perms(len, PERM_READ | PERM_WRITE)
     }
 
     pub fn free(&mut self, ptr: Addr) -> Result<()> {
@@ -110,17 +117,6 @@ impl Fixture {
         None
     }
 
-    fn with_breakpoints<F: Fn(&mut Fixture, &BTreeMap<u64, FixCallback>) -> Result<()>>(
-        &mut self,
-        action: F,
-    ) -> Result<()> {
-        let mut bps = BTreeMap::new();
-        std::mem::swap(&mut bps, &mut self.breakpoints);
-        let r = action(self, &bps);
-        std::mem::swap(&mut bps, &mut self.breakpoints);
-        r
-    }
-
     // Runs the vm, handling any breakpoints.
     fn run_vm(&mut self) -> Result<()> {
         loop {
@@ -128,16 +124,21 @@ impl Fixture {
                 Ok(()) => return Ok(()),
                 Err(VmErr::Breakpoint) => {
                     let loc = self.vm.reg(Reg::PC);
-                    self.with_breakpoints(move |fix, bps| {
-                        if let Some(callback) = bps.get(&loc) {
-                            (*callback)(fix)
-                        } else {
-                            Err(anyhow!(
-                                "Breakpoint at {:x?} without callback",
-                                fix.vm.reg(PC)
-                            ))
-                        }
-                    })?;
+
+                    // Temporarily remove the breakpoint before executing, this
+                    // gets around some issues with the fixture being held multiple
+                    // times, and allows the breakpoints to recurse back into here.  The
+                    // downside is you cannot recurse a particular breakpoint.
+                    if let Some(callback) = self.breakpoints.remove(&loc) {
+                        let r = (*callback)(self);
+                        self.breakpoints.insert(loc, callback);
+                        r?;
+                    } else {
+                        Err(anyhow!(
+                            "Breakpoint at {:x?} without callback",
+                            self.vm.reg(PC)
+                        ))?;
+                    }
                 }
                 Err(VmErr::EBreak) => {
                     if let Some(global) = self.symbol_rmap(self.vm.reg(Reg::PC)) {
@@ -153,16 +154,12 @@ impl Fixture {
     }
 
     // Call a named function in the vm.  Returns the contents of Ra.
+    // FIXME: we need to support recursive calls.
     pub fn call(&mut self, func: &str) -> Result<u64> {
         let entry = self.lookup_fn(func)?;
 
-        // We need an ebreak instruction to return control to us.
-        // FIXME: why not put on stack?
-        let exit_addr = Addr(0x100);
-        let ebreak_inst = 0b00000000000100000000000001110011u32; // FIXME: write an assembler
-        self.vm
-            .mem
-            .mmap_bytes(exit_addr, &ebreak_inst.to_le_bytes(), PERM_EXEC)?;
+        // We need a unique address return control to us.
+        let exit_addr = self.alloc_perms(4, PERM_EXEC)?;
         self.vm.set_reg(Reg::Ra, exit_addr.0);
         self.vm.set_pc(entry);
 
