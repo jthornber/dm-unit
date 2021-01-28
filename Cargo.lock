@@ -72,6 +72,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fc10e8cc6b2580fda3f36eb6dc5316657f812a3df879a44a66fc9f0fdbc4855"
 
 [[package]]
+name = "byteorder"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae44d1a3d5a19df61dd0c8beb138458ac2a53a7ac09eba97d55592540004306b"
+
+[[package]]
 name = "cfg-if"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -93,11 +99,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32c"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ba37ef26c12988c1cee882d522d65e1d5d2ad8c3864665b88ee92767ed84c5"
+
+[[package]]
 name = "dm-unit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "byteorder 1.4.2",
  "clap",
+ "crc32c",
  "elf",
  "env_logger",
  "fixedbitset",
@@ -115,7 +129,7 @@ version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4841de15dbe0e49b9b62a417589299e3be0d557e0900d36acb87e6dae47197f5"
 dependencies = [
- "byteorder",
+ "byteorder 0.5.3",
 ]
 
 [[package]]

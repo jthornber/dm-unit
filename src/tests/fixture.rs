@@ -1,13 +1,18 @@
 use crate::decode::Reg;
 use crate::loader::*;
-use crate::memory::{Addr, Heap, PERM_EXEC, PERM_READ, PERM_WRITE};
+use crate::memory::*;
+use crate::memory::{Addr, PERM_EXEC, PERM_READ, PERM_WRITE};
+use crate::user_data::*;
 use crate::vm::*;
 
 use anyhow::{anyhow, Result};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crc32c::crc32c;
 use elf::types::Symbol;
 use log::{debug, warn};
-use std::any::Any;
 use std::collections::BTreeMap;
+use std::io;
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -20,19 +25,15 @@ type FixCallback = Box<dyn Fn(&mut Fixture) -> Result<()>>;
 #[allow(dead_code)]
 pub struct Fixture {
     pub vm: VM,
-    symbols: BTreeMap<String, Symbol>,
-    heap_base: Addr,
-    heap: Heap,
 
-    // Maps allocation block to len.
-    allocations: BTreeMap<u64, usize>,
+    // Entry points for symbols
+    symbols: BTreeMap<String, Symbol>,
 
     // Associates breakpoint addresses with callback functions.
-    // FIXME: make private
-    pub breakpoints: BTreeMap<u64, FixCallback>,
+    breakpoints: BTreeMap<u64, FixCallback>,
 
     // Associates an address in the vm with rust user data.
-    user_data: BTreeMap<u64, Box<dyn Any>>,
+    user_data: UserData,
 }
 
 impl Fixture {
@@ -41,62 +42,21 @@ impl Fixture {
         module.push(kernel_dir);
         module.push("drivers/md/persistent-data/dm-persistent-data.ko");
 
-        let mut vm = VM::new();
+        let heap_begin = Addr(1024 * 1024 * 1024 * 3);
+        let heap_end = Addr(heap_begin.0 + (64 * 1024));
+        let mem = Memory::new(heap_begin, heap_end);
+        let mut vm = VM::new(mem);
         let symbols = load_elf(&mut vm.mem, module)?;
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;
 
-        let heap_base = Addr(1024 * 1024 * 1024 * 3);
-        let heap_end = Addr(heap_base.0 + (64 * 1024));
-        let heap = Heap::new(heap_base, heap_end);
-
-        let allocations = BTreeMap::new();
-
         Ok(Fixture {
             vm,
             symbols,
-            heap_base,
-            heap,
-            allocations,
             breakpoints: BTreeMap::new(),
-            user_data: BTreeMap::new(),
+            user_data: UserData::new(),
         })
-    }
-
-    // Allocates a block on the heap with specific permissions.
-    pub fn alloc_perms(&mut self, len: usize, perms: u8) -> Result<Addr> {
-        // We allocate an extra word before and after the block to
-        // detect overwrites.
-        let extra_len = len + 8;
-        let ptr = self.heap.alloc(extra_len)?;
-        self.allocations.insert(ptr.0, extra_len);
-
-        // mmap just the central part that may be used.
-        let ptr = Addr(ptr.0 + 4);
-        self.vm
-            .mem
-            .mmap(ptr, Addr(ptr.0 + len as u64), perms)?;
-
-        Ok(ptr)
-    }
-
-    // Allocates a block on the heap with read/write permissions.  The
-    // common case.
-    pub fn alloc(&mut self, len: usize) -> Result<Addr> {
-        self.alloc_perms(len, PERM_READ | PERM_WRITE)
-    }
-
-    pub fn free(&mut self, ptr: Addr) -> Result<()> {
-        let heap_ptr = Addr(ptr.0 - 4);
-
-        if let Some(_len) = self.allocations.remove(&heap_ptr.0) {
-            self.heap.free(heap_ptr)?;
-            self.vm.mem.unmap(ptr)?;
-            Ok(())
-        } else {
-            Err(anyhow!("unable to free ptr at {:?}", ptr))
-        }
     }
 
     fn lookup_fn(&self, func: &str) -> Result<Addr> {
@@ -130,6 +90,11 @@ impl Fixture {
                     // times, and allows the breakpoints to recurse back into here.  The
                     // downside is you cannot recurse a particular breakpoint.
                     if let Some(callback) = self.breakpoints.remove(&loc) {
+                        if let Some(global) = self.symbol_rmap(loc) {
+                            debug!("host call: {}", global);
+                        } else {
+                            // debug!("host call: {:x}", loc);
+                        }
                         let r = (*callback)(self);
                         self.breakpoints.insert(loc, callback);
                         r?;
@@ -159,7 +124,7 @@ impl Fixture {
         let entry = self.lookup_fn(func)?;
 
         // We need a unique address return control to us.
-        let exit_addr = self.alloc_perms(4, PERM_EXEC)?;
+        let exit_addr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
         self.vm.set_reg(Reg::Ra, exit_addr.0);
         self.vm.set_pc(entry);
 
@@ -220,8 +185,23 @@ impl Fixture {
         self.at_func("__kmalloc", Box::new(kmalloc))?;
         self.at_func("memset", Box::new(memset))?;
         self.at_func("kfree", Box::new(kfree))?;
-        self.at_func("dm_bufio_client_create", Box::new(bufio_create))?;
-        self.at_func("dm_bufio_client_destroy", Box::new(bufio_destroy))?;
+        self.at_func("dm_block_location", Box::new(bm_block_location))?;
+        self.at_func("dm_block_data", Box::new(bm_block_data))?;
+        self.at_func("dm_block_manager_create", Box::new(bm_create))?;
+        self.at_func("dm_block_manager_destroy", Box::new(bm_destroy))?;
+        self.at_func("dm_bm_block_size", Box::new(bm_block_size))?;
+        self.at_func("dm_bm_nr_blocks", Box::new(bm_nr_blocks))?;
+        self.at_func("dm_bm_read_lock", Box::new(bm_read_lock))?;
+        self.at_func("dm_bm_read_try_lock", Box::new(bm_read_lock))?;
+        self.at_func("dm_bm_write_lock", Box::new(bm_write_lock))?;
+        self.at_func("dm_bm_write_lock_zero", Box::new(bm_write_lock_zero))?;
+        self.at_func("dm_bm_unlock", Box::new(bm_unlock))?;
+        self.at_func("dm_bm_flush", Box::new(bm_flush))?;
+        self.at_func("dm_bm_prefetch", Box::new(bm_prefetch))?;
+        self.at_func("dm_bm_is_read_only", Box::new(bm_is_read_only))?;
+        self.at_func("dm_bm_set_read_only", Box::new(bm_set_read_only))?;
+        self.at_func("dm_bm_set_read_write", Box::new(bm_set_read_write))?;
+        self.at_func("dm_bm_checksum", Box::new(bm_checksum))?;
         Ok(())
     }
 }
@@ -230,14 +210,14 @@ impl Fixture {
 
 pub fn kmalloc(fix: &mut Fixture) -> Result<()> {
     let len = fix.vm.reg(Reg::A0);
-    let ptr = fix.alloc(len as usize)?;
+    let ptr = fix.vm.mem.alloc(len as usize)?;
     fix.vm.ret(ptr.0);
     Ok(())
 }
 
 pub fn kfree(fix: &mut Fixture) -> Result<()> {
     let ptr = Addr(fix.vm.reg(Reg::A0));
-    fix.free(ptr)?;
+    fix.vm.mem.free(ptr)?;
     fix.vm.ret(0);
     Ok(())
 }
@@ -257,73 +237,419 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-#[allow(dead_code)]
-struct Bufio {
-    ptr: Addr,
-
-    bdev: u64,
-    block_size: u64,
-    reserved_buffers: u64,
-    aux_size: u64,
-    alloc_cb: Addr,
-    write_cb: Addr,
+// Guest types must always consume the same amount of contiguous guest
+// memory.
+trait Guest {
+    fn guest_len() -> usize;
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()>;
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self>
+    where
+        Self: std::marker::Sized;
 }
 
-impl Bufio {
-    fn new(fix: &mut Fixture) -> Result<Self> {
-        let bdev = fix.vm.reg(A0);
-        let block_size = fix.vm.reg(A1);
-        let reserved_buffers = fix.vm.reg(A2);
-        let aux_size = fix.vm.reg(A3);
-        let alloc_cb = fix.vm.reg(A4);
-        let write_cb = fix.vm.reg(A5);
+// Allocates space on the guest and copies 'bytes' into it.
+fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr> {
+    let mut bytes = vec![0; G::guest_len()];
+    let mut w = Cursor::new(&mut bytes);
+    v.pack(&mut w)?;
+    let ptr = mem.alloc_perms(bytes.len(), perms)?;
+    mem.write(ptr, &bytes, 0)?;
+    Ok(ptr)
+}
 
-        assert!(block_size == 4096);
-        assert!(aux_size == 16);
+// Copies data from the guest to host.
+fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
+    let len = G::guest_len();
+    let mut bytes = vec![0; len];
+    mem.read(ptr, &mut bytes, PERM_READ)?;
+    let mut r = Cursor::new(&bytes);
+    let v = G::unpack(&mut r)?;
+    Ok(v)
+}
 
-        let ptr = fix.alloc(4)?;
+// Reads and frees a guest value.
+fn free_guest<G: Guest>(mem: &mut Memory, ptr: Addr) -> Result<G> {
+    let v = read_guest(mem, ptr)?;
+    mem.free(ptr)?;
+    Ok(v)
+}
 
-        Ok(Bufio {
-            ptr,
-            bdev,
-            block_size,
-            reserved_buffers,
-            aux_size,
-            alloc_cb: Addr(alloc_cb),
-            write_cb: Addr(write_cb),
-        })
+//-------------------------------
+
+struct GBlock {
+    bm: Addr,
+    loc: u64,
+    data: Vec<u8>,
+}
+
+impl Guest for GBlock {
+    fn guest_len() -> usize {
+        8 + 8 + 4096
+    }
+
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        // I'm only supporting 4k blocks atm, since that's all we use.
+        assert!(self.data.len() == 4096);
+
+        w.write_u64::<LittleEndian>(self.bm.0)?;
+        w.write_u64::<LittleEndian>(self.loc)?;
+        w.write_all(&self.data)
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let bm = Addr(r.read_u64::<LittleEndian>()?);
+        let loc = r.read_u64::<LittleEndian>()?;
+        let mut data = vec![0; 4096];
+        r.read_exact(&mut data)?;
+
+        Ok(GBlock { bm, loc, data })
     }
 }
 
-pub fn bufio_create(fix: &mut Fixture) -> Result<()> {
-    let bufio = Bufio::new(fix)?;
+enum BlockData {
+    Host(Vec<u8>),
+    ExclusiveGuest(Addr),
+    SharedGuest(Addr, u32),
+}
 
-    let ptr = bufio.ptr.clone();
-    fix.user_data.insert(bufio.ptr.0, Box::new(bufio));
-    fix.vm.ret(ptr.0);
+#[allow(dead_code)]
+struct Block {
+    bm: Addr,
+    loc: u64,
+    block_size: u64,
+    dirty: bool,
+    data: BlockData,
+}
 
+impl Block {
+    fn new(bm: Addr, loc: u64, block_size: u64) -> Self {
+        Block {
+            bm,
+            loc,
+            block_size,
+            dirty: false,
+            data: BlockData::Host(vec![0; block_size as usize]),
+        }
+    }
+
+    fn to_shared(&mut self, mem: &mut Memory) -> Result<Addr> {
+        use BlockData::*;
+        let g_ptr = match &mut self.data {
+            Host(bytes) => {
+                let gb = GBlock {
+                    bm: self.bm,
+                    loc: self.loc,
+                    data: bytes.clone(),
+                };
+                let g_ptr = alloc_guest(mem, &gb, PERM_READ)?;
+                self.data = SharedGuest(g_ptr, 1);
+                g_ptr
+            }
+            SharedGuest(g_ptr, count) => {
+                *count += 1;
+                *g_ptr
+            }
+            ExclusiveGuest(_) => {
+                return Err(anyhow!(
+                    "Request to read lock block when it is already write locked"
+                ));
+            }
+        };
+
+        Ok(g_ptr)
+    }
+
+    fn to_exclusive(&mut self, mem: &mut Memory) -> Result<Addr> {
+        use BlockData::*;
+        match &mut self.data {
+            Host(bytes) => {
+                let gb = GBlock {
+                    bm: self.bm,
+                    loc: self.loc,
+                    data: bytes.clone(),
+                };
+                let g_ptr = alloc_guest(mem, &gb, PERM_READ | PERM_WRITE)?;
+                self.dirty = true;
+                self.data = ExclusiveGuest(g_ptr);
+                Ok(g_ptr)
+            }
+            _ => Err(anyhow!("Requenst to write lock a block when already held")),
+        }
+    }
+
+    fn unlock(&mut self, mem: &mut Memory) -> Result<()> {
+        use BlockData::*;
+        match &mut self.data {
+            Host(_bytes) => Err(anyhow!(
+                "request to unlock block {}, but it is not locked.",
+                self.loc
+            )),
+            SharedGuest(g_ptr, count) if *count == 1 => {
+                let gb = free_guest::<GBlock>(mem, *g_ptr)?;
+                self.data = Host(gb.data);
+                Ok(())
+            }
+            SharedGuest(_g_ptr, count) => {
+                *count -= 1;
+                Ok(())
+            }
+            ExclusiveGuest(g_ptr) => {
+                let gb = free_guest::<GBlock>(mem, *g_ptr)?;
+                self.data = Host(gb.data);
+                Ok(())
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+struct BlockManager {
+    block_size: u64,
+    nr_blocks: u64,
+    blocks: BTreeMap<u64, Block>,
+    read_only: bool,
+}
+
+fn bm_create(fix: &mut Fixture) -> Result<()> {
+    let bdev_ptr = fix.vm.reg(A0);
+    let block_size = fix.vm.reg(A1);
+    let _max_held_per_thread = fix.vm.reg(A2);
+
+    let nr_sectors = fix.vm.mem.read_into::<u64>(Addr(bdev_ptr), PERM_READ)?;
+    let nr_blocks = nr_sectors / (block_size / 512);
+
+    let bm = Box::new(BlockManager {
+        block_size,
+        nr_blocks,
+        blocks: BTreeMap::new(),
+        read_only: false,
+    });
+
+    let guest_addr = fix.vm.mem.alloc(4)?;
+    fix.user_data.insert(guest_addr, bm);
+
+    fix.vm.ret(guest_addr.0);
     Ok(())
 }
 
-pub fn bufio_destroy(fix: &mut Fixture) -> Result<()> {
-    let ptr = fix.vm.reg(A0);
+fn bm_destroy(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let bm = fix.user_data.remove::<BlockManager>(Addr(bm_ptr))?;
 
-    // FIXME: make this a utility fn
-    let user_data = fix
-        .user_data
-        .remove(&ptr)
-        .expect("couldn't look up bufio user data");
-    match user_data.downcast_ref::<Bufio>() {
-        Some(_bufio) => {
-            debug!("found user data");
-            fix.free(Addr(ptr))?;
-            fix.vm.ret(0);
-        }
-        None => {
-            return Err(anyhow!("Incorrect user data type, expected bufio"));
+    let mut held = false;
+    for (index, b) in &bm.blocks {
+        use BlockData::*;
+        match b.data {
+            ExclusiveGuest(_) => {
+                warn!("Block {} still held", index);
+                held = true;
+            }
+            SharedGuest(_, _) => {
+                warn!("Block {} still held", index);
+                held = true;
+            }
+            _ => {}
         }
     }
 
+    if held {
+        return Err(anyhow!(
+            "dm_block_manager_destroy() called with blocks still held"
+        ));
+    }
+
+    fix.vm.mem.free(Addr(bm_ptr))?;
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_block_size(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let block_size = {
+        let bm = fix.user_data.get_ref::<BlockManager>(bm_ptr)?;
+        bm.block_size
+    };
+    fix.vm.ret(block_size);
+    Ok(())
+}
+
+fn bm_nr_blocks(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let nr_blocks = {
+        let bm = fix.user_data.get_ref::<BlockManager>(bm_ptr)?;
+        bm.nr_blocks
+    };
+    fix.vm.ret(nr_blocks);
+    Ok(())
+}
+
+fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let b = fix.vm.reg(A1);
+    let _v_ptr = fix.vm.reg(A2);
+    let result_ptr = fix.vm.reg(A3);
+
+    let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+    let guest_addr = match bm.blocks.get_mut(&b) {
+        Some(block) => block.to_shared(&mut fix.vm.mem)?,
+        None => {
+            let mut block = Block::new(Addr(bm_ptr), b, bm.block_size);
+            let guest_addr = block.to_shared(&mut fix.vm.mem)?;
+            bm.blocks.insert(b, block);
+            guest_addr
+        }
+    };
+
+    // fill out result ptr
+    fix.vm
+        .mem
+        .write(Addr(result_ptr), &guest_addr.0.to_le_bytes(), PERM_WRITE)?;
+
+    // return success
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_write_lock(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let b = fix.vm.reg(A1);
+    let _v_ptr = fix.vm.reg(A2);
+    let result_ptr = fix.vm.reg(A3);
+
+    let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+    let guest_addr = match bm.blocks.get_mut(&b) {
+        Some(block) => block.to_exclusive(&mut fix.vm.mem)?,
+        None => {
+            let mut block = Block::new(Addr(bm_ptr), b, bm.block_size);
+            let guest_addr = block.to_exclusive(&mut fix.vm.mem)?;
+            bm.blocks.insert(b, block);
+            guest_addr
+        }
+    };
+
+    // fill out result ptr
+    fix.vm
+        .mem
+        .write(Addr(result_ptr), &guest_addr.0.to_le_bytes(), PERM_WRITE)?;
+
+    // return success
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_write_lock_zero(fix: &mut Fixture) -> Result<()> {
+    bm_write_lock(fix)?;
+    todo!();
+}
+
+fn bm_unlock(fix: &mut Fixture) -> Result<()> {
+    let block_ptr = fix.vm.reg(A0);
+
+    // FIXME: we unpack gb twice, once here, and once as part of the unlock op.
+    let gb = read_guest::<GBlock>(&mut fix.vm.mem, Addr(block_ptr))?;
+    let bm = fix.user_data.get_mut::<BlockManager>(gb.bm)?;
+    match bm.blocks.get_mut(&gb.loc) {
+        Some(b) => {
+            b.unlock(&mut fix.vm.mem)?;
+        }
+        None => {
+            return Err(anyhow!(
+                "unable to find block {}, it has never been locked",
+                gb.loc
+            ));
+        }
+    }
+
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_block_location(fix: &mut Fixture) -> Result<()> {
+    let block_ptr = fix.vm.reg(A0);
+    // FIXME: this needlessly copies the data across.
+    let gb = read_guest::<GBlock>(&mut fix.vm.mem, Addr(block_ptr))?;
+    fix.vm.ret(gb.loc);
+    Ok(())
+}
+
+fn bm_block_data(fix: &mut Fixture) -> Result<()> {
+    let block_ptr = fix.vm.reg(A0);
+    fix.vm.ret(block_ptr + 16);
+    Ok(())
+}
+
+fn bm_flush(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+
+    // Run through the blocks, clearing the dirty flags on those that
+    // aren't held.  This would be a good place to put a journal so we
+    // can double check transactionality.
+    use BlockData::*;
+    for (_, b) in &mut bm.blocks {
+        match b {
+            Block {
+                dirty,
+                data: Host(_),
+                ..
+            } => {
+                *dirty = false;
+            }
+            _ => {
+                // Noop
+            }
+        }
+    }
+
+    fix.vm.ret(0);
+    Ok(())
+}
+
+// Our prefetch does nothing
+fn bm_prefetch(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let _bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+    let _loc = fix.vm.reg(A1);
+
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_is_read_only(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+    let result = if bm.read_only { 1 } else { 0 };
+    fix.vm.ret(result);
+    Ok(())
+}
+
+fn bm_set_read_only(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+    bm.read_only = true;
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_set_read_write(fix: &mut Fixture) -> Result<()> {
+    let bm_ptr = fix.vm.reg(A0);
+    let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
+    bm.read_only = false;
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn bm_checksum(fix: &mut Fixture) -> Result<()> {
+    let data = Addr(fix.vm.reg(A0));
+    let len = fix.vm.reg(A1);
+    let init_xor = fix.vm.reg(A2) as u32;
+
+    let mut buf = vec![0u8; len as usize];
+    fix.vm.mem.read(data, &mut buf, PERM_READ)?;
+    let mut csum = crc32c(&buf) ^ 0xffffffff;
+    csum = csum ^ init_xor;
+
+    fix.vm.ret(csum as u64);
     Ok(())
 }
 

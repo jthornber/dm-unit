@@ -13,4 +13,5 @@ pub mod memory;
 pub mod primitive;
 pub mod test_runner;
 pub mod tests;
+pub mod user_data;
 pub mod vm;

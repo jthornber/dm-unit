@@ -91,10 +91,10 @@ pub enum VmErr {
 pub type Result<T> = std::result::Result<T, VmErr>;
 
 impl VM {
-    pub fn new() -> Self {
+    pub fn new(mem: Memory) -> Self {
         VM {
             reg: vec![0; 33],
-            mem: Memory::new(),
+            mem,
             breakpoints: BTreeSet::new(),
         }
     }

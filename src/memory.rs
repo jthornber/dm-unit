@@ -110,8 +110,8 @@ impl MMap {
         }
     }
 
-    /// Reads data from the region.  Fails if all the data can't be read from this
-    /// region, or if any of the perms are not present.
+    /// Reads data from the region.  Fails if all the data can't be read
+    /// from this region, or if any of the perms are not present.
     fn read(&self, begin: u64, bytes: &mut [u8], perms: u8) -> Result<()> {
         let end = begin + (bytes.len() as u64);
         assert!(begin >= self.begin);
@@ -126,8 +126,8 @@ impl MMap {
         Ok(())
     }
 
-    /// Writes data to the region.  Fails if all the data can't be written to this
-    /// region, or if any of the perms are not pesent.
+    /// Writes data to the region.  Fails if all the data can't be
+    /// written to this region, or if any of the perms are not pesent.
     fn write(&mut self, begin: u64, bytes: &[u8], perms: u8) -> Result<()> {
         let end = begin + (bytes.len() as u64);
         assert!(begin >= self.begin);
@@ -200,25 +200,34 @@ impl<'a> KeyAdapter<'a> for MMapAdapter {
 pub struct Memory {
     index: RBTree<MMapAdapter>,
 
-    nr_allocations: usize,
+    // Used to ensure each mmap has a unique index.
+    total_allocations: usize,
     mmaps: BTreeMap<usize, MMap>,
+
+    // We always want a heap, so I'm embedding it in the mmu.
+    heap: Heap,
+
+    // Maps allocation block to len.  FIXME: this is ugly.
+    allocations: BTreeMap<u64, usize>,
 }
 
 // FIXME: implement snapshotting.
 
 impl Memory {
-    pub fn new() -> Self {
+    pub fn new(heap_begin: Addr, heap_end: Addr) -> Self {
         Memory {
             index: RBTree::new(MMapAdapter::new()),
-            nr_allocations: 0,
+            total_allocations: 0,
             mmaps: BTreeMap::new(),
+            heap: Heap::new(heap_begin, heap_end),
+            allocations: BTreeMap::new(),
         }
     }
 
     /// Inserts a MMap into both the mmaps vec, and the index rbtree.
     fn insert_mm(&mut self, mm: MMap) {
-        let index = self.nr_allocations;
-        self.nr_allocations += 1;
+        let index = self.total_allocations;
+        self.total_allocations += 1;
         let begin = mm.begin;
         self.mmaps.insert(index, mm);
         self.index.insert(Box::new(MMapIndex::new(begin, index)));
@@ -278,7 +287,7 @@ impl Memory {
             }
 
             let mi = cursor.get().unwrap();
-            let mm = &self.mmaps.get(&mi.index).unwrap();
+            let mm = &self.mmaps.get(&mi.index).expect("mm region present in index but not mmaps");
 
             // begin must be within the region
             if (begin < mm.begin) || (begin >= mm.end) {
@@ -331,16 +340,13 @@ impl Memory {
 
         let mut indexes = self.get_indexes(begin, end)?;
 
-        let mut mmaps = BTreeMap::new();
-        std::mem::swap(&mut mmaps, &mut self.mmaps);
-
         while begin < end {
             if indexes.len() == 0 {
                 return Err(MemErr::BadPerms(Addr(begin), perms));
             }
 
             let index = indexes.pop_front().unwrap();
-            let mm = &mut mmaps.get_mut(&index).unwrap();
+            let mm = &mut self.mmaps.get_mut(&index).unwrap();
 
             // begin must be within mm, otherwise we have a gap.
             if begin >= mm.end {
@@ -354,7 +360,6 @@ impl Memory {
             begin += len;
         }
 
-        std::mem::swap(&mut mmaps, &mut self.mmaps);
         Ok(())
     }
 
@@ -398,6 +403,40 @@ impl Memory {
 
         Ok(unsafe { core::ptr::read_unaligned(dest.as_ptr() as *const T) })
     }
+
+    // Allocates a block on the heap with specific permissions.
+    pub fn alloc_perms(&mut self, len: usize, perms: u8) -> Result<Addr> {
+        // We allocate an extra word before and after the block to
+        // detect overwrites.
+        let extra_len = len + 8;
+        let ptr = self.heap.alloc(extra_len)?;
+        self.allocations.insert(ptr.0, extra_len);
+
+        // mmap just the central part that may be used.
+        let ptr = Addr(ptr.0 + 4);
+        self.mmap(ptr, Addr(ptr.0 + len as u64), perms)?;
+
+        Ok(ptr)
+    }
+
+    // Allocates a block on the heap with read/write permissions.  The
+    // common case.
+    pub fn alloc(&mut self, len: usize) -> Result<Addr> {
+        self.alloc_perms(len, PERM_READ | PERM_WRITE)
+    }
+
+    pub fn free(&mut self, ptr: Addr) -> Result<()> {
+        let heap_ptr = Addr(ptr.0 - 4);
+
+        if let Some(_len) = self.allocations.remove(&heap_ptr.0) {
+            self.heap.free(heap_ptr)?;
+            self.unmap(ptr)?;
+            Ok(())
+        } else {
+            Err(MemErr::BadFree(ptr))
+        }
+    }
+
 }
 
 //-------------------------------------
@@ -555,14 +594,14 @@ impl Heap {
 
 #[test]
 fn test_create_mem() -> Result<()> {
-    let mem = Memory::new();
+    let mem = Memory::new(Addr(0), Addr(1024));
     drop(mem);
     Ok(())
 }
 
 #[test]
 fn test_single_mmap() -> Result<()> {
-    let mut mem = Memory::new();
+    let mut mem = Memory::new(Addr(0), Addr(1024));
     let begin = Addr(0xff);
     let end = Addr(begin.0 + 0xffff);
     mem.mmap(begin, end, PERM_READ)?;
@@ -580,7 +619,7 @@ fn test_single_mmap() -> Result<()> {
 
 #[test]
 fn test_adjacent_mmap() -> Result<()> {
-    let mut mem = Memory::new();
+    let mut mem = Memory::new(Addr(0), Addr(1024));
     let begin = Addr(64);
     let mid = Addr(128);
     let end = Addr(192);
