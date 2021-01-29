@@ -13,6 +13,7 @@ use log::{debug, warn};
 use std::collections::BTreeMap;
 use std::io;
 use std::io::{Cursor, Read, Write};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -204,6 +205,49 @@ impl Fixture {
         self.at_func("dm_bm_checksum", Box::new(bm_checksum))?;
         Ok(())
     }
+}
+
+//-------------------------------
+
+// A smart ptr to a Fixture that automatically frees
+// a ptr in the guest when it is dropped.
+pub struct AutoGPtr<'a> {
+    fix: &'a mut Fixture,
+    ptr: Addr,
+}
+
+impl<'a> AutoGPtr<'a> {
+    pub fn new(fix: &'a mut Fixture, ptr: Addr) -> Self {
+        AutoGPtr { fix, ptr }
+    }
+}
+
+impl<'a> Drop for AutoGPtr<'a> {
+    fn drop(&mut self) {
+        self.fix
+            .vm
+            .mem
+            .free(self.ptr)
+            .expect(&format!("couldn't free guest ptr {:?}", self.ptr));
+    }
+}
+
+impl<'a> Deref for AutoGPtr<'a> {
+    type Target = Fixture;
+    fn deref(&self) -> &Self::Target {
+        self.fix
+    }
+}
+
+impl<'a> DerefMut for AutoGPtr<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.fix
+    }
+}
+
+pub fn auto_alloc<'a>(fix: &'a mut Fixture, len: usize) -> Result<(AutoGPtr<'a>, Addr)> {
+    let ptr = fix.vm.mem.alloc(len)?;
+    Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 
 //-------------------------------
