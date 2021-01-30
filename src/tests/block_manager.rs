@@ -5,7 +5,7 @@ use crate::tests::fixture::*;
 
 use anyhow::{anyhow, ensure, Result};
 use libc::ENOMEM;
-use log::{debug, info};
+use log::{info};
 
 use Reg::*;
 
