@@ -120,8 +120,7 @@ impl Fixture {
     }
 
     // Call a named function in the vm.  Returns the contents of Ra.
-    // FIXME: we need to support recursive calls.
-    pub fn call(&mut self, func: &str) -> Result<u64> {
+    pub fn call(&mut self, func: &str) -> Result<()> {
         let entry = self.lookup_fn(func)?;
 
         // We need a unique address return control to us.
@@ -152,12 +151,22 @@ impl Fixture {
             Err(e) => {
                 let completed = completed.lock().unwrap();
                 if *completed == true {
-                    Ok(self.vm.reg(Reg::Ra))
+                    Ok(())
                 } else {
                     Err(e)
                 }
             }
         }
+    }
+
+    // Use this to call functions that return an int errno.
+    pub fn call_with_errno(&mut self, tm_func: &str) -> Result<()> {
+        self.call(tm_func);
+        let r = self.vm.reg(A0);
+        if r != 0 {
+            return Err(anyhow!("{} returned {}", tm_func, r));
+        }
+        Ok(())
     }
 
     pub fn at_addr(&mut self, loc: Addr, callback: FixCallback) {

@@ -2,7 +2,7 @@ extern crate dm_unit;
 extern crate log;
 
 use dm_unit::test_runner::*;
-use dm_unit::tests::btree_remove;
+use dm_unit::tests::btree;
 use dm_unit::tests::block_manager;
 
 use anyhow::Result;
@@ -13,7 +13,7 @@ use std::path::Path;
 //-------------------------------
 
 fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    btree_remove::register_tests(runner)?;
+    btree::register_tests(runner)?;
     block_manager::register_tests(runner)?;
     Ok(())
 }
