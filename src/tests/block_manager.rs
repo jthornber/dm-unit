@@ -16,7 +16,7 @@ fn kmalloc_nomem(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
-pub fn dm_block_manager_create(fix: &mut Fixture, nr_blocks: u64) -> Result<Addr> {
+pub fn dm_bm_create(fix: &mut Fixture, nr_blocks: u64) -> Result<Addr> {
     // We'll just allocate a word to act as the bdev, we don't examine the contents.
     let bdev = fix.vm.mem.alloc(8)?;
 
@@ -32,7 +32,7 @@ pub fn dm_block_manager_create(fix: &mut Fixture, nr_blocks: u64) -> Result<Addr
     Ok(Addr(fix.vm.reg(A0)))
 }
 
-pub fn dm_block_manager_destroy(fix: &mut Fixture, bm: Addr) -> Result<()> {
+pub fn dm_bm_destroy(fix: &mut Fixture, bm: Addr) -> Result<()> {
     fix.vm.set_reg(A0, bm.0);
     fix.call("dm_block_manager_destroy")?;
     Ok(())
@@ -106,14 +106,14 @@ fn test_create_nomem(fix: &mut Fixture) -> Result<()> {
 
 fn test_create_success(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
-    let bm = dm_block_manager_create(fix, 128)?;
-    dm_block_manager_destroy(fix, bm)?;
+    let bm = dm_bm_create(fix, 128)?;
+    dm_bm_destroy(fix, bm)?;
     Ok(())
 }
 
 fn test_block_size(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
-    let bm = dm_block_manager_create(fix, 1024)?;
+    let bm = dm_bm_create(fix, 1024)?;
     let bs = dm_bm_block_size(fix, bm)?;
     assert!(bs == 4096);
     Ok(())
@@ -123,7 +123,7 @@ fn test_nr_blocks(fix: &mut Fixture) -> Result<()> {
     let nr_blocks = 1234u64;
 
     fix.standard_globals()?;
-    let bm = dm_block_manager_create(fix, nr_blocks)?;
+    let bm = dm_bm_create(fix, nr_blocks)?;
     let nr_blocks = dm_bm_nr_blocks(fix, bm)?;
     assert!(nr_blocks == dm_bm_nr_blocks(fix, bm)?);
     Ok(())
@@ -131,7 +131,7 @@ fn test_nr_blocks(fix: &mut Fixture) -> Result<()> {
 
 fn test_read_lock(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
-    let bm = dm_block_manager_create(fix, 16)?;
+    let bm = dm_bm_create(fix, 16)?;
     let validator = Addr(0); // Just passing NULL for now
     let b1 = dm_bm_read_lock(fix, bm, 0, validator)?;
     let data1 = dm_block_data(fix, b1)?;
@@ -166,7 +166,7 @@ fn test_read_lock(fix: &mut Fixture) -> Result<()> {
 
 fn test_write_lock(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
-    let bm = dm_block_manager_create(fix, 16)?;
+    let bm = dm_bm_create(fix, 16)?;
     let validator = Addr(0); // Just passing NULL for now
     let b = dm_bm_write_lock(fix, bm, 0, validator)?;
     let data = dm_block_data(fix, b)?;

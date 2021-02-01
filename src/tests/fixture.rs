@@ -161,7 +161,7 @@ impl Fixture {
 
     // Use this to call functions that return an int errno.
     pub fn call_with_errno(&mut self, tm_func: &str) -> Result<()> {
-        self.call(tm_func);
+        self.call(tm_func)?;
         let r = self.vm.reg(A0);
         if r != 0 {
             return Err(anyhow!("{} returned {}", tm_func, r));
@@ -292,7 +292,7 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
 
 // Guest types must always consume the same amount of contiguous guest
 // memory.
-trait Guest {
+pub trait Guest {
     fn guest_len() -> usize;
     fn pack<W: Write>(&self, w: &mut W) -> io::Result<()>;
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self>
@@ -301,7 +301,7 @@ trait Guest {
 }
 
 // Allocates space on the guest and copies 'bytes' into it.
-fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr> {
+pub fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr> {
     let mut bytes = vec![0; G::guest_len()];
     let mut w = Cursor::new(&mut bytes);
     v.pack(&mut w)?;
@@ -311,7 +311,7 @@ fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr> {
 }
 
 // Copies data from the guest to host.
-fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
+pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
     let len = G::guest_len();
     let mut bytes = vec![0; len];
     mem.read(ptr, &mut bytes, PERM_READ)?;
@@ -321,7 +321,7 @@ fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
 }
 
 // Reads and frees a guest value.
-fn free_guest<G: Guest>(mem: &mut Memory, ptr: Addr) -> Result<G> {
+pub fn free_guest<G: Guest>(mem: &mut Memory, ptr: Addr) -> Result<G> {
     let v = read_guest(mem, ptr)?;
     mem.free(ptr)?;
     Ok(v)
