@@ -1,0 +1,4 @@
+# source this file
+
+export CROSS_COMPILE=riscv64-linux-gnu-
+export ARCH=riscv
