@@ -37,15 +37,36 @@ fn load_sections(
     for s in ss {
         debug!("loading section {} at {:x}", s.shdr.name, base.0 + len);
 
+        // We round up all the sections to be dword aligned so naughty functions like
+        // memcpy which read dwords don't get perms errors.
         let begin = Addr(base.0 + len);
         if s.data.len() == 0 {
-            let end = Addr(base.0 + len + s.shdr.size);
+            let end = Addr(base.0 + next_word(len + s.shdr.size));
             mem.mmap_zeroes(begin, end, perms)
-                .map_err(|_e| anyhow!("couldnt' mmap zero section"))?;
+                .map_err(|_e| anyhow!("couldn't mmap zero section"))?;
         } else {
             mem.mmap_bytes(begin, &s.data, perms)
                 .map_err(|_e| anyhow!("couldn't mmap section"))?;
+
+            let new_len = len + s.shdr.size;
+            let new_rounded = next_word(len + s.shdr.size);
+            if new_len != new_rounded {
+                // We need to map an extra few bytes
+                eprintln!(
+                    "mapping tail bytes {:?}..{:?}",
+                    Addr(new_len),
+                    Addr(new_rounded)
+                );
+                mem.mmap_zeroes(Addr(base.0 + new_len), Addr(base.0 + new_rounded), perms)
+                    .map_err(|_e| anyhow!("couldn't mmap zero tail section"))?;
+            }
         }
+        debug!(
+            "{} mapped to {:?}..{:?}",
+            s.shdr.name,
+            begin,
+            Addr(begin.0 + s.shdr.size)
+        );
         bases.insert(s.shdr.name.clone(), begin);
 
         len = next_word(len + s.shdr.size);
@@ -190,7 +211,7 @@ fn relocate(
     rtype: RelocationType,
     location: Addr,
     sym: Addr,
-    _addend: u64,
+    addend: u64,
 ) -> Result<()> {
     use RelocationType::*;
 
@@ -224,6 +245,13 @@ fn relocate(
             mutate_u32(mem, location, |old| (old & 0xfff) | hi20)?;
         }
         RPCREL_LO12_I => {
+            if (location == Addr(0x1049dc)) || (location == Addr(0x1049e6)) {
+                eprintln!(
+                    "found relocation: rtype = {:?}, sym = {:?}, addend = {:x}",
+                    rtype, sym, addend
+                );
+            }
+
             mutate_u32(mem, location, |old| {
                 (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
             })?;
@@ -333,7 +361,7 @@ fn exec_relocations(
                     let sym_index = rloc.sym as usize;
                     let sym = &syms[sym_index];
 
-                    relocate(mem, rloc.rtype, location, Addr(sym.value), rloc.addend)?;
+                    relocate(mem, rloc.rtype, location, Addr(sym.value + rloc.addend), rloc.addend)?;
                 }
                 CompoundRel::Pair(hi_rloc, lo_rloc) => {
                     // These is the location of the instruction that needs adjusting.
@@ -345,18 +373,18 @@ fn exec_relocations(
                     let sym = &syms[sym_index];
 
                     debug!("{} relocating to {:?}", sym.name, Addr(sym.value));
-                    
+
                     // Do the hi20 relocation
                     relocate(
                         mem,
                         hi_rloc.rtype,
                         hi_location,
-                        Addr(sym.value),
+                        Addr(sym.value + hi_rloc.addend),
                         hi_rloc.addend,
                     )?;
 
                     // Do the lo12 relocation
-                    let offset = addr_offset(Addr(sym.value), hi_location);
+                    let offset = addr_offset(Addr(sym.value + hi_rloc.addend), hi_location);
                     let hi20 = ((offset + 0x800) as u32 as u64) & 0xfffff000;
                     let lo12 = (offset as u32 as u64).wrapping_sub(hi20);
                     relocate(mem, lo_rloc.rtype, lo_location, Addr(lo12), lo_rloc.addend)?;

@@ -1,6 +1,6 @@
 use crate::tests::fixture::*;
 use anyhow::Result;
-use log::info;
+use log::{debug, info};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -126,6 +126,7 @@ impl<'a> TestRunner<'a> {
                 fail += 1;
                 println!(" FAIL");
                 info!("<<< {}: FAIL, {}", p, e);
+                debug!("{}", fix.vm);
             } else {
                 pass += 1;
                 println!(" PASS");

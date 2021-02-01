@@ -33,8 +33,8 @@ impl fmt::LowerHex for Addr {
 /// Indicates memory errors such as referencing unallocated memory.  Or bad permissions.
 #[derive(Error, Debug)]
 pub enum MemErr {
-    #[error("Memory is not mapped at {0:?}")]
-    UnmappedRegion(Addr),
+    #[error("Memory is not mapped at {0:?}, looking for perms {1:?}")]
+    UnmappedRegion(Addr, u8),
 
     #[error("Bad memory permissions at {0:?}, wanted {1}")]
     BadPerms(Addr, u8),
@@ -277,13 +277,13 @@ impl Memory {
     }
 
     /// Builds a vec of mmap indexes within a given address range.
-    fn get_indexes(&self, mut begin: u64, end: u64) -> Result<VecDeque<usize>> {
+    fn get_indexes(&self, mut begin: u64, end: u64, perms: u8) -> Result<VecDeque<usize>> {
         let mut cursor = self.index.upper_bound(Bound::Included(&begin));
         let mut indexes = VecDeque::new();
 
         while begin < end {
             if cursor.is_null() {
-                return Err(MemErr::UnmappedRegion(Addr(begin)));
+                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
             }
 
             let mi = cursor.get().unwrap();
@@ -291,7 +291,7 @@ impl Memory {
 
             // begin must be within the region
             if (begin < mm.begin) || (begin >= mm.end) {
-                return Err(MemErr::UnmappedRegion(Addr(begin)));
+                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
             }
 
             indexes.push_back(mi.index);
@@ -307,7 +307,7 @@ impl Memory {
     pub fn read(&self, begin: Addr, mut bytes: &mut [u8], perms: u8) -> Result<()> {
         let mut begin = begin.0;
         let end = begin + (bytes.len() as u64);
-        let mut indexes = self.get_indexes(begin, end)?;
+        let mut indexes = self.get_indexes(begin, end, perms)?;
 
         while begin < end {
             if indexes.len() == 0 {
@@ -338,7 +338,7 @@ impl Memory {
         let mut begin = begin.0;
         let end = begin + (bytes.len() as u64);
 
-        let mut indexes = self.get_indexes(begin, end)?;
+        let mut indexes = self.get_indexes(begin, end, perms)?;
 
         while begin < end {
             if indexes.len() == 0 {
@@ -369,7 +369,7 @@ impl Memory {
         let mut begin = begin.0;
         let end = end.0;
 
-        let mut indexes = self.get_indexes(begin, end)?;
+        let mut indexes = self.get_indexes(begin, end, 0)?;
 
         let mut mmaps = BTreeMap::new();
         std::mem::swap(&mut mmaps, &mut self.mmaps);
@@ -460,12 +460,12 @@ impl BuddyAllocator {
     pub fn new(order: usize) -> Self {
         assert!(order <= 32);
         let mut free_blocks = Vec::new();
-        for _ in 0..order {
+        for _ in 0..(order + 1) {
             free_blocks.push(BTreeSet::new());
         }
 
-        // we start with a single block of order size
-        free_blocks[order - 1].insert(0);
+        // we start with a single block of order size.
+        free_blocks[order].insert(0);
 
         BuddyAllocator {
             free_blocks,
@@ -515,6 +515,7 @@ impl BuddyAllocator {
         loop {
             let buddy = get_buddy(index, order);
             if !self.allocated.contains_key(&buddy) {
+                self.free_blocks[order].remove(&buddy);
                 order += 1;
             } else {
                 break;
@@ -532,6 +533,25 @@ impl BuddyAllocator {
         self.free_blocks[order].insert(index);
         Ok(())
     }
+}
+
+#[test]
+fn test_create_allocator() -> Result<()> {
+    let buddy = BuddyAllocator::new(10);
+    Ok(())
+}
+
+#[test]
+fn test_alloc_small() -> Result<()> {
+    let mut buddy = BuddyAllocator::new(10);
+
+    // order 0, is a single byte
+    let index = buddy.alloc(0)?;
+    assert!(index == 0);
+    buddy.free(index)?;
+    let index = buddy.alloc(0)?;
+    assert!(index == 0);
+    Ok(())
 }
 
 //-------------------------------------

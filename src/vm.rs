@@ -223,6 +223,7 @@ impl VM {
     pub fn step(&mut self) -> Result<()> {
         let pc = self.pc();
         if self.breakpoints.contains(&pc) {
+            debug!("hit breakpoint at {:?}", pc);
             return Err(VmErr::Breakpoint);
         }
 

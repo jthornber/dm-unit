@@ -193,6 +193,7 @@ impl Fixture {
     /// eg, kmalloc, kfree.
     pub fn standard_globals(&mut self) -> Result<()> {
         self.at_func("__kmalloc", Box::new(kmalloc))?;
+        self.at_func("kmalloc_order", Box::new(kmalloc))?;
         self.at_func("memset", Box::new(memset))?;
         self.at_func("kfree", Box::new(kfree))?;
         self.at_func("dm_block_location", Box::new(bm_block_location))?;

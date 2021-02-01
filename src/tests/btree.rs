@@ -157,8 +157,13 @@ impl Guest for Value64 {
 // Delete an empty tree.
 fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
+//    fix.at_addr(Addr(0x1049ea), Box::new(print_registers));
+
+
     let bm = dm_bm_create(fix, 1024)?;
+    debug!("calling dm_tm_create");
     let (tm, sm) = dm_tm_create(fix, bm, 0)?;
+
     let vtype: BTreeValueType<Value64> = BTreeValueType {
         context: Addr(0),
         inc_fn: Addr(0),
@@ -171,7 +176,9 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
         levels: 1,
         vtype,
     };
+    debug!("calling dm_btree_empty");
     let root = dm_btree_empty(fix, &info)?;
+    debug!("calling dm_btree_del");
     dm_btree_del(fix, &info, root)?;
     Ok(())
 }

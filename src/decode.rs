@@ -97,7 +97,7 @@ fn reg_at(inst: u32, bit: usize) -> Reg {
 /// Extracts a register from a _compressed_ bit field. pass in the first/lowest
 /// bit of the field.
 fn creg_at(bits: u16, bit: usize) -> Reg {
-    Reg::from((((bits >> bit) & 0b1111) + 8) as u32)
+    Reg::from((((bits >> bit) & 0b111) + 8) as u32)
 }
 
 /// Sign extends a given number of bits.
@@ -231,7 +231,13 @@ impl fmt::Display for Inst {
                 }
             }
 
-            BEQ { rs1, rs2, imm } => write!(f, "beq\t{},{},{}", rs1, rs2, imm),
+            BEQ { rs1, rs2, imm } => {
+                if *rs2 == Zero {
+                    write!(f, "beqz\t{},{}", rs1, imm)
+                } else {
+                    write!(f, "beq\t{},{},{}", rs1, rs2, imm)
+                }
+            }
             BNE { rs1, rs2, imm } => write!(f, "bne\t{},{},{}", rs1, rs2, imm),
             BLT { rs1, rs2, imm } => write!(f, "blt\t{},{},{}", rs1, rs2, imm),
             BGE { rs1, rs2, imm } => write!(f, "bge\t{},{},{}", rs1, rs2, imm),
@@ -273,7 +279,13 @@ impl fmt::Display for Inst {
             SRAIW { rd, rs, shamt } => write!(f, "sraiw\t{},{},{}", rd, rs, shamt),
             SRAI { rd, rs, shamt } => write!(f, "srai\t{},{},{}", rd, rs, shamt),
 
-            ADD { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
+            ADD { rd, rs1, rs2 } => {
+                if *rs1 == Zero {
+                    write!(f, "mv\t{},{}", rd, rs2)
+                } else {
+                    write!(f, "add\t{},{},{}", rd, rs1, rs2)
+                }
+            }
             ADDW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
             SUB { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
             SUBW { rd, rs1, rs2 } => write!(f, "add\t{},{},{}", rd, rs1, rs2),
@@ -1181,7 +1193,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         let imm_16_12 = (bits >> 2) & 0b11111;
                         let imm = ((imm_17 as u32) << 17) | ((imm_16_12 as u32) << 12);
                         let imm = sign_extend(imm as i32, 17);
-                        LUI { rd, imm }
+                        LUI { rd, imm: imm >> 12 }
                     }
                 }
                 0b100 => {
