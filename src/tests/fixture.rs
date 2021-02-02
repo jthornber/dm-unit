@@ -9,12 +9,15 @@ use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crc32c::crc32c;
 use elf::types::Symbol;
-use log::{debug, warn};
+use libc::{c_char, c_int, strerror_r};
+use log::{debug, info, warn};
 use std::collections::BTreeMap;
+use std::ffi::CStr;
 use std::io;
 use std::io::{Cursor, Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
+use std::str;
 use std::sync::{Arc, Mutex};
 
 use Reg::*;
@@ -35,6 +38,9 @@ pub struct Fixture {
 
     // Associates an address in the vm with rust user data.
     user_data: UserData,
+
+    // Current indentation for function tracing.
+    trace_indent: usize,
 }
 
 impl Fixture {
@@ -57,6 +63,7 @@ impl Fixture {
             symbols,
             breakpoints: BTreeMap::new(),
             user_data: UserData::new(),
+            trace_indent: 0,
         })
     }
 
@@ -92,7 +99,7 @@ impl Fixture {
                     // downside is you cannot recurse a particular breakpoint.
                     if let Some(callback) = self.breakpoints.remove(&loc) {
                         if let Some(global) = self.symbol_rmap(loc) {
-                            debug!("host call: {}", global);
+                            // debug!("host call: {}", global);
                         } else {
                             // debug!("host call: {:x}", loc);
                         }
@@ -162,9 +169,13 @@ impl Fixture {
     // Use this to call functions that return an int errno.
     pub fn call_with_errno(&mut self, tm_func: &str) -> Result<()> {
         self.call(tm_func)?;
-        let r = self.vm.reg(A0);
+        let r = self.vm.reg(A0) as i64 as i32;
         if r != 0 {
-            return Err(anyhow!("{} returned {}", tm_func, r));
+            if r < 0 {
+                return Err(anyhow!("{} failed: {}", tm_func, error_string(-r)));
+            } else {
+                return Err(anyhow!("{} failed: {}", tm_func, r));
+            }
         }
         Ok(())
     }
@@ -189,6 +200,69 @@ impl Fixture {
         self.at_func(func, Box::new(callback))
     }
 
+    // FIXME: there's got to be a better way to do this
+    fn indent_string(&self) -> String {
+        let mut r = String::new();
+        for _ in 0..self.trace_indent {
+            r.push(' ');
+        }
+        r
+    }
+
+    fn trace_entry(&mut self, func: &str) {
+        debug!("{}>>> {}", self.indent_string(), func);
+        self.trace_indent += 1;
+    }
+
+    fn trace_exit(&mut self, func: &str, rv: u64) {
+        let err = rv as i32;
+        let estr = if err < 0 && err >= -1024 {
+            error_string(-err)
+        } else {
+            format!("{:x}", rv)
+        };
+        self.trace_indent -= 1;
+        debug!("{}<<< {} -> {}", self.indent_string(), func, estr);
+    }
+
+    /// Logs a debug message when this function is entered and exited.
+    /// Useful for tracing progress of a test.  Tracing return from the
+    /// function is awkward, we have to squeeze in a wrapper function that
+    /// is returned to where we can set the breakpoint.
+    pub fn trace_func(&mut self, func: &str) -> Result<()> {
+        let name = func.to_string();
+
+        let trampoline = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
+
+        let entry_callback = {
+            let name = name.clone();
+            move |fix: &mut Fixture| {
+                // Push the real return address onto the stack.
+                fix.vm.push_reg(Ra);
+
+                // Set Ra to our trampoline.
+                fix.vm.set_reg(Ra, trampoline.0);
+                fix.trace_entry(&name);
+                Ok(())
+            }
+        };
+
+        let exit_callback = {
+            let name = name.clone();
+            move |fix: &mut Fixture| {
+                fix.trace_exit(&name, fix.vm.reg(A0));
+                fix.vm.mem.free(trampoline);
+                fix.vm.pop_reg(Ra);
+                fix.vm.set_reg(PC, fix.vm.reg(Ra));
+                Ok(())
+            }
+        };
+
+        self.at_func(func, Box::new(entry_callback))?;
+        self.at_addr(trampoline, Box::new(exit_callback));
+        Ok(())
+    }
+
     /// Attaches a standard set of global implementations.
     /// eg, kmalloc, kfree.
     pub fn standard_globals(&mut self) -> Result<()> {
@@ -196,6 +270,9 @@ impl Fixture {
         self.at_func("kmalloc_order", Box::new(kmalloc))?;
         self.at_func("memset", Box::new(memset))?;
         self.at_func("kfree", Box::new(kfree))?;
+        self.stub("__raw_spin_lock_init", 0)?;
+        self.stub("__mutex_init", 0)?;
+        self.at_func("memcpy", Box::new(memcpy))?;
         self.at_func("dm_block_location", Box::new(bm_block_location))?;
         self.at_func("dm_block_data", Box::new(bm_block_data))?;
         self.at_func("dm_block_manager_create", Box::new(bm_create))?;
@@ -213,7 +290,27 @@ impl Fixture {
         self.at_func("dm_bm_set_read_only", Box::new(bm_set_read_only))?;
         self.at_func("dm_bm_set_read_write", Box::new(bm_set_read_write))?;
         self.at_func("dm_bm_checksum", Box::new(bm_checksum))?;
+        self.at_func("printk", Box::new(printk))?;
         Ok(())
+    }
+}
+
+//-------------------------------
+
+// FIXME: move somewhere else
+pub fn error_string(errno: i32) -> String {
+    let mut buf = [0 as c_char; 512];
+
+    let p = buf.as_mut_ptr();
+    unsafe {
+        if strerror_r(errno as c_int, p, buf.len()) < 0 {
+            panic!("strerror_r failure");
+        }
+
+        let p = p as *const _;
+        str::from_utf8(CStr::from_ptr(p).to_bytes())
+            .unwrap()
+            .to_owned()
     }
 }
 
@@ -261,6 +358,24 @@ pub fn auto_alloc<'a>(fix: &'a mut Fixture, len: usize) -> Result<(AutoGPtr<'a>,
 }
 
 //-------------------------------
+
+pub fn printk(fix: &mut Fixture) -> Result<()> {
+    let msg = fix.vm.mem.read_string(Addr(fix.vm.reg(A0)))?;
+    info!("printk(\"{}\")", &msg[2..]);
+    fix.vm.ret(0);
+    Ok(())
+}
+
+pub fn memcpy(fix: &mut Fixture) -> Result<()> {
+    let dest = Addr(fix.vm.reg(A0));
+    let src = Addr(fix.vm.reg(A1));
+    let len = fix.vm.reg(A2);
+    let mut bytes = vec![0u8; len as usize];
+    fix.vm.mem.read(src, &mut bytes, PERM_READ)?;
+    fix.vm.mem.write(dest, &bytes, PERM_WRITE)?;
+    fix.vm.ret(dest.0);
+    Ok(())
+}
 
 pub fn kmalloc(fix: &mut Fixture) -> Result<()> {
     let len = fix.vm.reg(Reg::A0);
@@ -592,6 +707,7 @@ fn bm_write_lock(fix: &mut Fixture) -> Result<()> {
 }
 
 fn bm_write_lock_zero(fix: &mut Fixture) -> Result<()> {
+    warn!("in bm_write_lock_zero() (which isn't implemented)");
     bm_write_lock(fix)?;
     todo!();
 }

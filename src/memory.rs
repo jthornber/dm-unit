@@ -277,7 +277,13 @@ impl Memory {
     }
 
     /// Builds a vec of mmap indexes within a given address range.
-    fn get_indexes(&self, mut begin: u64, end: u64, perms: u8) -> Result<VecDeque<usize>> {
+    fn get_indexes_(
+        &self,
+        mut begin: u64,
+        end: u64,
+        perms: u8,
+        allow_gaps: bool,
+    ) -> Result<VecDeque<usize>> {
         let mut cursor = self.index.upper_bound(Bound::Included(&begin));
         let mut indexes = VecDeque::new();
 
@@ -287,11 +293,16 @@ impl Memory {
             }
 
             let mi = cursor.get().unwrap();
-            let mm = &self.mmaps.get(&mi.index).expect("mm region present in index but not mmaps");
+            let mm = &self
+                .mmaps
+                .get(&mi.index)
+                .expect("mm region present in index but not mmaps");
 
             // begin must be within the region
             if (begin < mm.begin) || (begin >= mm.end) {
-                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+                if !allow_gaps {
+                    return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+                }
             }
 
             indexes.push_back(mi.index);
@@ -300,6 +311,10 @@ impl Memory {
         }
 
         Ok(indexes)
+    }
+
+    fn get_indexes(&self, mut begin: u64, end: u64, perms: u8) -> Result<VecDeque<usize>> {
+        self.get_indexes_(begin, end, perms, false)
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
@@ -437,6 +452,49 @@ impl Memory {
         }
     }
 
+    /// This is a bit of a hack for use by printk and friends.
+    pub fn read_string(&mut self, ptr: Addr) -> Result<String> {
+        // We assume the string is short, and grab the indexes for that max range.
+        // Then read bytes from it.
+        let mut begin = ptr.0;
+        let end = begin + 256;
+
+        // We allow gaps since we don't know how much memory is mapped.
+        let mut indexes = self.get_indexes_(begin, end, PERM_READ, true)?;
+
+        let mut buffer = Vec::new();
+        while begin < end {
+            if indexes.len() == 0 {
+                return Err(MemErr::BadPerms(Addr(begin), PERM_READ));
+            }
+
+            let index = indexes.pop_front().unwrap();
+            let mm = &self.mmaps.get(&index).unwrap();
+
+            // begin must be within mm, otherwise we have a gap.
+            if begin >= mm.end {
+                return Err(MemErr::BadPerms(Addr(begin), PERM_READ));
+            }
+
+            let len = std::cmp::min(end, mm.end) - begin;
+            let start = (begin - mm.begin) as usize;
+            let stop = start + (end - begin) as usize;
+            let mem = &mm.bytes[start..stop];
+
+            for byte in mem {
+                if *byte == 0 {
+                    begin == end;
+                    break;
+                }
+
+                buffer.push(*byte);
+            }
+
+            begin += len;
+        }
+
+        Ok(std::str::from_utf8(&buffer).unwrap().to_owned())
+    }
 }
 
 //-------------------------------------

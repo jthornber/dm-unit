@@ -157,8 +157,16 @@ impl Guest for Value64 {
 // Delete an empty tree.
 fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
-//    fix.at_addr(Addr(0x1049ea), Box::new(print_registers));
-
+    fix.trace_func("dm_btree_empty")?;
+    fix.trace_func("sm_bootstrap_new_block")?;
+    fix.trace_func("dm_tm_create")?;
+    fix.trace_func("dm_sm_metadata_create")?;
+    fix.trace_func("sm_ll_new_metadata")?;
+    fix.trace_func("sm_ll_init")?;
+    fix.trace_func("metadata_ll_init_index")?;
+    fix.trace_func("dm_tm_new_block")?;
+    fix.trace_func("sm_bootstrap_new_block")?;
+    fix.trace_func("sm_ll_extend")?;
 
     let bm = dm_bm_create(fix, 1024)?;
     debug!("calling dm_tm_create");

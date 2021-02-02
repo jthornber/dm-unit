@@ -14,6 +14,7 @@ pub struct VM {
     reg: Vec<u64>,
     pub mem: Memory,
     breakpoints: BTreeSet<Addr>,
+    last_bp: Option<Addr>,
 }
 
 impl fmt::Display for VM {
@@ -96,6 +97,7 @@ impl VM {
             reg: vec![0; 33],
             mem,
             breakpoints: BTreeSet::new(),
+            last_bp: None,
         }
     }
 
@@ -220,11 +222,46 @@ impl VM {
         self.set_reg(PC, self.reg(Ra))
     }
 
+    // Pushes a register onto the stack
+    pub fn push_reg(&mut self, rd: Reg) -> Result<()> {
+        // addi sp,sp,-8
+        self.set_reg(Sp, self.reg(Sp).wrapping_add(-8i64 as u64));
+
+        // sd r,0(sp)
+        let dest = Addr(self.reg(Sp));
+        let v = self.reg(rd);
+        let bytes = v.to_le_bytes();
+        self.mem
+            .write(dest, &bytes, PERM_WRITE)
+            .map_err(|e| VmErr::BadAccess(e))?;
+        Ok(())
+    }
+
+    // Pops the stack into a register
+    pub fn pop_reg(&mut self, rd: Reg) -> Result<()> {
+        // ld r,0(sp)
+        let src = Addr(self.reg(Sp));
+        let mut bytes = [0u8; 8];
+        self.mem
+            .read(src, &mut bytes, PERM_READ)
+            .map_err(|e| VmErr::BadAccess(e))?;
+        self.set_reg(rd, i64::from_le_bytes(bytes) as i64 as u64);
+
+        // addi sp,sp,8
+        self.set_reg(Sp, self.reg(Sp).wrapping_add(8u64));
+        Ok(())
+    }
+
     pub fn step(&mut self) -> Result<()> {
         let pc = self.pc();
         if self.breakpoints.contains(&pc) {
-            debug!("hit breakpoint at {:?}", pc);
-            return Err(VmErr::Breakpoint);
+            if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
+                self.last_bp = Some(pc);
+                debug!("hit breakpoint at {:?}", pc);
+                return Err(VmErr::Breakpoint);
+            }
+        } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
+            self.last_bp = None;
         }
 
         let mut bits = self
