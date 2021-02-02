@@ -98,7 +98,7 @@ impl Fixture {
                     // times, and allows the breakpoints to recurse back into here.  The
                     // downside is you cannot recurse a particular breakpoint.
                     if let Some(callback) = self.breakpoints.remove(&loc) {
-                        if let Some(global) = self.symbol_rmap(loc) {
+                        if let Some(_global) = self.symbol_rmap(loc) {
                             // debug!("host call: {}", global);
                         } else {
                             // debug!("host call: {:x}", loc);
@@ -238,7 +238,7 @@ impl Fixture {
             let name = name.clone();
             move |fix: &mut Fixture| {
                 // Push the real return address onto the stack.
-                fix.vm.push_reg(Ra);
+                fix.vm.push_reg(Ra)?;
 
                 // Set Ra to our trampoline.
                 fix.vm.set_reg(Ra, trampoline.0);
@@ -251,8 +251,8 @@ impl Fixture {
             let name = name.clone();
             move |fix: &mut Fixture| {
                 fix.trace_exit(&name, fix.vm.reg(A0));
-                fix.vm.mem.free(trampoline);
-                fix.vm.pop_reg(Ra);
+                fix.vm.mem.free(trampoline)?;
+                fix.vm.pop_reg(Ra)?;
                 fix.vm.set_reg(PC, fix.vm.reg(Ra));
                 Ok(())
             }

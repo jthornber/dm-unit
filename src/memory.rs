@@ -313,7 +313,7 @@ impl Memory {
         Ok(indexes)
     }
 
-    fn get_indexes(&self, mut begin: u64, end: u64, perms: u8) -> Result<VecDeque<usize>> {
+    fn get_indexes(&self, begin: u64, end: u64, perms: u8) -> Result<VecDeque<usize>> {
         self.get_indexes_(begin, end, perms, false)
     }
 
@@ -483,7 +483,7 @@ impl Memory {
 
             for byte in mem {
                 if *byte == 0 {
-                    begin == end;
+                    begin = end;
                     break;
                 }
 
@@ -595,7 +595,7 @@ impl BuddyAllocator {
 
 #[test]
 fn test_create_allocator() -> Result<()> {
-    let buddy = BuddyAllocator::new(10);
+    let _buddy = BuddyAllocator::new(10);
     Ok(())
 }
 

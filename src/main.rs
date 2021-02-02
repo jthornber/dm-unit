@@ -2,8 +2,8 @@ extern crate dm_unit;
 extern crate log;
 
 use dm_unit::test_runner::*;
-use dm_unit::tests::btree;
 use dm_unit::tests::block_manager;
+use dm_unit::tests::btree;
 
 use anyhow::Result;
 use clap::{App, Arg};
@@ -33,6 +33,11 @@ fn main() -> Result<()> {
                 .value_name("KERNEL_DIR"),
         )
         .arg(
+            Arg::with_name("GDB")
+                .long("gdb")
+                .help("Listen on a socket for a gdb connection"),
+        )
+        .arg(
             Arg::with_name("FILTER")
                 .short("t")
                 .help("regex filter to select which tests to run")
@@ -47,6 +52,11 @@ fn main() -> Result<()> {
         let rx = Regex::new(pattern)?;
         runner.set_filter(rx);
     }
+
+    if matches.is_present("GDB") {
+        runner.enable_gdb();
+    }
+
     register_tests(&mut runner)?;
 
     let (pass, fail) = runner.exec()?;

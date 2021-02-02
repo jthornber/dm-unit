@@ -5,11 +5,9 @@ use crate::tests::block_manager::*;
 use crate::tests::transaction_manager::*;
 use crate::tests::fixture::*;
 
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crc32c::crc32c;
-use log::{debug, info, warn};
-use std::collections::BTreeMap;
+use log::{debug, info};
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
@@ -100,7 +98,7 @@ pub fn dm_btree_empty<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>) -> Resul
     fix.vm.set_reg(A0, info_ptr.0);
     let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
     fix.vm.set_reg(A1, result_ptr.0);
-    fix.call_with_errno("dm_btree_empty");
+    fix.call_with_errno("dm_btree_empty")?;
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
@@ -170,7 +168,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
 
     let bm = dm_bm_create(fix, 1024)?;
     debug!("calling dm_tm_create");
-    let (tm, sm) = dm_tm_create(fix, bm, 0)?;
+    let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
 
     let vtype: BTreeValueType<Value64> = BTreeValueType {
         context: Addr(0),

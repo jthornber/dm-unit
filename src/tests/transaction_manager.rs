@@ -1,9 +1,8 @@
 use crate::decode::*;
 use crate::memory::*;
 use crate::tests::fixture::*;
-use crate::vm::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result};
 
 use Reg::*;
 

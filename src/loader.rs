@@ -52,11 +52,6 @@ fn load_sections(
             let new_rounded = next_word(len + s.shdr.size);
             if new_len != new_rounded {
                 // We need to map an extra few bytes
-                eprintln!(
-                    "mapping tail bytes {:?}..{:?}",
-                    Addr(new_len),
-                    Addr(new_rounded)
-                );
                 mem.mmap_zeroes(Addr(base.0 + new_len), Addr(base.0 + new_rounded), perms)
                     .map_err(|_e| anyhow!("couldn't mmap zero tail section"))?;
             }
