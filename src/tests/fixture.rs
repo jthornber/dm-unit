@@ -501,6 +501,22 @@ impl Block {
         }
     }
 
+    // Data must be on the host
+    fn zero(&mut self) -> Result<()> {
+        use BlockData::*;
+        match &mut self.data {
+            Host(bytes) => {
+                for b in bytes {
+                    *b = 0u8;
+                }
+            }
+            _ => {
+                return Err(anyhow!("can't zero a held block"));
+            }
+        }
+        Ok(())
+    }
+
     fn to_shared(&mut self, mem: &mut Memory) -> Result<Addr> {
         use BlockData::*;
         let g_ptr = match &mut self.data {
@@ -679,20 +695,37 @@ fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
-fn bm_write_lock(fix: &mut Fixture) -> Result<()> {
+fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
     let bm_ptr = fix.vm.reg(A0);
     let b = fix.vm.reg(A1);
     let _v_ptr = fix.vm.reg(A2);
     let result_ptr = fix.vm.reg(A3);
 
     let bm = fix.user_data.get_mut::<BlockManager>(Addr(bm_ptr))?;
-    let guest_addr = match bm.blocks.get_mut(&b) {
-        Some(block) => block.to_exclusive(&mut fix.vm.mem)?,
-        None => {
-            let mut block = Block::new(Addr(bm_ptr), b, bm.block_size);
-            let guest_addr = block.to_exclusive(&mut fix.vm.mem)?;
-            bm.blocks.insert(b, block);
-            guest_addr
+
+    let guest_addr: Addr = if zero {
+        match bm.blocks.get_mut(&b) {
+            Some(block) => {
+                block.zero()?;
+                block.to_exclusive(&mut fix.vm.mem)?
+            }
+            None => {
+                let mut block = Block::new(Addr(bm_ptr), b, bm.block_size);
+                block.zero()?;
+                let guest_addr = block.to_exclusive(&mut fix.vm.mem)?;
+                bm.blocks.insert(b, block);
+                guest_addr
+            }
+        }
+    } else {
+        match bm.blocks.get_mut(&b) {
+            Some(block) => block.to_exclusive(&mut fix.vm.mem)?,
+            None => {
+                let mut block = Block::new(Addr(bm_ptr), b, bm.block_size);
+                let guest_addr = block.to_exclusive(&mut fix.vm.mem)?;
+                bm.blocks.insert(b, block);
+                guest_addr
+            }
         }
     };
 
@@ -706,10 +739,12 @@ fn bm_write_lock(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+fn bm_write_lock(fix: &mut Fixture) -> Result<()> {
+    write_lock_(fix, false)
+}
+
 fn bm_write_lock_zero(fix: &mut Fixture) -> Result<()> {
-    warn!("in bm_write_lock_zero() (which isn't implemented)");
-    bm_write_lock(fix)?;
-    todo!();
+    write_lock_(fix, true)
 }
 
 fn bm_unlock(fix: &mut Fixture) -> Result<()> {
