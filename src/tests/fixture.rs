@@ -231,7 +231,6 @@ impl Fixture {
     /// is returned to where we can set the breakpoint.
     pub fn trace_func(&mut self, func: &str) -> Result<()> {
         let name = func.to_string();
-
         let trampoline = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
 
         let entry_callback = {
@@ -251,7 +250,6 @@ impl Fixture {
             let name = name.clone();
             move |fix: &mut Fixture| {
                 fix.trace_exit(&name, fix.vm.reg(A0));
-                fix.vm.mem.free(trampoline)?;
                 fix.vm.pop_reg(Ra)?;
                 fix.vm.set_reg(PC, fix.vm.reg(Ra));
                 Ok(())
@@ -260,6 +258,7 @@ impl Fixture {
 
         self.at_func(func, Box::new(entry_callback))?;
         self.at_addr(trampoline, Box::new(exit_callback));
+
         Ok(())
     }
 
@@ -271,6 +270,8 @@ impl Fixture {
         self.at_func("memset", Box::new(memset))?;
         self.at_func("kfree", Box::new(kfree))?;
         self.stub("__raw_spin_lock_init", 0)?;
+        self.stub("_raw_spin_lock", 0)?;
+        self.stub("_raw_spin_unlock", 0)?;
         self.stub("__mutex_init", 0)?;
         self.at_func("memcpy", Box::new(memcpy))?;
         self.at_func("dm_block_location", Box::new(bm_block_location))?;
@@ -361,7 +362,7 @@ pub fn auto_alloc<'a>(fix: &'a mut Fixture, len: usize) -> Result<(AutoGPtr<'a>,
 
 pub fn printk(fix: &mut Fixture) -> Result<()> {
     let msg = fix.vm.mem.read_string(Addr(fix.vm.reg(A0)))?;
-    info!("printk(\"{}\")", &msg[2..]);
+    info!("printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x})", &msg[2..], fix.vm.reg(A1), fix.vm.reg(A2), fix.vm.reg(A3));
     fix.vm.ret(0);
     Ok(())
 }
@@ -600,8 +601,7 @@ fn bm_create(fix: &mut Fixture) -> Result<()> {
     let block_size = fix.vm.reg(A1);
     let _max_held_per_thread = fix.vm.reg(A2);
 
-    let nr_sectors = fix.vm.mem.read_into::<u64>(Addr(bdev_ptr), PERM_READ)?;
-    let nr_blocks = nr_sectors / (block_size / 512);
+    let nr_blocks = fix.vm.mem.read_into::<u64>(Addr(bdev_ptr), PERM_READ)?;
 
     let bm = Box::new(BlockManager {
         block_size,

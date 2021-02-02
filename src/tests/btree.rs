@@ -2,12 +2,12 @@ use crate::decode::*;
 use crate::memory::*;
 use crate::test_runner::*;
 use crate::tests::block_manager::*;
-use crate::tests::transaction_manager::*;
 use crate::tests::fixture::*;
+use crate::tests::transaction_manager::*;
 
-use anyhow::{Result};
+use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::{debug, info};
+use log::info;
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
@@ -152,22 +152,33 @@ impl Guest for Value64 {
     }
 }
 
+#[allow(dead_code)]
+fn enable_traces(fix: &mut Fixture) -> Result<()> {
+    let traces = [
+        "dm_tm_create_with_sm",
+        "dm_btree_empty",
+        "sm_bootstrap_new_block",
+        "dm_tm_create",
+        "dm_sm_metadata_create",
+        "sm_ll_new_metadata",
+        "sm_ll_init",
+        "metadata_ll_init_index",
+        "dm_tm_new_block",
+        "sm_bootstrap_new_block",
+        "sm_ll_extend",
+        "dm_btree_del",
+    ];
+    for t in &traces {
+        fix.trace_func(t)?;
+    }
+    Ok(())
+}
+
 // Delete an empty tree.
 fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
-    fix.trace_func("dm_btree_empty")?;
-    fix.trace_func("sm_bootstrap_new_block")?;
-    fix.trace_func("dm_tm_create")?;
-    fix.trace_func("dm_sm_metadata_create")?;
-    fix.trace_func("sm_ll_new_metadata")?;
-    fix.trace_func("sm_ll_init")?;
-    fix.trace_func("metadata_ll_init_index")?;
-    fix.trace_func("dm_tm_new_block")?;
-    fix.trace_func("sm_bootstrap_new_block")?;
-    fix.trace_func("sm_ll_extend")?;
 
     let bm = dm_bm_create(fix, 1024)?;
-    debug!("calling dm_tm_create");
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
 
     let vtype: BTreeValueType<Value64> = BTreeValueType {
@@ -182,9 +193,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
         levels: 1,
         vtype,
     };
-    debug!("calling dm_btree_empty");
     let root = dm_btree_empty(fix, &info)?;
-    debug!("calling dm_btree_del");
     dm_btree_del(fix, &info, root)?;
     Ok(())
 }

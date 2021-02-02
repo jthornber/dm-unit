@@ -293,14 +293,14 @@ impl VM {
             }
             JAL { rd, imm } => {
                 let dest = pc.0.wrapping_add(imm as i64 as u64);
-                let ret = pc.0.wrapping_add(4);
+                let ret = pc.0.wrapping_add(pc_increment);
 
                 self.set_reg(PC, dest);
                 self.set_reg(rd, ret);
             }
             JALR { rd, rs, imm } => {
                 let dest = self.reg(rs).wrapping_add(imm as i64 as u64);
-                let ret = pc.0.wrapping_add(4);
+                let ret = pc.0.wrapping_add(pc_increment);
 
                 self.set_reg(rd, ret);
                 self.set_reg(PC, dest);

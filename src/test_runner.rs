@@ -196,7 +196,7 @@ impl<'a> TestRunner<'a> {
 
         for (p, t) in &mut self.tests {
             if !(*self.filter_fn)(p) {
-                info!("skipping {} due to filter", p);
+                debug!("skipping {} due to filter", p);
                 continue;
             }
 
