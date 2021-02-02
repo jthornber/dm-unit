@@ -1298,7 +1298,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_4_3 << 3)
                         | (imm_2_1 << 1);
                     let imm = sign_extend(imm as i32, 8);
-                    BEQ {
+                    BNE {
                         rs1,
                         rs2: Zero,
                         imm,
