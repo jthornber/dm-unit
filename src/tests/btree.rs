@@ -84,7 +84,7 @@ impl<G: Guest> Guest for BTreeInfo<G> {
     }
 }
 
-fn alloc_info<'a, G: Guest>(
+fn auto_info<'a, G: Guest>(
     fix: &'a mut Fixture,
     info: &BTreeInfo<G>,
 ) -> Result<(AutoGPtr<'a>, Addr)> {
@@ -93,7 +93,7 @@ fn alloc_info<'a, G: Guest>(
 }
 
 pub fn dm_btree_empty<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>) -> Result<u64> {
-    let (mut fix, info_ptr) = alloc_info(fix, info)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
     let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
@@ -103,10 +103,46 @@ pub fn dm_btree_empty<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>) -> Resul
 }
 
 pub fn dm_btree_del<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>, root: u64) -> Result<()> {
-    let (mut fix, info_ptr) = alloc_info(fix, info)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
     fix.call_with_errno("dm_btree_del")
+}
+
+fn auto_keys<'a>(fix: &'a mut Fixture, keys: &Vec<u64>) -> Result<(AutoGPtr<'a>, Addr)> {
+    let ptr = fix.vm.mem.alloc(8 * keys.len())?;
+
+    for i in 0..keys.len() {
+        let bytes = keys[i].to_le_bytes();
+        fix.vm.mem.write(Addr(ptr.0 + (8 * i as u64)), &bytes, PERM_WRITE)?;
+    }
+
+    Ok((AutoGPtr::new(fix, ptr), ptr))
+}
+
+// Returns the new root
+pub fn dm_btree_insert<G: Guest>(
+    fix: &mut Fixture,
+    info: &BTreeInfo<G>,
+    root: u64,
+    keys: &Vec<u64>,
+    v: &G,
+) -> Result<u64> {
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
+    let (mut fix, guest_keys) = auto_keys(&mut *fix, keys)?;
+    let (mut fix, guest_value) = auto_guest(&mut *fix, v, PERM_READ | PERM_WRITE)?;
+    let (mut fix, new_root) = auto_alloc(&mut *fix, 8)?;
+
+    fix.vm.set_reg(A0, info_ptr.0);
+    fix.vm.set_reg(A1, root);
+    fix.vm.set_reg(A2, guest_keys.0);
+    fix.vm.set_reg(A3, guest_value.0);
+    fix.vm.set_reg(A4, new_root.0);
+
+    fix.call_with_errno("dm_btree_insert")?;
+
+    let new_root = fix.vm.mem.read_into::<u64>(new_root, PERM_READ)?;
+    Ok(new_root)
 }
 
 /*
@@ -155,18 +191,39 @@ impl Guest for Value64 {
 #[allow(dead_code)]
 fn enable_traces(fix: &mut Fixture) -> Result<()> {
     let traces = [
-        "dm_tm_create_with_sm",
+        "btree_insert_raw",
+        "dm_btree_cursor_begin",
+        "dm_btree_cursor_end",
+        "dm_btree_cursor_get_value",
+        "dm_btree_cursor_next",
+        "dm_btree_cursor_skip",
+        "dm_btree_del",
         "dm_btree_empty",
-        "sm_bootstrap_new_block",
-        "dm_tm_create",
+        "dm_btree_find_highest_key",
+        "dm_btree_find_lowest_key",
+        "dm_btree_insert",
+        "dm_btree_insert_notify",
+        "dm_btree_lookup",
+        "dm_btree_lookup_next",
+        "dm_btree_lookup_next_single",
+        "dm_btree_remove",
+        "dm_btree_remove_leaves",
+        "dm_btree_walk",
         "dm_sm_metadata_create",
-        "sm_ll_new_metadata",
-        "sm_ll_init",
-        "metadata_ll_init_index",
+        "dm_tm_create",
+        "dm_tm_create_with_sm",
         "dm_tm_new_block",
+        "insert",
+        "insert_at",
+        "lower_bound",
+        "metadata_ll_init_index",
+        "shadow_current",
+        "shadow_step",
+        "sm_bootstrap_new_block",
         "sm_bootstrap_new_block",
         "sm_ll_extend",
-        "dm_btree_del",
+        "sm_ll_init",
+        "sm_ll_new_metadata",
     ];
     for t in &traces {
         fix.trace_func(t)?;
@@ -198,10 +255,44 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
+    fix.standard_globals()?;
+
+    let bm = dm_bm_create(fix, 1024)?;
+    let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
+
+    let vtype: BTreeValueType<Value64> = BTreeValueType {
+        context: Addr(0),
+        inc_fn: Addr(0),
+        dec_fn: Addr(0),
+        eq_fn: Addr(0),
+        rust_value_type: PhantomData,
+    };
+    let info = BTreeInfo {
+        tm,
+        levels: 1,
+        vtype,
+    };
+    let mut root = dm_btree_empty(fix, &info)?;
+
+    for i in 0u64..1024u64 {
+        let keys = vec![i];
+        let v = Value64(i + 1000000);
+        root = dm_btree_insert(fix, &info, root, &keys, &v)?;
+    }
+
+    dm_btree_del(fix, &info, root)?;
+    Ok(())
+}
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     info!("registered /pdata/btree/remove tests");
 
     runner.register("/pdata/btree/del/empty", Box::new(test_del_empty));
+    runner.register(
+        "/pdata/btree/insert/ascending",
+        Box::new(test_insert_ascending),
+    );
     Ok(())
 }
 

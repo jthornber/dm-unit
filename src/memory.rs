@@ -1,6 +1,7 @@
 use fixedbitset::FixedBitSet;
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
+use log::debug;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::result;
@@ -233,6 +234,32 @@ impl Memory {
         self.index.insert(Box::new(MMapIndex::new(begin, index)));
     }
 
+    // Checks there are no mappings in a particular range
+    fn no_mappings(&self, begin: u64, end: u64) -> bool {
+        let mut cur = self.index.upper_bound(Bound::Included(&begin));
+
+        loop {
+            if cur.is_null() {
+                break;
+            }
+
+            let index = cur.get().unwrap().index;
+            let mm = self.mmaps.get(&index).unwrap();
+            if mm.begin >= end {
+                break;
+            }
+
+            if mm.end > begin && (mm.begin >= begin || mm.end < end) {
+                debug!("mapping clash: mm.begin = {:x}, mm.end = {:x}", mm.begin, mm.end);
+                return false;
+            }
+
+            cur.move_next();
+        }
+
+        true
+    }
+
     /// Remove an mmapped area.
     pub fn unmap(&mut self, begin: Addr) -> Result<()> {
         let mut cur = self.index.find_mut(&begin.0);
@@ -251,7 +278,16 @@ impl Memory {
     /// data will be uninitialised.
     pub fn mmap(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
         assert!(begin.0 <= end.0);
+
+        // Nothing should be mapped in this range.  This is really
+        // checking the buddy allocator is working ok.  FIXME: paranoia,
+        // remove when confident.
+        //
+        //
+        assert!(self.no_mappings(begin.0, end.0));
+
         let mm = MMap::new(begin.0, end.0, perms);
+
         self.insert_mm(mm);
         Ok(())
     }
@@ -317,6 +353,31 @@ impl Memory {
         self.get_indexes_(begin, end, perms, false)
     }
 
+    // Checks that a memory region is mapped with the particular permissions.
+    pub fn check_perms(&self, mut begin: Addr, end: Addr, perms: u8) -> Result<()> {
+        let mut indexes = self.get_indexes(begin.0, end.0, perms)?;
+
+        while begin < end {
+            if indexes.len() == 0 {
+                return Err(MemErr::BadPerms(begin, perms));
+            }
+
+            let index = indexes.pop_front().unwrap();
+            let mm = &self.mmaps.get(&index).unwrap();
+
+            // begin must be within mm, otherwise we have a gap.
+            if begin.0 >= mm.end {
+                return Err(MemErr::BadPerms(begin, perms));
+            }
+
+            let len = std::cmp::min(end.0, mm.end) - begin.0;
+            mm.check_perms(begin.0, perms)?;
+            begin = Addr(begin.0 + len);
+        }
+
+        Ok(())
+    }
+
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
     /// not set for any byte in the range.
     pub fn read(&self, begin: Addr, mut bytes: &mut [u8], perms: u8) -> Result<()> {
@@ -346,6 +407,14 @@ impl Memory {
 
         Ok(())
     }
+
+    /*
+    pub fn read(&self, begin: Addr, bytes: &mut [u8], perms: u8) -> Result<()> {
+        let r = self.read_(begin, bytes, perms);
+        assert!(r.is_ok());
+        r
+    }
+    */
 
     /// Writes bytes to a memory range.  Fails in the bits in 'perms' are
     /// not set for any byte in the range.
@@ -425,12 +494,12 @@ impl Memory {
         // detect overwrites.
         let extra_len = len + 8;
         let ptr = self.heap.alloc(extra_len)?;
+        assert!(!self.allocations.contains_key(&ptr.0));
         self.allocations.insert(ptr.0, extra_len);
 
         // mmap just the central part that may be used.
         let ptr = Addr(ptr.0 + 4);
         self.mmap(ptr, Addr(ptr.0 + len as u64), perms)?;
-
         Ok(ptr)
     }
 
@@ -443,9 +512,10 @@ impl Memory {
     pub fn free(&mut self, ptr: Addr) -> Result<()> {
         let heap_ptr = Addr(ptr.0 - 4);
 
-        if let Some(_len) = self.allocations.remove(&heap_ptr.0) {
+        if let Some(extra_len) = self.allocations.remove(&heap_ptr.0) {
             self.heap.free(heap_ptr)?;
             self.unmap(ptr)?;
+            assert!(self.no_mappings(ptr.0, ptr.0 + extra_len as u64 - 8 as u64));
             Ok(())
         } else {
             Err(MemErr::BadFree(ptr))
@@ -478,7 +548,7 @@ impl Memory {
 
             let len = std::cmp::min(end, mm.end) - begin;
             let start = (begin - mm.begin) as usize;
-            let stop = start + (end - begin) as usize;
+            let stop = start + len as usize;
             let mem = &mm.bytes[start..stop];
 
             for byte in mem {
@@ -557,6 +627,7 @@ impl BuddyAllocator {
             self.free_blocks[high_order].insert(get_buddy(index, high_order));
         }
 
+        assert!(!self.allocated.contains_key(&index));
         self.allocated.insert(index, order);
         Ok(index)
     }
@@ -572,18 +643,19 @@ impl BuddyAllocator {
         let mut order = order.unwrap();
         loop {
             let buddy = get_buddy(index, order);
-            if !self.allocated.contains_key(&buddy) {
-                self.free_blocks[order].remove(&buddy);
-                order += 1;
-            } else {
+
+            // Is the buddy free at this order?
+            if !self.free_blocks[order].contains(&buddy) {
                 break;
             }
+            self.free_blocks[order].remove(&buddy);
+            order += 1;
 
             if buddy < index {
                 index = buddy;
             }
 
-            if order == self.free_blocks.len() - 1 {
+            if order == self.free_blocks.len() {
                 break;
             }
         }
@@ -616,6 +688,7 @@ fn test_alloc_small() -> Result<()> {
 
 const MIN_BLOCK_SIZE: usize = 8;
 const MIN_BLOCK_SHIFT: usize = 3;
+const MIN_BLOCK_MASK: u64 = 0b111;
 
 /// A simple buddy allocator.  This is not attached to the memory directly
 /// so the layer above this needs to allocate via this heap, and then mmap
@@ -640,7 +713,9 @@ impl Heap {
     }
 
     fn addr_to_index(&self, ptr: Addr) -> u64 {
-        (ptr.0 - self.base) >> MIN_BLOCK_SHIFT
+        let ptr = ptr.0 - self.base;
+        assert!((ptr & MIN_BLOCK_MASK) == 0);
+        ptr >> MIN_BLOCK_SHIFT
     }
 
     fn index_to_addr(&self, index: u64) -> Addr {
@@ -655,8 +730,6 @@ impl Heap {
         let order = size.next_power_of_two().trailing_zeros() - (MIN_BLOCK_SHIFT as u32);
         let index = self.allocator.alloc(order as usize)?;
         let ptr = self.index_to_addr(index);
-
-        // FIXME: adjust perms in heap here.
 
         Ok(ptr)
     }

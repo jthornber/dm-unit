@@ -142,7 +142,6 @@ pub enum Inst {
     XORI { rd: Reg, rs: Reg, imm: i32 },
     ORI { rd: Reg, rs: Reg, imm: i32 },
     ANDI { rd: Reg, rs: Reg, imm: i32 },
-    ANDIW { rd: Reg, rs: Reg, imm: i32 },
     SLLI { rd: Reg, rs: Reg, shamt: i32 },
     SLLIW { rd: Reg, rs: Reg, shamt: u32 },
     SRLI { rd: Reg, rs: Reg, shamt: u32 },
@@ -271,7 +270,6 @@ impl fmt::Display for Inst {
             XORI { rd, rs, imm } => write!(f, "xori\t{},{},{}", rd, rs, imm),
             ORI { rd, rs, imm } => write!(f, "ori\t{},{},{}", rd, rs, imm),
             ANDI { rd, rs, imm } => write!(f, "andi\t{},{},{}", rd, rs, imm),
-            ANDIW { rd, rs, imm } => write!(f, "andiw\t{},{},{}", rd, rs, imm),
             SLLI { rd, rs, shamt } => write!(f, "slli\t{},{},{}", rd, rs, shamt),
             SLLIW { rd, rs, shamt } => write!(f, "slliw\t{},{},{}", rd, rs, shamt),
             SRLI { rd, rs, shamt } => write!(f, "srli\t{},{},{}", rd, rs, shamt),
@@ -847,7 +845,7 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     let mode = (inst.imm >> 5) & 0b1111111;
                     let shamt = (inst.imm & 0b11111) as u32;
                     match mode {
-                        0b0000000 => SLLIW {
+                        0b0000000 => SRLIW {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt,

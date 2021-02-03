@@ -50,7 +50,7 @@ impl Fixture {
         module.push("drivers/md/persistent-data/dm-persistent-data.ko");
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
-        let heap_end = Addr(heap_begin.0 + (64 * 1024));
+        let heap_end = Addr(heap_begin.0 + (1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
         let symbols = load_elf(&mut vm.mem, module)?;
@@ -358,6 +358,11 @@ pub fn auto_alloc<'a>(fix: &'a mut Fixture, len: usize) -> Result<(AutoGPtr<'a>,
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 
+pub fn auto_guest<'a, G: Guest>(fix: &'a mut Fixture, v: &G, perms: u8) -> Result<(AutoGPtr<'a>, Addr)> {
+    let ptr = alloc_guest::<G>(&mut fix.vm.mem, v, perms)?;
+    Ok((AutoGPtr::new(fix, ptr), ptr))
+}
+
 //-------------------------------
 
 pub fn printk(fix: &mut Fixture) -> Result<()> {
@@ -371,6 +376,14 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
     let dest = Addr(fix.vm.reg(A0));
     let src = Addr(fix.vm.reg(A1));
     let len = fix.vm.reg(A2);
+
+    debug!("memcpy({:x}, {:x}, {:x})", dest, src, len);
+
+    // Let's check the bounds before we both allocating the
+    // intermediate buffer.
+    fix.vm.mem.check_perms(src, Addr(src.0 + len), PERM_READ)?;
+    fix.vm.mem.check_perms(dest, Addr(dest.0 + len), PERM_WRITE)?;
+
     let mut bytes = vec![0u8; len as usize];
     fix.vm.mem.read(src, &mut bytes, PERM_READ)?;
     fix.vm.mem.write(dest, &bytes, PERM_WRITE)?;

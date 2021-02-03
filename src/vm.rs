@@ -103,7 +103,7 @@ impl VM {
 
     pub fn setup_stack(&mut self, size: u64) -> Result<()> {
         // We put the stack just below the 4G mark.
-        let top = 0xffffffff;
+        let top = 1 << 32;
         let base = top - size;
         self.mem
             .mmap_zeroes(Addr(base), Addr(top), PERM_READ | PERM_WRITE)
@@ -370,7 +370,7 @@ impl VM {
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
                     .map_err(|e| VmErr::BadAccess(e))?;
-                self.set_reg(rd, i64::from_le_bytes(bytes) as i64 as u64);
+                self.set_reg(rd, i64::from_le_bytes(bytes) as u64);
                 self.inc_pc(pc_increment);
             }
             LBU { rd, rs, imm } => {
@@ -441,7 +441,8 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             ADDIW { rd, rs, imm } => {
-                self.set_reg(rd, self.reg(rs).wrapping_add(imm as i32 as u32 as u64));
+                let rs = self.reg(rs) as u32;
+                self.set_reg(rd, rs.wrapping_add(imm as u32) as i32 as u32 as u64);
                 self.inc_pc(pc_increment);
             }
             SLTI { rd, rs, imm } => {
@@ -535,18 +536,13 @@ impl VM {
                 self.set_reg(rd, self.reg(rs1) & self.reg(rs2));
                 self.inc_pc(pc_increment);
             }
-            ANDIW { rd, rs, imm } => {
-                let rs = self.reg(rs) as i32;
-                self.set_reg(rd, rs.wrapping_add(imm) as i32 as i64 as u64);
-                self.inc_pc(pc_increment);
-            }
             SLLIW { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
                 self.set_reg(rd, (rs << shamt) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             SRLIW { rd, rs, shamt } => {
-                let rs = self.reg(rs) as i32;
+                let rs = self.reg(rs) as u32;
                 self.set_reg(rd, (rs >> shamt) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -565,6 +561,7 @@ impl VM {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 self.set_reg(rd, rs1.wrapping_sub(rs2) as i32 as i64 as u64);
+                debug!("subw {:x} <- {:x} - {:x}", self.reg(rd), rs1, rs2);
                 self.inc_pc(pc_increment);
             }
             SLLW { rd, rs1, rs2 } => {
@@ -646,8 +643,8 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             MULW { rd, rs1, rs2 } => {
-                let rs1 = self.reg(rs1);
-                let rs2 = self.reg(rs2);
+                let rs1 = self.reg(rs1) as u32;
+                let rs2 = self.reg(rs2) as u32;
                 let v = (rs1 as u32).wrapping_mul(rs2 as u32);
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);

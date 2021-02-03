@@ -206,7 +206,7 @@ fn relocate(
     rtype: RelocationType,
     location: Addr,
     sym: Addr,
-    addend: u64,
+    _addend: u64,
 ) -> Result<()> {
     use RelocationType::*;
 
@@ -225,6 +225,16 @@ fn relocate(
                 (old & 0x1fff07f) | imm12 | imm11 | imm10_5 | imm4_1
             })?;
         }
+        RJAL => {
+            let offset = addr_offset(sym, location) as u32;
+            let imm20 = (offset & 0x100000) << (31 - 20);
+            let imm19_12 = offset & 0xff000;
+            let imm11 = (offset & 0x800) << (20 - 11);
+            let imm10_1 = (offset & 0x7fe) << (30 - 10);
+            mutate_u32(mem, location, |old| {
+                (old & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
+            })?;
+        }
         RCALL => {
             let offset = addr_offset(sym, location);
 
@@ -240,13 +250,6 @@ fn relocate(
             mutate_u32(mem, location, |old| (old & 0xfff) | hi20)?;
         }
         RPCREL_LO12_I => {
-            if (location == Addr(0x1049dc)) || (location == Addr(0x1049e6)) {
-                eprintln!(
-                    "found relocation: rtype = {:?}, sym = {:?}, addend = {:x}",
-                    rtype, sym, addend
-                );
-            }
-
             mutate_u32(mem, location, |old| {
                 (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
             })?;
@@ -356,7 +359,13 @@ fn exec_relocations(
                     let sym_index = rloc.sym as usize;
                     let sym = &syms[sym_index];
 
-                    relocate(mem, rloc.rtype, location, Addr(sym.value + rloc.addend), rloc.addend)?;
+                    relocate(
+                        mem,
+                        rloc.rtype,
+                        location,
+                        Addr(sym.value + rloc.addend),
+                        rloc.addend,
+                    )?;
                 }
                 CompoundRel::Pair(hi_rloc, lo_rloc) => {
                     // These is the location of the instruction that needs adjusting.
