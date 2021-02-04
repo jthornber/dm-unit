@@ -1,0 +1,45 @@
+diff --git a/Makefile b/Makefile
+index e0af7a4a5..673772625 100644
+--- a/Makefile
++++ b/Makefile
+@@ -850,6 +850,12 @@ endif # CONFIG_DEBUG_INFO
+ KBUILD_CFLAGS += $(DEBUG_CFLAGS)
+ export DEBUG_CFLAGS
+ 
++ifdef CONFIG_NO_AUTO_INLINE
++KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
++		   $(call cc-option, -fno-inline-small-functions) \
++		   $(call cc-option, -fno-inline-functions-called-once)
++endif
++
+ ifdef CONFIG_FUNCTION_TRACER
+ ifdef CONFIG_FTRACE_MCOUNT_RECORD
+   # gcc 5 supports generating the mcount tables directly
+diff --git a/lib/Kconfig b/lib/Kconfig
+index 46806332a..087903ddc 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -86,6 +86,23 @@ config ARCH_HAS_FAST_MULTIPLIER
+ config ARCH_USE_SYM_ANNOTATIONS
+ 	bool
+ 
++config NO_AUTO_INLINE
++	bool "Disable compiler auto-inline optimizations"
++	help
++	  This will prevent the compiler from optimizing the kernel by
++	  auto-inlining functions not marked with the inline keyword.
++	  With this option, only functions explicitly marked with
++	  "inline" will be inlined. This will allow the function tracer
++	  to trace more functions because it only traces functions that
++	  the compiler has not inlined.
++
++	  Enabling this function can help debugging a kernel if using
++	  the function tracer. But it can also change how the kernel
++	  works, because inlining functions may change the timing,
++	  which could make it difficult while debugging race conditions.
++
++	  If unsure, select N.
++
+ config INDIRECT_PIO
+ 	bool "Access I/O in non-MMIO mode"
+ 	depends on ARM64
