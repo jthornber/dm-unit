@@ -377,10 +377,7 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
     let src = Addr(fix.vm.reg(A1));
     let len = fix.vm.reg(A2);
 
-    debug!("memcpy({:x}, {:x}, {:x})", dest, src, len);
-
-    // Let's check the bounds before we both allocating the
-    // intermediate buffer.
+    // Let's check the bounds before allocating the intermediate buffer.
     fix.vm.mem.check_perms(src, Addr(src.0 + len), PERM_READ)?;
     fix.vm.mem.check_perms(dest, Addr(dest.0 + len), PERM_WRITE)?;
 
