@@ -1,6 +1,6 @@
 use crate::memory::*;
 use crate::test_runner::*;
-use crate::tests::fixture::*;
+use crate::fixture::*;
 use crate::wrappers::transaction_manager::*;
 use crate::wrappers::btree::*;
 use crate::wrappers::block_manager::*;

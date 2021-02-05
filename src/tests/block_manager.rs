@@ -1,7 +1,7 @@
 use crate::decode::*;
 use crate::memory::*;
 use crate::test_runner::*;
-use crate::tests::fixture::*;
+use crate::fixture::*;
 use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};

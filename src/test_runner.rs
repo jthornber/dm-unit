@@ -1,4 +1,4 @@
-use crate::tests::fixture::*;
+use crate::fixture::*;
 use anyhow::Result;
 use gdbstub::arch::riscv::Riscv64;
 use gdbstub::arch::Arch;

@@ -1,6 +1,6 @@
 use crate::decode::*;
 use crate::memory::*;
-use crate::tests::fixture::*;
+use crate::fixture::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};

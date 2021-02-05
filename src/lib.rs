@@ -8,6 +8,7 @@ extern crate regex;
 extern crate thiserror;
 
 pub mod decode;
+pub mod fixture;
 pub mod loader;
 pub mod memory;
 pub mod primitive;
