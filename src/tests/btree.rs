@@ -1,9 +1,9 @@
 use crate::memory::*;
 use crate::test_runner::*;
-use crate::tests::block_manager::*;
 use crate::tests::fixture::*;
 use crate::wrappers::transaction_manager::*;
 use crate::wrappers::btree::*;
+use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
