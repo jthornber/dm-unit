@@ -347,7 +347,13 @@ fn exec_relocations(
         // Each relocation section has a corresponding code section that it
         // mutates.  We need the base address that this section is loaded at.
         let index = r.shdr.info as u16;
-        let base = bases.get(indexes.get(&index).unwrap()).unwrap();
+        let base = match bases.get(indexes.get(&index).unwrap()) {
+            Some(base) => base,
+            None => {
+                debug!("No base found for section {}", r.shdr.name);
+                return Ok(());
+            }
+        };
 
         for crel in build_compound_rels(rlocs) {
             match crel {
