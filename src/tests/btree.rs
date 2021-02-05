@@ -5,7 +5,7 @@ use crate::tests::block_manager::*;
 use crate::tests::fixture::*;
 use crate::tests::transaction_manager::*;
 
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::info;
 use std::io;
@@ -33,6 +33,7 @@ impl<G: Guest> Guest for BTreeValueType<G> {
     fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.context.0)?;
         w.write_u32::<LittleEndian>(G::guest_len() as u32)?;
+        w.write_u32::<LittleEndian>(0)?; // padding
         w.write_u64::<LittleEndian>(self.inc_fn.0)?;
         w.write_u64::<LittleEndian>(self.dec_fn.0)?;
         w.write_u64::<LittleEndian>(self.eq_fn.0)?;
@@ -42,6 +43,7 @@ impl<G: Guest> Guest for BTreeValueType<G> {
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
         let context = Addr(r.read_u64::<LittleEndian>()?);
         let size = r.read_u32::<LittleEndian>()?;
+        let _padding = r.read_u32::<LittleEndian>()?;
         let inc_fn = Addr(r.read_u64::<LittleEndian>()?);
         let dec_fn = Addr(r.read_u64::<LittleEndian>()?);
         let eq_fn = Addr(r.read_u64::<LittleEndian>()?);
@@ -72,12 +74,14 @@ impl<G: Guest> Guest for BTreeInfo<G> {
     fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.tm.0)?;
         w.write_u32::<LittleEndian>(self.levels)?;
+        w.write_u32::<LittleEndian>(0)?; // padding
         self.vtype.pack(w)
     }
 
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
         let tm = Addr(r.read_u64::<LittleEndian>()?);
         let levels = r.read_u32::<LittleEndian>()?;
+        let _padding = r.read_u32::<LittleEndian>()?;
         let vtype = BTreeValueType::unpack(r)?;
 
         Ok(BTreeInfo { tm, levels, vtype })
@@ -109,12 +113,14 @@ pub fn dm_btree_del<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>, root: u64)
     fix.call_with_errno("dm_btree_del")
 }
 
-fn auto_keys<'a>(fix: &'a mut Fixture, keys: &Vec<u64>) -> Result<(AutoGPtr<'a>, Addr)> {
+fn auto_keys<'a>(fix: &'a mut Fixture, keys: &[u64]) -> Result<(AutoGPtr<'a>, Addr)> {
     let ptr = fix.vm.mem.alloc(8 * keys.len())?;
 
     for i in 0..keys.len() {
         let bytes = keys[i].to_le_bytes();
-        fix.vm.mem.write(Addr(ptr.0 + (8 * i as u64)), &bytes, PERM_WRITE)?;
+        fix.vm
+            .mem
+            .write(Addr(ptr.0 + (8 * i as u64)), &bytes, PERM_WRITE)?;
     }
 
     Ok((AutoGPtr::new(fix, ptr), ptr))
@@ -125,7 +131,7 @@ pub fn dm_btree_insert<G: Guest>(
     fix: &mut Fixture,
     info: &BTreeInfo<G>,
     root: u64,
-    keys: &Vec<u64>,
+    keys: &[u64],
     v: &G,
 ) -> Result<u64> {
     let (mut fix, info_ptr) = auto_info(fix, info)?;
@@ -145,32 +151,34 @@ pub fn dm_btree_insert<G: Guest>(
     Ok(new_root)
 }
 
-/*
-// FIXME: return value
-fn dm_btree_lookup(fix: &mut Fixture, info: BTreeInfo, root: u64, keys: &[u64]) -> Result<()> {
-    ensure!(keys.len() == info.levels);
+pub fn dm_btree_lookup<G: Guest>(
+    fix: &mut Fixture,
+    info: &BTreeInfo<G>,
+    root: u64,
+    keys: &[u64],
+) -> Result<G> {
+    ensure!(keys.len() == info.levels as usize);
 
-    let (mut fix, info_ptr) = alloc_info(fix, info)?;
+    let (mut fix, info_ptr) = auto_info(fix, &info)?;
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
 
-    let (mut fix, keys_ptr) = alloc_keys(&mut *fix, keys)?;
+    let (mut fix, keys_ptr) = auto_keys(&mut *fix, keys)?;
     fix.vm.set_reg(A2, keys_ptr.0);
 
-    let (mut fix, value_ptr) = auto_alloc(&mut *fix, ValueType::guest_len())?;
+    let (mut fix, value_ptr) = auto_alloc(&mut *fix, G::guest_len())?;
     fix.vm.set_reg(A3, value_ptr.0);
 
     fix.call_with_errno("dm_btree_lookup")?;
 
-    // FIXME: unpack the value
-    let value = read_guest::<???>(fix.vm.mem, value_ptr);
+    let value = read_guest::<G>(&fix.vm.mem, value_ptr)?;
     Ok(value)
 }
-*/
 
 //-------------------------------
 
 /// A little wrapper to let us store u64's in btrees.
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Value64(u64);
 
 impl Guest for Value64 {
@@ -250,6 +258,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
         levels: 1,
         vtype,
     };
+
     let root = dm_btree_empty(fix, &info)?;
     dm_btree_del(fix, &info, root)?;
     Ok(())
@@ -257,6 +266,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
 
 fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
     fix.standard_globals()?;
+    enable_traces(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
@@ -282,17 +292,66 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
     }
 
     dm_btree_del(fix, &info, root)?;
+    dm_tm_destroy(fix, tm)?;
+    dm_bm_destroy(fix, bm)?;
+
+    Ok(())
+}
+
+fn test_lookup(fix: &mut Fixture) -> Result<()> {
+    fix.standard_globals()?;
+    enable_traces(fix)?;
+
+    let bm = dm_bm_create(fix, 1024)?;
+    let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
+
+    let vtype: BTreeValueType<Value64> = BTreeValueType {
+        context: Addr(0),
+        inc_fn: Addr(0),
+        dec_fn: Addr(0),
+        eq_fn: Addr(0),
+        rust_value_type: PhantomData,
+    };
+    let info = BTreeInfo {
+        tm,
+        levels: 1,
+        vtype,
+    };
+    let mut root = dm_btree_empty(fix, &info)?;
+
+    // FIXME: bump count up
+    let count = 1024u64;
+    for i in 0u64..count {
+        let keys = vec![i];
+        let v = Value64(i + 1000000);
+        root = dm_btree_insert(fix, &info, root, &keys, &v)?;
+    }
+
+    for i in 0u64..count {
+        let keys = vec![i];
+        let v = dm_btree_lookup(fix, &info, root, &keys)?;
+        ensure!(v == Value64(i + 1000000));
+    }
+
+    dm_btree_del(fix, &info, root)?;
+    dm_tm_destroy(fix, tm)?;
+    dm_bm_destroy(fix, bm)?;
+
     Ok(())
 }
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    info!("registered /pdata/btree/remove tests");
+    let mut reg = move |path, func| {
+        let mut p = "/pdata/btree/".to_string();
+        p.push_str(path);
+        runner.register(&p, func);
+    };
 
-    runner.register("/pdata/btree/del/empty", Box::new(test_del_empty));
-    runner.register(
-        "/pdata/btree/insert/ascending",
-        Box::new(test_insert_ascending),
-    );
+    reg("del/empty", Box::new(test_del_empty));
+    reg("insert/ascending", Box::new(test_insert_ascending));
+    reg("lookup", Box::new(test_lookup));
+
+    info!("registered /pdata/btree/remove tests");
     Ok(())
 }
 
