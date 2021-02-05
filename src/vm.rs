@@ -10,11 +10,16 @@ use thiserror::Error;
 
 use Reg::*;
 
+pub struct Stats {
+    pub instrs: u64,
+}
+
 pub struct VM {
     reg: Vec<u64>,
     pub mem: Memory,
     breakpoints: BTreeSet<Addr>,
     last_bp: Option<Addr>,
+    pub stats: Stats,
 }
 
 impl fmt::Display for VM {
@@ -98,6 +103,7 @@ impl VM {
             mem,
             breakpoints: BTreeSet::new(),
             last_bp: None,
+            stats: Stats {instrs: 0},
         }
     }
 
@@ -280,6 +286,8 @@ impl VM {
         } else {
             debug!("{:08x}: {:0>8x}\t{}", pc, bits, inst);
         }
+
+        self.stats.instrs += 1;
 
         use Inst::*;
         match inst {

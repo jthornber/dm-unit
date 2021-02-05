@@ -1,16 +1,15 @@
 use crate::tests::fixture::*;
 use anyhow::Result;
-use log::{debug, info, warn};
-use regex::Regex;
-use std::collections::BTreeMap;
-use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
-use gdbstub::*;
 use gdbstub::arch::riscv::Riscv64;
 use gdbstub::arch::Arch;
 use gdbstub::target::ext::base::singlethread::{SingleThreadOps, StopReason};
 use gdbstub::target::ext::base::{self, ResumeAction};
 use gdbstub::target::{Target, TargetResult};
+use log::{debug, info};
+use regex::Regex;
+use std::collections::BTreeMap;
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 
 //-------------------------------
 
@@ -135,6 +134,7 @@ impl<'a> Target for TestTarget<'a> {
     }
 }
 
+#[allow(dead_code)]
 fn wait_for_gdb_connection(port: u16) -> std::io::Result<TcpStream> {
     let sockaddr = format!("localhost:{}", port);
     eprintln!("Waiting for a GDB connection on {:?}...", sockaddr);
@@ -206,45 +206,17 @@ impl<'a> TestRunner<'a> {
 
             let mut fix = Fixture::new(&self.kernel_dir)?;
 
-            if self.gdb {
-                let gdb_connection = wait_for_gdb_connection(6776)?;
-                let mut debugger = GdbStub::new(gdb_connection);
-
-                // FIXME: need to pass a combination of the fix and test.
-                let mut target = TestTarget {fix, test_fn: t};
-
-                use DisconnectReason::*;
-                match debugger.run(&mut target) {
-                    Ok(disconnect_reason) => match disconnect_reason {
-                        Disconnect => {
-                            info!("GDB client disconnected.");
-                        }
-                        TargetHalted => {
-                            info!("GDB target halted.");
-                        }
-                        Kill => {
-                            info!("GDB client sent a kill command.");
-                        }
-                    }
-                    Err(GdbStubError::TargetError(e)) => {
-                        warn!("GDB target raised fatal error: {:?}", e);
-                        // retry for post mortem debug session.
-                        debugger.run(&mut target)?;
-                    }
-                    Err(e) => return Err(e.into())
-                }
+            if let Err(e) = (*t)(&mut fix) {
+                fail += 1;
+                println!(" FAIL");
+                info!("<<< {}: FAIL, {}", p, e);
+                debug!("{}", fix.vm);
             } else {
-                if let Err(e) = (*t)(&mut fix) {
-                    fail += 1;
-                    println!(" FAIL");
-                    info!("<<< {}: FAIL, {}", p, e);
-                    debug!("{}", fix.vm);
-                } else {
-                    pass += 1;
-                    println!(" PASS");
-                    info!("<<< {}: PASS", p);
-                }
+                pass += 1;
+                println!(" PASS");
+                info!("<<< {}: PASS", p);
             }
+            info!("{} instr", fix.vm.stats.instrs);
         }
 
         Ok((pass, fail))
