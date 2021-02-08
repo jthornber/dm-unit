@@ -125,14 +125,13 @@ impl Fixture {
     }
 
     // Call a named function in the vm.  Returns the contents of Ra.
-    pub fn call(&mut self, func: &str) -> Result<()> {
-        let entry = self.lookup_fn(func)?;
-
+    pub fn call_at(&mut self, code: Addr) -> Result<()> {
         // We need a unique address return control to us.
         let exit_addr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
         self.vm.set_reg(Reg::Ra, exit_addr.0);
-        self.vm.set_pc(entry);
+        self.vm.set_pc(code);
 
+        // FIXME: use AtommicBool
         let completed = Arc::new(Mutex::new(false));
         {
             let completed = completed.clone();
@@ -162,6 +161,10 @@ impl Fixture {
                 }
             }
         }
+    }
+
+    pub fn call(&mut self, func: &str) -> Result<()> {
+        self.call_at(self.lookup_fn(func)?)
     }
 
     // Use this to call functions that return an int errno.
