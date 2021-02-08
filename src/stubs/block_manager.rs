@@ -1,12 +1,12 @@
 use crate::decode::Reg;
+use crate::fixture::*;
 use crate::memory::*;
 use crate::memory::{Addr, PERM_READ, PERM_WRITE};
-use crate::fixture::*;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crc32c::crc32c;
-use log::{warn};
+use log::{info, warn};
 use std::collections::BTreeMap;
 use std::io;
 use std::io::{Read, Write};
@@ -163,6 +163,9 @@ pub struct BlockManager {
     nr_blocks: u64,
     blocks: BTreeMap<u64, Block>,
     read_only: bool,
+
+    nr_read_locks: u64,
+    nr_write_locks: u64,
 }
 
 pub fn bm_create(fix: &mut Fixture) -> Result<()> {
@@ -177,6 +180,8 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
         nr_blocks,
         blocks: BTreeMap::new(),
         read_only: false,
+        nr_read_locks: 0,
+        nr_write_locks: 0,
     });
 
     let guest_addr = fix.vm.mem.alloc(4)?;
@@ -189,6 +194,13 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
 pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
     let bm_ptr = fix.vm.reg(A0);
     let bm = fix.user_data.remove::<BlockManager>(Addr(bm_ptr))?;
+
+    info!(
+        "bm: nr_blocks = {}, nr_read_locks = {}, nr_write_locks = {}",
+        bm.blocks.len(),
+        bm.nr_read_locks,
+        bm.nr_write_locks,
+    );
 
     let mut held = false;
     for (index, b) in &bm.blocks {
@@ -260,6 +272,7 @@ pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
         .write(Addr(result_ptr), &guest_addr.0.to_le_bytes(), PERM_WRITE)?;
 
     // return success
+    bm.nr_read_locks += 1;
     fix.vm.ret(0);
     Ok(())
 }
@@ -304,6 +317,7 @@ fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
         .write(Addr(result_ptr), &guest_addr.0.to_le_bytes(), PERM_WRITE)?;
 
     // return success
+    bm.nr_write_locks += 1;
     fix.vm.ret(0);
     Ok(())
 }
