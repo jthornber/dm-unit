@@ -335,10 +335,8 @@ impl Memory {
                 .expect("mm region present in index but not mmaps");
 
             // begin must be within the region
-            if (begin < mm.begin) || (begin >= mm.end) {
-                if !allow_gaps {
-                    return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-                }
+            if ((begin < mm.begin) || (begin >= mm.end)) && !allow_gaps {
+                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
             }
 
             indexes.push_back(mi.index);
@@ -358,7 +356,7 @@ impl Memory {
         let mut indexes = self.get_indexes(begin.0, end.0, perms)?;
 
         while begin < end {
-            if indexes.len() == 0 {
+            if indexes.is_empty() {
                 return Err(MemErr::BadPerms(begin, perms));
             }
 
@@ -386,7 +384,7 @@ impl Memory {
         let mut indexes = self.get_indexes(begin, end, perms)?;
 
         while begin < end {
-            if indexes.len() == 0 {
+            if indexes.is_empty() {
                 return Err(MemErr::BadPerms(Addr(begin), perms));
             }
 
@@ -425,7 +423,7 @@ impl Memory {
         let mut indexes = self.get_indexes(begin, end, perms)?;
 
         while begin < end {
-            if indexes.len() == 0 {
+            if indexes.is_empty() {
                 return Err(MemErr::BadPerms(Addr(begin), perms));
             }
 
@@ -459,7 +457,7 @@ impl Memory {
         std::mem::swap(&mut mmaps, &mut self.mmaps);
 
         while begin < end {
-            if indexes.len() == 0 {
+            if indexes.is_empty() {
                 return Err(MemErr::BadPerms(Addr(begin), 0));
             }
 
@@ -515,7 +513,7 @@ impl Memory {
         if let Some(extra_len) = self.allocations.remove(&heap_ptr.0) {
             self.heap.free(heap_ptr)?;
             self.unmap(ptr)?;
-            assert!(self.no_mappings(ptr.0, ptr.0 + extra_len as u64 - 8 as u64));
+            assert!(self.no_mappings(ptr.0, ptr.0 + extra_len as u64 - 8_u64));
             Ok(())
         } else {
             Err(MemErr::BadFree(ptr))
@@ -534,7 +532,7 @@ impl Memory {
 
         let mut buffer = Vec::new();
         while begin < end {
-            if indexes.len() == 0 {
+            if indexes.is_empty() {
                 return Err(MemErr::BadPerms(Addr(begin), PERM_READ));
             }
 

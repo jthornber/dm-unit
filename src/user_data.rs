@@ -41,7 +41,7 @@ impl UserData {
         match ud.unwrap().downcast_ref::<T>() {
             Some(v) => Ok(v),
             None => {
-                return Err(UserData::bad_type(ptr));
+                Err(UserData::bad_type(ptr))
             }
         }
     }
@@ -70,6 +70,12 @@ impl UserData {
             },
             None => Err(UserData::bad_address(ptr)),
         }
+    }
+}
+
+impl Default for UserData {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

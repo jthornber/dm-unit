@@ -42,7 +42,7 @@ impl PathFormatter {
     fn dots(&self, count: usize) {
         let mut space = String::new();
         for _ in 0..count {
-            space.push_str(".");
+            space.push('.');
         }
         print!("{}", space);
     }
@@ -149,6 +149,7 @@ fn wait_for_gdb_connection(port: u16) -> std::io::Result<TcpStream> {
 
 //-------------------------------
 
+#[allow(dead_code)]
 pub struct TestRunner<'a> {
     kernel_dir: PathBuf,
     filter_fn: Box<dyn Fn(&str) -> bool + 'a>,

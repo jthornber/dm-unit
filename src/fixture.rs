@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crc32c::crc32c;
 use elf::types::Symbol;
-use libc::{c_char, c_int, strerror_r};
+use libc::{c_int, strerror_r};
 use log::{debug, info, warn};
 use std::collections::BTreeMap;
 use std::ffi::CStr;
@@ -107,10 +107,10 @@ impl Fixture {
                         self.breakpoints.insert(loc, callback);
                         r?;
                     } else {
-                        Err(anyhow!(
+                        return Err(anyhow!(
                             "Breakpoint at {:x?} without callback",
                             self.vm.reg(PC)
-                        ))?;
+                        ));
                     }
                 }
                 Err(VmErr::EBreak) => {
@@ -118,7 +118,7 @@ impl Fixture {
                         warn!("unstubbed global called: {}", global);
                         return Err(anyhow!("unstubbed global access '{}'", global));
                     } else {
-                        Err(VmErr::EBreak)?;
+                        return Err(VmErr::EBreak.into());
                     }
                 }
                 err => err?,
@@ -157,7 +157,7 @@ impl Fixture {
             }
             Err(e) => {
                 let completed = completed.lock().unwrap();
-                if *completed == true {
+                if *completed {
                     Ok(())
                 } else {
                     Err(e)
@@ -247,7 +247,7 @@ impl Fixture {
         };
 
         let exit_callback = {
-            let name = name.clone();
+            let name = name;
             move |fix: &mut Fixture| {
                 fix.trace_exit(&name, fix.vm.reg(A0));
                 fix.vm.pop_reg(Ra)?;
@@ -300,7 +300,7 @@ impl Fixture {
 
 // FIXME: move somewhere else
 pub fn error_string(errno: i32) -> String {
-    let mut buf = [0 as c_char; 512];
+    let mut buf = [0_i8; 512];
 
     let p = buf.as_mut_ptr();
     unsafe {
@@ -336,7 +336,7 @@ impl<'a> Drop for AutoGPtr<'a> {
             .vm
             .mem
             .free(self.ptr)
-            .expect(&format!("couldn't free guest ptr {:?}", self.ptr));
+            .unwrap_or_else(|_| panic!("couldn't free guest ptr {:?}", self.ptr));
     }
 }
 
@@ -358,7 +358,11 @@ pub fn auto_alloc<'a>(fix: &'a mut Fixture, len: usize) -> Result<(AutoGPtr<'a>,
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 
-pub fn auto_guest<'a, G: Guest>(fix: &'a mut Fixture, v: &G, perms: u8) -> Result<(AutoGPtr<'a>, Addr)> {
+pub fn auto_guest<'a, G: Guest>(
+    fix: &'a mut Fixture,
+    v: &G,
+    perms: u8,
+) -> Result<(AutoGPtr<'a>, Addr)> {
     let ptr = alloc_guest::<G>(&mut fix.vm.mem, v, perms)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
@@ -367,7 +371,13 @@ pub fn auto_guest<'a, G: Guest>(fix: &'a mut Fixture, v: &G, perms: u8) -> Resul
 
 pub fn printk(fix: &mut Fixture) -> Result<()> {
     let msg = fix.vm.mem.read_string(Addr(fix.vm.reg(A0)))?;
-    info!("printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x})", &msg[2..], fix.vm.reg(A1), fix.vm.reg(A2), fix.vm.reg(A3));
+    info!(
+        "printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x})",
+        &msg[2..],
+        fix.vm.reg(A1),
+        fix.vm.reg(A2),
+        fix.vm.reg(A3)
+    );
     fix.vm.ret(0);
     Ok(())
 }
@@ -379,7 +389,9 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
 
     // Let's check the bounds before allocating the intermediate buffer.
     fix.vm.mem.check_perms(src, Addr(src.0 + len), PERM_READ)?;
-    fix.vm.mem.check_perms(dest, Addr(dest.0 + len), PERM_WRITE)?;
+    fix.vm
+        .mem
+        .check_perms(dest, Addr(dest.0 + len), PERM_WRITE)?;
 
     let mut bytes = vec![0u8; len as usize];
     fix.vm.mem.read(src, &mut bytes, PERM_READ)?;
@@ -862,7 +874,7 @@ fn bm_checksum(fix: &mut Fixture) -> Result<()> {
     let mut buf = vec![0u8; len as usize];
     fix.vm.mem.read(data, &mut buf, PERM_READ)?;
     let mut csum = crc32c(&buf) ^ 0xffffffff;
-    csum = csum ^ init_xor;
+    csum ^= init_xor;
 
     fix.vm.ret(csum as u64);
     Ok(())

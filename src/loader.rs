@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use elf;
 use elf::types::Symbol;
 use elf::types::*;
 use log::debug;
@@ -40,7 +39,7 @@ fn load_sections(
         // We round up all the sections to be dword aligned so naughty functions like
         // memcpy which read dwords don't get perms errors.
         let begin = Addr(base.0 + len);
-        if s.data.len() == 0 {
+        if s.data.is_empty() {
             let end = Addr(base.0 + next_word(len + s.shdr.size));
             mem.mmap_zeroes(begin, end, perms)
                 .map_err(|_e| anyhow!("couldn't mmap zero section"))?;
@@ -427,9 +426,7 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
     // Build a vector of symbols for each section.
     let mut syms_by_section = BTreeMap::new();
     for (index, s) in syms.iter().enumerate() {
-        if !syms_by_section.contains_key(&s.shndx) {
-            syms_by_section.insert(s.shndx, Vec::new());
-        }
+        syms_by_section.entry(s.shndx).or_insert(Vec::new());
         let v = syms_by_section.get_mut(&s.shndx).unwrap();
         v.push(index);
     }
@@ -501,12 +498,10 @@ pub fn load_elf<P: AsRef<Path>>(mem: &mut Memory, path: P) -> Result<BTreeMap<St
         // adjust the offset for defined symbols
         if sym.shndx == 0 {
             globals.push(i);
-        } else {
-            if let Some(section_name) = indexes.get(&sym.shndx) {
-                if let Some(base) = bases.get(section_name) {
-                    // info!("adjusting {}: {} += {}, section '{}'", sym.name, sym.value, base.0, section_name);
-                    sym.value += base.0;
-                }
+        } else if let Some(section_name) = indexes.get(&sym.shndx) {
+            if let Some(base) = bases.get(section_name) {
+                // info!("adjusting {}: {} += {}, section '{}'", sym.name, sym.value, base.0, section_name);
+                sym.value += base.0;
             }
         }
     }

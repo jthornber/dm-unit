@@ -103,7 +103,7 @@ impl VM {
             mem,
             breakpoints: BTreeSet::new(),
             last_bp: None,
-            stats: Stats {instrs: 0},
+            stats: Stats { instrs: 0 },
         }
     }
 
@@ -113,7 +113,7 @@ impl VM {
         let base = top - size;
         self.mem
             .mmap_zeroes(Addr(base), Addr(top), PERM_READ | PERM_WRITE)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
         self.set_reg(Sp, top);
         Ok(())
     }
@@ -123,7 +123,7 @@ impl VM {
         let bytes = v.to_le_bytes();
         self.mem
             .write(Addr(sp), &bytes, 0)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
         self.set_reg(Sp, sp);
         Ok(())
     }
@@ -167,7 +167,7 @@ impl VM {
         let mut bytes = [0u8; 4];
         self.mem
             .read(src, &mut bytes, PERM_READ)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
         Ok(u32::from_le_bytes(bytes))
     }
 
@@ -176,7 +176,7 @@ impl VM {
         let mut bytes = [0u8; 8];
         self.mem
             .read(src, &mut bytes, PERM_READ)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
         Ok(u64::from_le_bytes(bytes))
     }
 
@@ -185,7 +185,7 @@ impl VM {
         let bytes = v.to_le_bytes();
         self.mem
             .write(dest, &bytes, PERM_WRITE)
-            .map_err(|e| VmErr::BadAccess(e))
+            .map_err(VmErr::BadAccess)
     }
 
     fn set_deref_u64(&mut self, dest: Reg, v: u64) -> Result<()> {
@@ -193,7 +193,7 @@ impl VM {
         let bytes = v.to_le_bytes();
         self.mem
             .write(dest, &bytes, PERM_WRITE)
-            .map_err(|e| VmErr::BadAccess(e))
+            .map_err(VmErr::BadAccess)
     }
 
     fn amo_op_u32<F: FnOnce(u32, u32) -> u32>(
@@ -239,7 +239,7 @@ impl VM {
         let bytes = v.to_le_bytes();
         self.mem
             .write(dest, &bytes, PERM_WRITE)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
         Ok(())
     }
 
@@ -250,7 +250,7 @@ impl VM {
         let mut bytes = [0u8; 8];
         self.mem
             .read(src, &mut bytes, PERM_READ)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
         self.set_reg(rd, i64::from_le_bytes(bytes) as i64 as u64);
 
         // addi sp,sp,8
@@ -273,11 +273,11 @@ impl VM {
         let mut bits = self
             .mem
             .read_into::<u32>(pc, PERM_EXEC)
-            .map_err(|e| VmErr::BadAccess(e))?;
+            .map_err(VmErr::BadAccess)?;
 
         let (inst, pc_increment) = decode_instr(bits).ok_or(VmErr::DecodeError(bits))?;
         if pc_increment == 2 {
-            bits = bits & 0xffff;
+            bits &= 0xffff;
         }
 
         if pc_increment == 2 {
@@ -350,7 +350,7 @@ impl VM {
                 let mut bytes = [0u8; 1];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, i8::from_le_bytes(bytes) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -359,7 +359,7 @@ impl VM {
                 let mut bytes = [0u8; 2];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, i16::from_le_bytes(bytes) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -368,7 +368,7 @@ impl VM {
                 let mut bytes = [0u8; 4];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, i32::from_le_bytes(bytes) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -377,7 +377,7 @@ impl VM {
                 let mut bytes = [0u8; 8];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, i64::from_le_bytes(bytes) as u64);
                 self.inc_pc(pc_increment);
             }
@@ -386,7 +386,7 @@ impl VM {
                 let mut bytes = [0u8; 1];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, u8::from_le_bytes(bytes) as u64);
                 self.inc_pc(pc_increment);
             }
@@ -395,7 +395,7 @@ impl VM {
                 let mut bytes = [0u8; 2];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, u16::from_le_bytes(bytes) as u64);
                 self.inc_pc(pc_increment);
             }
@@ -404,7 +404,7 @@ impl VM {
                 let mut bytes = [0u8; 4];
                 self.mem
                     .read(src, &mut bytes, PERM_READ)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.set_reg(rd, u32::from_le_bytes(bytes) as u64);
                 self.inc_pc(pc_increment);
             }
@@ -414,7 +414,7 @@ impl VM {
                 let bytes = v.to_le_bytes();
                 self.mem
                     .write(dest, &bytes, PERM_WRITE)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             SH { rs1, rs2, imm } => {
@@ -423,7 +423,7 @@ impl VM {
                 let bytes = v.to_le_bytes();
                 self.mem
                     .write(dest, &bytes, PERM_WRITE)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             SW { rs1, rs2, imm } => {
@@ -432,7 +432,7 @@ impl VM {
                 let bytes = v.to_le_bytes();
                 self.mem
                     .write(dest, &bytes, PERM_WRITE)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             SD { rs1, rs2, imm } => {
@@ -441,7 +441,7 @@ impl VM {
                 let bytes = v.to_le_bytes();
                 self.mem
                     .write(dest, &bytes, PERM_WRITE)
-                    .map_err(|e| VmErr::BadAccess(e))?;
+                    .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             ADDI { rd, rs, imm } => {
@@ -736,11 +736,11 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             AMOMINUW { rd, rs1, rs2 } => {
-                self.amo_op_u32(rd, rs1, rs2, |l, r| u32::min(l, r))?;
+                self.amo_op_u32(rd, rs1, rs2, u32::min)?;
                 self.inc_pc(pc_increment);
             }
             AMOMAXUW { rd, rs1, rs2 } => {
-                self.amo_op_u32(rd, rs1, rs2, |l, r| u32::max(l, r))?;
+                self.amo_op_u32(rd, rs1, rs2, u32::max)?;
                 self.inc_pc(pc_increment);
             }
             LRD { rd, rs } => {
@@ -783,11 +783,11 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             AMOMINUD { rd, rs1, rs2 } => {
-                self.amo_op_u64(rd, rs1, rs2, |l, r| u64::min(l, r))?;
+                self.amo_op_u64(rd, rs1, rs2, u64::min)?;
                 self.inc_pc(pc_increment);
             }
             AMOMAXUD { rd, rs1, rs2 } => {
-                self.amo_op_u64(rd, rs1, rs2, |l, r| u64::max(l, r))?;
+                self.amo_op_u64(rd, rs1, rs2, u64::max)?;
                 self.inc_pc(pc_increment);
             }
             ECALL => {

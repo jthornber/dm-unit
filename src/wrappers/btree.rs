@@ -112,7 +112,7 @@ pub fn dm_btree_del<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>, root: u64)
 fn auto_keys<'a>(fix: &'a mut Fixture, keys: &[u64]) -> Result<(AutoGPtr<'a>, Addr)> {
     let ptr = fix.vm.mem.alloc(8 * keys.len())?;
 
-    for i in 0..keys.len() {
+    for (i, _item) in keys.iter().enumerate() {
         let bytes = keys[i].to_le_bytes();
         fix.vm
             .mem
