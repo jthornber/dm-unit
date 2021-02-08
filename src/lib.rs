@@ -12,6 +12,7 @@ pub mod fixture;
 pub mod loader;
 pub mod memory;
 pub mod primitive;
+pub mod stubs;
 pub mod test_runner;
 pub mod tests;
 pub mod user_data;

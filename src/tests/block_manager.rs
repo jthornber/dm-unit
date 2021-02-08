@@ -1,7 +1,8 @@
 use crate::decode::*;
-use crate::memory::*;
-use crate::test_runner::*;
 use crate::fixture::*;
+use crate::memory::*;
+use crate::stubs::*;
+use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};
@@ -27,14 +28,14 @@ fn test_create_nomem(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_create_success(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     let bm = dm_bm_create(fix, 128)?;
     dm_bm_destroy(fix, bm)?;
     Ok(())
 }
 
 fn test_block_size(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     let bm = dm_bm_create(fix, 1024)?;
     let bs = dm_bm_block_size(fix, bm)?;
     assert!(bs == 4096);
@@ -44,7 +45,7 @@ fn test_block_size(fix: &mut Fixture) -> Result<()> {
 fn test_nr_blocks(fix: &mut Fixture) -> Result<()> {
     let nr_blocks = 1234u64;
 
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     let bm = dm_bm_create(fix, nr_blocks)?;
     let nr_blocks = dm_bm_nr_blocks(fix, bm)?;
     assert!(nr_blocks == dm_bm_nr_blocks(fix, bm)?);
@@ -52,7 +53,7 @@ fn test_nr_blocks(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_read_lock(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     let bm = dm_bm_create(fix, 16)?;
     let validator = Addr(0); // Just passing NULL for now
     let b1 = dm_bm_read_lock(fix, bm, 0, validator)?;
@@ -87,7 +88,7 @@ fn test_read_lock(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_write_lock(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     let bm = dm_bm_create(fix, 16)?;
     let validator = Addr(0); // Just passing NULL for now
     let b = dm_bm_write_lock(fix, bm, 0, validator)?;

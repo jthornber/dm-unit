@@ -4,6 +4,7 @@ use crate::fixture::*;
 use crate::wrappers::transaction_manager::*;
 use crate::wrappers::btree::*;
 use crate::wrappers::block_manager::*;
+use crate::stubs::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -80,7 +81,7 @@ fn enable_traces(fix: &mut Fixture) -> Result<()> {
 
 // Delete an empty tree.
 fn test_del_empty(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
@@ -104,7 +105,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     enable_traces(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
@@ -138,7 +139,7 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_lookup(fix: &mut Fixture) -> Result<()> {
-    fix.standard_globals()?;
+    standard_globals(fix)?;
     enable_traces(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
