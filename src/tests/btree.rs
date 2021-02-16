@@ -5,14 +5,59 @@ use crate::wrappers::transaction_manager::*;
 use crate::wrappers::btree::*;
 use crate::wrappers::block_manager::*;
 use crate::stubs::*;
+use crate::stubs::block_manager::*;
 use crate::guest::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::{debug, info};
+use log::*;
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
+use thinp::pdata::btree_walker::*;
+use thinp::pdata::unpack::*;
+use thinp::pdata::btree::*;
+use thinp::pdata::btree;
+use nom::{number::complete::*, IResult};
+
+//-------------------------------
+
+struct NoopVisitor {
+}
+
+impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
+    fn visit(
+        &self,
+        _path: &[u64],
+        _kr: &KeyRange,
+        _header: &NodeHeader,
+        _keys: &[u64],
+        _values: &[V],
+    ) -> btree::Result<()> {
+        Ok(())
+    }
+
+    fn visit_again(&self, _path: &[u64], _b: u64) -> btree::Result<()> {
+        Ok(())
+    }
+
+    fn end_walk(&self) -> btree::Result<()> {
+        Ok(())
+    }
+}
+
+fn check_btree(root: u64) -> Result<()> {
+    let engine = get_bm()?.engine.clone();
+    let walker = BTreeWalker::new(engine, false);
+    let visitor = NoopVisitor {};
+    let mut path = Vec::new();
+
+    debug!(">>> checking btree");
+    walker.walk::<NoopVisitor, Value64>(&mut path, &visitor, root)?;
+    debug!("<<< checked");
+
+    Ok(())
+}
 
 //-------------------------------
 
@@ -32,6 +77,17 @@ impl Guest for Value64 {
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
         let v = r.read_u64::<LittleEndian>()?;
         Ok(Value64(v))
+    }
+}
+
+impl Unpack for Value64 {
+    fn disk_size() -> u32 {
+        8
+    }
+    
+    fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
+        let (i, v) = le_u64(data)?;
+        Ok((i, Value64(v)))
     }
 }
 
@@ -85,7 +141,6 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
-    debug!("del: 0");
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
 
     let vtype: BTreeValueType<Value64> = BTreeValueType {
@@ -101,11 +156,8 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
         vtype,
     };
 
-    debug!("del: 1");
     let root = dm_btree_empty(fix, &info)?;
-    debug!("del: 2");
     dm_btree_del(fix, &info, root)?;
-    debug!("del: 3");
     Ok(())
 }
 
@@ -135,6 +187,8 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         let v = Value64(i + 1000000);
         root = dm_btree_insert(fix, &info, root, &keys, &v)?;
     }
+
+    check_btree(root)?;
 
     dm_btree_del(fix, &info, root)?;
     dm_tm_destroy(fix, tm)?;

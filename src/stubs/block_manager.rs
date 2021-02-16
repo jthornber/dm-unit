@@ -7,7 +7,7 @@ use crate::memory::{Addr, PERM_READ, PERM_WRITE};
 use anyhow::{anyhow, Result};
 use crc32c::crc32c;
 use log::{info, warn};
-use thinp::io_engine::IoEngine;
+use std::sync::Arc;
 
 use Reg::*;
 
@@ -16,7 +16,7 @@ use Reg::*;
 // We only support a single bm atm.
 static mut BLOCK_MANAGER: Option<(Addr, BlockManager)> = None;
 
-fn get_bm<'a>() -> Result<&'a BlockManager> {
+pub fn get_bm<'a>() -> Result<&'a BlockManager> {
     unsafe {
         if BLOCK_MANAGER.is_none() {
             Err(anyhow!("no block manager created"))
@@ -26,7 +26,7 @@ fn get_bm<'a>() -> Result<&'a BlockManager> {
     }
 }
 
-fn get_bm_mut<'a>() -> Result<&'a mut BlockManager> {
+pub fn get_bm_mut<'a>() -> Result<&'a mut BlockManager> {
     unsafe {
         if BLOCK_MANAGER.is_none() {
             return Err(anyhow!("no block manager created"));
@@ -42,20 +42,20 @@ fn get_bm_mut<'a>() -> Result<&'a mut BlockManager> {
     }
 }
 
-fn set_bm(gptr: Addr, bm: BlockManager) -> Result<()> {
+pub fn set_bm(gptr: Addr, bm: BlockManager) -> Result<()> {
     unsafe {
         /*
         if BLOCK_MANAGER.is_some() {
             Err(anyhow!("dm-unit only supports a single block manager"))
         } else {
             */
-            BLOCK_MANAGER = Some((gptr, bm));
-            Ok(())
+        BLOCK_MANAGER = Some((gptr, bm));
+        Ok(())
         //}
     }
 }
 
-fn clear_bm() {
+pub fn clear_bm() {
     unsafe {
         BLOCK_MANAGER = None;
     }
@@ -68,7 +68,7 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
 
     let nr_blocks = fix.vm.mem.read_into::<u64>(Addr(bdev_ptr), PERM_READ)?;
 
-    let engine = CoreEngine::new(nr_blocks);
+    let engine = Arc::new(CoreEngine::new(nr_blocks));
     let bm = BlockManager::new(engine);
     let guest_addr = fix.vm.mem.alloc(4)?;
     set_bm(guest_addr, bm)?;
@@ -82,8 +82,7 @@ pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
     let bm = get_bm_mut()?;
 
     info!(
-        "bm: nr_blocks = {}, nr_read_locks = {}, nr_write_locks = {}",
-        bm.engine.residency(),
+        "bm: nr_read_locks = {}, nr_write_locks = {}",
         bm.nr_read_locks,
         bm.nr_write_locks,
     );

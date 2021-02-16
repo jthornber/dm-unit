@@ -6,7 +6,7 @@ use log::debug;
 use std::collections::BTreeMap;
 use std::io;
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thinp::io_engine;
 use thinp::io_engine::{IoEngine, BLOCK_SIZE};
 
@@ -137,7 +137,7 @@ pub enum Lock {
 }
 
 pub struct BlockManager {
-    pub engine: CoreEngine,
+    pub engine: Arc<dyn IoEngine + Sync + Send>,
     pub locks: BTreeMap<u64, Lock>,
 
     pub nr_read_locks: u64,
@@ -145,7 +145,7 @@ pub struct BlockManager {
 }
 
 impl BlockManager {
-    pub fn new(engine: CoreEngine) -> Self {
+    pub fn new(engine: Arc<dyn IoEngine + Sync + Send>) -> Self {
         BlockManager {
             engine,
             locks: BTreeMap::new(),
