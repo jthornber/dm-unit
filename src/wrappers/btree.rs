@@ -1,9 +1,11 @@
 use crate::decode::*;
-use crate::memory::*;
 use crate::fixture::*;
+use crate::guest::*;
+use crate::memory::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use log::debug;
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
@@ -106,6 +108,7 @@ pub fn dm_btree_del<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>, root: u64)
     let (mut fix, info_ptr) = auto_info(fix, info)?;
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
+    debug!("about to call dm_btree_del");
     fix.call_with_errno("dm_btree_del")
 }
 

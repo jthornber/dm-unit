@@ -1,8 +1,8 @@
 use crate::decode::Reg;
+use crate::guest::*;
 use crate::loader::*;
 use crate::memory::*;
-use crate::memory::{Addr, PERM_EXEC, PERM_READ};
-use crate::user_data::*;
+use crate::memory::{Addr, PERM_EXEC};
 use crate::vm::*;
 
 use anyhow::{anyhow, Result};
@@ -11,11 +11,8 @@ use libc::{c_int, strerror_r};
 use log::{debug, warn};
 use std::collections::BTreeMap;
 use std::ffi::CStr;
-use std::io;
-use std::io::{Cursor, Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::str;
 use std::sync::{Arc, Mutex};
 
 use Reg::*;
@@ -34,12 +31,47 @@ pub struct Fixture {
     // Associates breakpoint addresses with callback functions.
     breakpoints: BTreeMap<u64, FixCallback>,
 
-    // Associates an address in the vm with rust user data.
-    pub user_data: UserData,
-
     // Current indentation for function tracing.
     trace_indent: usize,
+
+
 }
+
+/*
+struct AutoUserData<'a> {
+    fix: &'a mut Fixture,
+    user_data: UserData,
+}
+
+impl<'a> Drop for AutoUserData<'a> {
+    fn drop(&mut self) {
+        std::mem::swap(&mut self.user_data, &mut self.fix.user_data);
+    }
+}
+
+impl<'a> Deref for AutoUserData<'a> {
+    type Target = Fixture;
+    fn deref(&self) -> &Self::Target {
+        self.fix
+    }
+}
+
+impl<'a> DerefMut for AutoUserData<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.fix
+    }
+}
+
+impl<'a> AutoUserData<'a> {
+    pub fn get_user_data(&self) -> &UserData {
+        &self.user_data
+    }
+
+    pub fn get_user_data_mut(&mut self) -> &mut UserData {
+        &mut self.user_data
+    }
+}
+*/
 
 impl Fixture {
     pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Result<Self> {
@@ -60,7 +92,6 @@ impl Fixture {
             vm,
             symbols,
             breakpoints: BTreeMap::new(),
-            user_data: UserData::new(),
             trace_indent: 0,
         })
     }
@@ -277,7 +308,7 @@ pub fn error_string(errno: i32) -> String {
         }
 
         let p = p as *const _;
-        str::from_utf8(CStr::from_ptr(p).to_bytes())
+        std::str::from_utf8(CStr::from_ptr(p).to_bytes())
             .unwrap()
             .to_owned()
     }
@@ -333,45 +364,6 @@ pub fn auto_guest<'a, G: Guest>(
 ) -> Result<(AutoGPtr<'a>, Addr)> {
     let ptr = alloc_guest::<G>(&mut fix.vm.mem, v, perms)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
-}
-
-//-------------------------------
-
-// Guest types must always consume the same amount of contiguous guest
-// memory.
-pub trait Guest {
-    fn guest_len() -> usize;
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()>;
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self>
-    where
-        Self: std::marker::Sized;
-}
-
-// Allocates space on the guest and copies 'bytes' into it.
-pub fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr> {
-    let mut bytes = vec![0; G::guest_len()];
-    let mut w = Cursor::new(&mut bytes);
-    v.pack(&mut w)?;
-    let ptr = mem.alloc_perms(bytes.len(), perms)?;
-    mem.write(ptr, &bytes, 0)?;
-    Ok(ptr)
-}
-
-// Copies data from the guest to host.
-pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
-    let len = G::guest_len();
-    let mut bytes = vec![0; len];
-    mem.read(ptr, &mut bytes, PERM_READ)?;
-    let mut r = Cursor::new(&bytes);
-    let v = G::unpack(&mut r)?;
-    Ok(v)
-}
-
-// Reads and frees a guest value.
-pub fn free_guest<G: Guest>(mem: &mut Memory, ptr: Addr) -> Result<G> {
-    let v = read_guest(mem, ptr)?;
-    mem.free(ptr)?;
-    Ok(v)
 }
 
 //-------------------------------

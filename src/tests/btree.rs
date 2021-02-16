@@ -5,10 +5,11 @@ use crate::wrappers::transaction_manager::*;
 use crate::wrappers::btree::*;
 use crate::wrappers::block_manager::*;
 use crate::stubs::*;
+use crate::guest::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::info;
+use log::{debug, info};
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
@@ -84,6 +85,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
+    debug!("del: 0");
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
 
     let vtype: BTreeValueType<Value64> = BTreeValueType {
@@ -99,8 +101,11 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
         vtype,
     };
 
+    debug!("del: 1");
     let root = dm_btree_empty(fix, &info)?;
+    debug!("del: 2");
     dm_btree_del(fix, &info, root)?;
+    debug!("del: 3");
     Ok(())
 }
 
