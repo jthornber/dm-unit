@@ -157,9 +157,13 @@ impl Fixture {
 
     // Call a named function in the vm.  Returns the contents of Ra.
     pub fn call_at(&mut self, code: Addr) -> Result<()> {
+        use Reg::*;
+        
         // We need a unique address return control to us.
         let exit_addr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
-        self.vm.set_reg(Reg::Ra, exit_addr.0);
+        
+        self.vm.push_reg(Ra)?;
+        self.vm.set_reg(Ra, exit_addr.0);
         self.vm.set_pc(code);
 
         // FIXME: use AtommicBool
@@ -167,9 +171,10 @@ impl Fixture {
         {
             let completed = completed.clone();
 
-            let callback = move |_fix: &mut Fixture| {
+            let callback = move |fix: &mut Fixture| {
                 let mut completed = completed.lock().unwrap();
                 *completed = true;
+                fix.vm.pop_reg(Ra)?;
                 Err(anyhow!("call complete, exiting"))
             };
 
@@ -186,6 +191,7 @@ impl Fixture {
             Err(e) => {
                 let completed = completed.lock().unwrap();
                 if *completed {
+                    // FIXME: pop Ra from the stack
                     Ok(())
                 } else {
                     Err(e)

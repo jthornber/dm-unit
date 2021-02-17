@@ -6,7 +6,7 @@ use crate::memory::{Addr, PERM_READ, PERM_WRITE};
 
 use anyhow::{anyhow, Result};
 use crc32c::crc32c;
-use log::{info, warn};
+use log::*;
 use std::sync::Arc;
 
 use Reg::*;
@@ -168,12 +168,8 @@ pub fn bm_write_lock_zero(fix: &mut Fixture) -> Result<()> {
 
 pub fn bm_unlock(fix: &mut Fixture) -> Result<()> {
     let gb_ptr = Addr(fix.vm.reg(A0));
-
     let bm = get_bm_mut()?;
-    if bm.unlock(&mut fix.vm.mem, gb_ptr)? {
-        // unregister gb_ptr
-    }
-
+    bm.unlock(fix, gb_ptr)?;
     fix.vm.ret(0);
     Ok(())
 }

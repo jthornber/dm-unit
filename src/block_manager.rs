@@ -1,5 +1,8 @@
+use crate::decode::*;
 use crate::guest::*;
 use crate::memory::*;
+use crate::fixture::*;
+
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::debug;
@@ -102,6 +105,37 @@ impl io_engine::IoEngine for CoreEngine {
 
 //-------------------------------
 
+#[allow(dead_code)]
+struct Validator {
+    name: Addr,
+    prepare: Addr,
+    check: Addr,
+}
+
+impl Guest for Validator {
+    fn guest_len() -> usize {
+        24
+    }
+
+    fn pack<W: Write>(&self, _w: &mut W) -> io::Result<()> {
+        todo!();
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let name = Addr(r.read_u64::<LittleEndian>()?);
+        let prepare = Addr(r.read_u64::<LittleEndian>()?);
+        let check = Addr(r.read_u64::<LittleEndian>()?);
+
+        Ok(Validator {
+            name,
+            prepare,
+            check,
+        })
+    }
+}
+
+//-------------------------------
+
 pub struct GBlock {
     pub loc: u64,
     data: Vec<u8>,
@@ -172,20 +206,27 @@ impl BlockManager {
                 _ => Ok(()),
             }
         }
-
-        fn v_prep(&self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
-            use Reg::*;
-
-            // Call the prep function in the guest
-            fix.vm.set_reg(A0, v_ptr.0);
-            fix.vm.set_reg(A1, guest_ptr.0);
-            fix.vm.set_reg(A2, 4096);
-
-            let v = read_guest::<Validator>(&fix.vm.mem, v_ptr)?;
-            fix.call_at(v.prepare)?;
-            Ok(())
-        }
     */
+
+    fn v_prep(&self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
+        use Reg::*;
+
+        if v_ptr.is_null() {
+            return Ok(());
+        }
+        
+        // Call the prep function in the guest
+        fix.vm.set_reg(A0, v_ptr.0);
+        fix.vm.set_reg(A1, guest_ptr.0);
+        fix.vm.set_reg(A2, 4096);
+
+        let v = read_guest::<Validator>(&fix.vm.mem, v_ptr)?;
+        if !v.prepare.is_null() {
+            fix.call_at(v.prepare)?;
+        }
+        
+        Ok(())
+    }
 
     pub fn read_lock(&mut self, mem: &mut Memory, loc: u64, _v_ptr: Addr) -> Result<Addr> {
         match self.locks.get_mut(&loc) {
@@ -285,8 +326,8 @@ impl BlockManager {
     }
 
     // Returns true if ptr was freed, ie. no further holders of the lock.
-    pub fn unlock(&mut self, mem: &mut Memory, ptr: Addr) -> Result<bool> {
-        let gb = read_guest::<GBlock>(&mem, ptr)?;
+    pub fn unlock(&mut self, fix: &mut Fixture, gb_ptr: Addr) -> Result<bool> {
+        let gb = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)?;
         let lock = self.locks.remove(&gb.loc);
         if lock.is_none() {
             return Err(anyhow!("Block is not locked"));
@@ -305,21 +346,22 @@ impl BlockManager {
                     );
                     Ok(false)
                 } else {
-                    mem.free(ptr)?;
+                    fix.vm.mem.free(gb_ptr)?;
                     Ok(true)
                 }
             }
-            Lock::Write { .. } => {
+            Lock::Write { validator } => {
                 let io_b = io_engine::Block::new(gb.loc);
 
-                /*
-                                // Call the validator
-                                self.v_prep(fix, ptr, validator)?;
-                */
+                // Call the validator
+                self.v_prep(fix, gb_ptr, validator)?;
 
-                mem.free(ptr)?;
+                // We have to re-read since the data will have been updated by the
+                // validator.
+                let gb = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)?;
 
-                // FIXME: redundant copying
+                fix.vm.mem.free(gb_ptr)?;
+
                 io_b.get_data().copy_from_slice(&gb.data);
                 self.engine.write(&io_b)?;
                 Ok(true)

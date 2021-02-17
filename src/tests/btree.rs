@@ -1,29 +1,30 @@
-use crate::memory::*;
-use crate::test_runner::*;
 use crate::fixture::*;
-use crate::wrappers::transaction_manager::*;
-use crate::wrappers::btree::*;
-use crate::wrappers::block_manager::*;
-use crate::stubs::*;
-use crate::stubs::block_manager::*;
 use crate::guest::*;
+use crate::memory::*;
+use crate::stubs::block_manager::*;
+use crate::stubs::*;
+use crate::test_runner::*;
+use crate::wrappers::block_manager::*;
+use crate::wrappers::btree::*;
+use crate::wrappers::transaction_manager::*;
 
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
+use nom::{number::complete::*, IResult};
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU32, Ordering};
+use thinp::io_engine::BLOCK_SIZE;
+use thinp::pdata::btree;
+use thinp::pdata::btree::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
-use thinp::pdata::btree::*;
-use thinp::pdata::btree;
-use nom::{number::complete::*, IResult};
 
 //-------------------------------
 
-struct NoopVisitor {
-}
+struct NoopVisitor {}
 
 impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
     fn visit(
@@ -46,17 +47,74 @@ impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
     }
 }
 
+#[allow(dead_code)]
 fn check_btree(root: u64) -> Result<()> {
     let engine = get_bm()?.engine.clone();
     let walker = BTreeWalker::new(engine, false);
     let visitor = NoopVisitor {};
     let mut path = Vec::new();
 
-    debug!(">>> checking btree");
     walker.walk::<NoopVisitor, Value64>(&mut path, &visitor, root)?;
-    debug!("<<< checked");
 
     Ok(())
+}
+
+//-------------------------------
+
+struct ResidencyVisitor {
+    nr_entries: AtomicU32,
+    nr_leaves: AtomicU32,
+}
+
+impl<V: Unpack> NodeVisitor<V> for ResidencyVisitor {
+    fn visit(
+        &self,
+        _path: &[u64],
+        _kr: &KeyRange,
+        _header: &NodeHeader,
+        keys: &[u64],
+        _values: &[V],
+    ) -> btree::Result<()> {
+        self.nr_entries
+            .fetch_add(keys.len() as u32, Ordering::SeqCst);
+        self.nr_leaves.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn visit_again(&self, _path: &[u64], _b: u64) -> btree::Result<()> {
+        Ok(())
+    }
+
+    fn end_walk(&self) -> btree::Result<()> {
+        Ok(())
+    }
+}
+
+fn calc_max_entries<V: Unpack>() -> usize {
+    let elt_size = 8 + V::disk_size() as usize; // key + value size
+    ((BLOCK_SIZE - NodeHeader::disk_size() as usize) / elt_size) as usize
+}
+
+// Because this is a walk it implicitly checks the btree.  Returns
+// average residency as a _percentage_.
+fn calc_residency(root: u64) -> Result<usize> {
+    let engine = get_bm()?.engine.clone();
+    let walker = BTreeWalker::new(engine, false);
+    let visitor = ResidencyVisitor {
+        nr_entries: AtomicU32::new(0),
+        nr_leaves: AtomicU32::new(0),
+    };
+    let mut path = Vec::new();
+
+    walker.walk::<ResidencyVisitor, Value64>(&mut path, &visitor, root)?;
+
+    let nr_entries = visitor.nr_entries.load(Ordering::SeqCst) as usize;
+    let nr_leaves = visitor.nr_leaves.load(Ordering::SeqCst) as usize;
+    let max_entries = calc_max_entries::<Value64>();
+
+    let percent = (nr_entries * 100) / (max_entries * nr_leaves);
+
+    Ok(percent)
 }
 
 //-------------------------------
@@ -84,7 +142,7 @@ impl Unpack for Value64 {
     fn disk_size() -> u32 {
         8
     }
-    
+
     fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
         let (i, v) = le_u64(data)?;
         Ok((i, Value64(v)))
@@ -116,6 +174,7 @@ fn enable_traces(fix: &mut Fixture) -> Result<()> {
         "dm_tm_create",
         "dm_tm_create_with_sm",
         "dm_tm_new_block",
+        "dm_tm_unlock",
         "insert",
         "insert_at",
         "lower_bound",
@@ -181,6 +240,7 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         vtype,
     };
     let mut root = dm_btree_empty(fix, &info)?;
+    debug!("empty complete");
 
     for i in 0u64..1024u64 {
         let keys = vec![i];
@@ -188,7 +248,12 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         root = dm_btree_insert(fix, &info, root, &keys, &v)?;
     }
 
-    check_btree(root)?;
+    let residency = calc_residency(root)?;
+
+    if residency < 75 {
+        return Err(anyhow!("Residency is too low ({}%)", residency));
+    }
+    info!("residency = {}", residency);
 
     dm_btree_del(fix, &info, root)?;
     dm_tm_destroy(fix, tm)?;
@@ -225,6 +290,8 @@ fn test_lookup(fix: &mut Fixture) -> Result<()> {
         let v = Value64(i + 1000000);
         root = dm_btree_insert(fix, &info, root, &keys, &v)?;
     }
+
+    check_btree(root)?;
 
     for i in 0u64..count {
         let keys = vec![i];

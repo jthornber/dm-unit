@@ -29,6 +29,12 @@ impl fmt::LowerHex for Addr {
     }
 }
 
+impl Addr {
+    pub fn is_null(&self) -> bool {
+        self.0 == 0
+    }
+}
+
 //-------------------------------------
 
 /// Indicates memory errors such as referencing unallocated memory.  Or bad permissions.
