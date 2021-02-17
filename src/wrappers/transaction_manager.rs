@@ -1,8 +1,8 @@
 use crate::decode::*;
-use crate::memory::*;
 use crate::fixture::*;
+use crate::memory::*;
 
-use anyhow::{Result};
+use anyhow::Result;
 
 use Reg::*;
 
@@ -37,8 +37,10 @@ pub fn dm_tm_pre_commit(fix: &mut Fixture, tm: Addr) -> Result<()> {
     tm_func(fix, "dm_tm_pre_commit", tm)
 }
 
-pub fn dm_tm_commit(fix: &mut Fixture, tm: Addr) -> Result<()> {
-    tm_func(fix, "dm_tm_commit", tm)
+pub fn dm_tm_commit(fix: &mut Fixture, tm: Addr, superblock: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, tm.0);
+    fix.vm.set_reg(A1, superblock.0);
+    fix.call_with_errno("dm_tm_commit")
 }
 
 pub fn dm_tm_new_block(fix: &mut Fixture, tm: Addr, validator: Addr) -> Result<Addr> {
@@ -53,7 +55,12 @@ pub fn dm_tm_new_block(fix: &mut Fixture, tm: Addr, validator: Addr) -> Result<A
 }
 
 // Returns (block, inc_children)
-pub fn dm_tm_shadow_block(fix: &mut Fixture, tm: Addr, orig: u64, validator: Addr) -> Result<(Addr, bool)> {
+pub fn dm_tm_shadow_block(
+    fix: &mut Fixture,
+    tm: Addr,
+    orig: u64,
+    validator: Addr,
+) -> Result<(Addr, bool)> {
     fix.vm.set_reg(A0, tm.0);
     fix.vm.set_reg(A1, orig);
     fix.vm.set_reg(A2, validator.0);

@@ -69,6 +69,10 @@ pub fn dm_bm_write_lock(fix: &mut Fixture, bm: Addr, b: u64, validator: Addr) ->
     lock_(fix, "dm_bm_write_lock", bm, b, validator)
 }
 
+pub fn dm_bm_write_lock_zero(fix: &mut Fixture, bm: Addr, b: u64, validator: Addr) -> Result<Addr> {
+    lock_(fix, "dm_bm_write_lock_zero", bm, b, validator)
+}
+
 pub fn dm_bm_unlock(fix: &mut Fixture, block: Addr) -> Result<()> {
     fix.vm.set_reg(A0, block.0);
     fix.call("dm_bm_unlock")?;

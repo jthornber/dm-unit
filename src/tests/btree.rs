@@ -12,10 +12,13 @@ use anyhow::{anyhow, ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
 use nom::{number::complete::*, IResult};
+use rand::prelude::*;
+use std::collections::BTreeSet;
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
@@ -115,6 +118,71 @@ fn calc_residency(root: u64) -> Result<usize> {
     let percent = (nr_entries * 100) / (max_entries * nr_leaves);
 
     Ok(percent)
+}
+
+//-------------------------------
+
+// Used to confirm all expected keys are present in the tree.
+struct EntryVisitor {
+    seen: Mutex<BTreeSet<u64>>,
+}
+
+fn key_to_value(k: u64) -> u64 {
+    k + 12345
+}
+
+impl NodeVisitor<Value64> for EntryVisitor {
+    fn visit(
+        &self,
+        _path: &[u64],
+        _kr: &KeyRange,
+        _header: &NodeHeader,
+        keys: &[u64],
+        values: &[Value64],
+    ) -> btree::Result<()> {
+        for (i, k) in keys.iter().enumerate() {
+            let v = values[i];
+            if v.0 != key_to_value(*k) {
+                return Err(BTreeError::ValueError(format!(
+                    "Key has bad value: {} -> {}",
+                    k, v.0
+                )));
+            }
+
+            let mut seen = self.seen.lock().unwrap();
+            seen.insert(*k);
+        }
+
+        Ok(())
+    }
+
+    fn visit_again(&self, _path: &[u64], _b: u64) -> btree::Result<()> {
+        Ok(())
+    }
+
+    fn end_walk(&self) -> btree::Result<()> {
+        Ok(())
+    }
+}
+
+fn check_keys_present(root: u64, keys: &[u64]) -> Result<()> {
+    let engine = get_bm()?.engine.clone();
+    let walker = BTreeWalker::new(engine, false);
+    let visitor = EntryVisitor {
+        seen: Mutex::new(BTreeSet::new()),
+    };
+
+    let mut path = Vec::new();
+    walker.walk::<EntryVisitor, Value64>(&mut path, &visitor, root)?;
+
+    let seen = visitor.seen.lock().unwrap();
+    for k in keys {
+        if !seen.contains(k) {
+            return Err(anyhow!("Key missing from btree: {}", *k));
+        }
+    }
+
+    Ok(())
 }
 
 //-------------------------------
@@ -220,12 +288,15 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
-fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
+// keys contains the keys we wish to insert, in the order
+// that they should be inserted.
+fn do_insert_test_(fix: &mut Fixture, keys: &[u64], target_residency: usize) -> Result<()> {
     standard_globals(fix)?;
     enable_traces(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
+    let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
 
     let vtype: BTreeValueType<Value64> = BTreeValueType {
         context: Addr(0),
@@ -240,26 +311,46 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         vtype,
     };
     let mut root = dm_btree_empty(fix, &info)?;
-    debug!("empty complete");
 
-    for i in 0u64..1024u64 {
-        let keys = vec![i];
-        let v = Value64(i + 1000000);
-        root = dm_btree_insert(fix, &info, root, &keys, &v)?;
+    for k in keys {
+        let ks = vec![*k];
+        let v = Value64(key_to_value(*k));
+        root = dm_btree_insert(fix, &info, root, &ks, &v)?;
     }
+    dm_tm_pre_commit(fix, tm)?;
+    dm_tm_commit(fix, tm, sb)?;
 
     let residency = calc_residency(root)?;
 
-    if residency < 75 {
+    if residency < target_residency {
         return Err(anyhow!("Residency is too low ({}%)", residency));
     }
     info!("residency = {}", residency);
 
-    dm_btree_del(fix, &info, root)?;
+    // Check all entries are present
+    check_keys_present(root, &keys)?;
+
     dm_tm_destroy(fix, tm)?;
     dm_bm_destroy(fix, bm)?;
 
     Ok(())
+}
+
+fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
+    let keys: Vec<u64> = (0..1024).collect();
+    do_insert_test_(fix, &keys, 75)
+}
+
+fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
+    let keys: Vec<u64> = (0..1024).rev().collect();
+    do_insert_test_(fix, &keys, 50)
+}
+
+fn test_insert_random(fix: &mut Fixture) -> Result<()> {
+    let mut keys: Vec<u64> = (0..1024).rev().collect();
+    let mut rng = thread_rng();
+    keys.shuffle(&mut rng);
+    do_insert_test_(fix, &keys, 50)
 }
 
 fn test_lookup(fix: &mut Fixture) -> Result<()> {
@@ -315,6 +406,8 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
 
     reg("del/empty", Box::new(test_del_empty));
     reg("insert/ascending", Box::new(test_insert_ascending));
+    reg("insert/descending", Box::new(test_insert_descending));
+    reg("insert/random", Box::new(test_insert_random));
     reg("lookup", Box::new(test_lookup));
 
     info!("registered /pdata/btree/remove tests");

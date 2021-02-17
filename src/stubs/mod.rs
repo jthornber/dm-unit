@@ -85,6 +85,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     fix.stub("_raw_spin_unlock", 0)?;
     fix.stub("__mutex_init", 0)?;
     fix.at_func("memcpy", Box::new(memcpy))?;
+    fix.at_func("memmove", Box::new(memcpy))?;
     fix.at_func("dm_block_location", Box::new(bm_block_location))?;
     fix.at_func("dm_block_data", Box::new(bm_block_data))?;
     fix.at_func("dm_block_manager_create", Box::new(bm_create))?;
