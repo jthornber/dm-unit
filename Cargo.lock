@@ -183,6 +183,7 @@ dependencies = [
  "log",
  "nom",
  "rand 0.8.3",
+ "rand_chacha 0.3.0",
  "regex",
  "thinp",
  "thiserror",
@@ -886,7 +887,7 @@ dependencies = [
 [[package]]
 name = "thinp"
 version = "0.1.0"
-source = "git+https://github.com/jthornber/thin-provisioning-tools.git?branch=main#763b2d14b2356497b3a9b0fb9870d42af3a359b3"
+source = "git+https://github.com/jthornber/thin-provisioning-tools.git?branch=main#58cd881340357d97dc1ddfbdc16557423a65c792"
 dependencies = [
  "anyhow",
  "atty",
