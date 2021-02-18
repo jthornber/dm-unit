@@ -13,6 +13,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
 use nom::{number::complete::*, IResult};
 use rand::prelude::*;
+use rand::SeedableRng;
 use std::collections::BTreeSet;
 use std::io;
 use std::io::{Read, Write};
@@ -347,8 +348,8 @@ fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_insert_random(fix: &mut Fixture) -> Result<()> {
-    let mut keys: Vec<u64> = (0..1024).rev().collect();
-    let mut rng = thread_rng();
+    let mut keys: Vec<u64> = (0..10240).rev().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     keys.shuffle(&mut rng);
     do_insert_test_(fix, &keys, 50)
 }
