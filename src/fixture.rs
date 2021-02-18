@@ -127,11 +127,6 @@ impl Fixture {
                     // times, and allows the breakpoints to recurse back into here.  The
                     // downside is you cannot recurse a particular breakpoint.
                     if let Some(callback) = self.breakpoints.remove(&loc) {
-                        if let Some(_global) = self.symbol_rmap(loc) {
-                            // debug!("host call: {}", global);
-                        } else {
-                            // debug!("host call: {:x}", loc);
-                        }
                         let r = (*callback)(self);
                         self.breakpoints.insert(loc, callback);
                         r?;
