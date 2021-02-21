@@ -14,11 +14,12 @@ use Reg::*;
 pub fn printk(fix: &mut Fixture) -> Result<()> {
     let msg = fix.vm.mem.read_string(Addr(fix.vm.reg(A0)))?;
     info!(
-        "printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x})",
+        "printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x})",
         &msg[2..],
         fix.vm.reg(A1),
         fix.vm.reg(A2),
-        fix.vm.reg(A3)
+        fix.vm.reg(A3),
+        fix.vm.reg(A4)
     );
     fix.vm.ret(0);
     Ok(())
@@ -84,6 +85,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     fix.stub("_raw_spin_lock", 0)?;
     fix.stub("_raw_spin_unlock", 0)?;
     fix.stub("__mutex_init", 0)?;
+    fix.stub("___ratelimit", 0)?;
     fix.at_func("memcpy", Box::new(memcpy))?;
     fix.at_func("memmove", Box::new(memcpy))?;
     fix.at_func("dm_block_location", Box::new(bm_block_location))?;

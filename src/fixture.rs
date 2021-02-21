@@ -37,42 +37,6 @@ pub struct Fixture {
 
 }
 
-/*
-struct AutoUserData<'a> {
-    fix: &'a mut Fixture,
-    user_data: UserData,
-}
-
-impl<'a> Drop for AutoUserData<'a> {
-    fn drop(&mut self) {
-        std::mem::swap(&mut self.user_data, &mut self.fix.user_data);
-    }
-}
-
-impl<'a> Deref for AutoUserData<'a> {
-    type Target = Fixture;
-    fn deref(&self) -> &Self::Target {
-        self.fix
-    }
-}
-
-impl<'a> DerefMut for AutoUserData<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.fix
-    }
-}
-
-impl<'a> AutoUserData<'a> {
-    pub fn get_user_data(&self) -> &UserData {
-        &self.user_data
-    }
-
-    pub fn get_user_data_mut(&mut self) -> &mut UserData {
-        &mut self.user_data
-    }
-}
-*/
-
 impl Fixture {
     pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Result<Self> {
         let mut module = PathBuf::new();
@@ -80,7 +44,7 @@ impl Fixture {
         module.push("drivers/md/persistent-data/dm-persistent-data.ko");
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
-        let heap_end = Addr(heap_begin.0 + (1024 * 1024));
+        let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
         let symbols = load_elf(&mut vm.mem, module)?;

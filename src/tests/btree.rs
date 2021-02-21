@@ -291,7 +291,12 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
 
 // keys contains the keys we wish to insert, in the order
 // that they should be inserted.
-fn do_insert_test_(fix: &mut Fixture, keys: &[u64], target_residency: usize) -> Result<()> {
+fn do_insert_test_(
+    fix: &mut Fixture,
+    keys: &[u64],
+    pass_count: usize,
+    target_residency: usize,
+) -> Result<()> {
     standard_globals(fix)?;
     enable_traces(fix)?;
 
@@ -313,20 +318,23 @@ fn do_insert_test_(fix: &mut Fixture, keys: &[u64], target_residency: usize) -> 
     };
     let mut root = dm_btree_empty(fix, &info)?;
 
-    for k in keys {
-        let ks = vec![*k];
-        let v = Value64(key_to_value(*k));
-        root = dm_btree_insert(fix, &info, root, &ks, &v)?;
+    for _ in 0..pass_count {
+        for k in keys {
+            let ks = vec![*k];
+            let v = Value64(key_to_value(*k));
+            root = dm_btree_insert(fix, &info, root, &ks, &v)?;
+        }
+
+        let residency = calc_residency(root)?;
+
+        if residency < target_residency {
+            // return Err(anyhow!("Residency is too low ({}%)", residency));
+        }
+        info!("residency = {}", residency);
     }
+    
     dm_tm_pre_commit(fix, tm)?;
     dm_tm_commit(fix, tm, sb)?;
-
-    let residency = calc_residency(root)?;
-
-    if residency < target_residency {
-        return Err(anyhow!("Residency is too low ({}%)", residency));
-    }
-    info!("residency = {}", residency);
 
     // Check all entries are present
     check_keys_present(root, &keys)?;
@@ -337,21 +345,52 @@ fn do_insert_test_(fix: &mut Fixture, keys: &[u64], target_residency: usize) -> 
     Ok(())
 }
 
+const KEY_COUNT: u64 = 10240;
+
 fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
-    let keys: Vec<u64> = (0..1024).collect();
-    do_insert_test_(fix, &keys, 75)
+    let keys: Vec<u64> = (0..KEY_COUNT).collect();
+    do_insert_test_(fix, &keys, 3, 75)
 }
 
 fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
-    let keys: Vec<u64> = (0..1024).rev().collect();
-    do_insert_test_(fix, &keys, 50)
+    let keys: Vec<u64> = (0..KEY_COUNT).rev().collect();
+    do_insert_test_(fix, &keys, 3, 49)
 }
 
 fn test_insert_random(fix: &mut Fixture) -> Result<()> {
-    let mut keys: Vec<u64> = (0..10240).rev().collect();
+    let mut keys: Vec<u64> = (0..KEY_COUNT).rev().collect();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     keys.shuffle(&mut rng);
-    do_insert_test_(fix, &keys, 50)
+    do_insert_test_(fix, &keys, 3, 68)
+}
+
+fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..500 {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+    ranges.shuffle(&mut rng);
+
+    let mut shuffled_keys = Vec::new();
+    for r in ranges {
+        for k in r {
+            shuffled_keys.push(k);
+        }
+    }
+
+    do_insert_test_(fix, &shuffled_keys, 3, 70)
 }
 
 fn test_lookup(fix: &mut Fixture) -> Result<()> {
@@ -409,6 +448,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     reg("insert/ascending", Box::new(test_insert_ascending));
     reg("insert/descending", Box::new(test_insert_descending));
     reg("insert/random", Box::new(test_insert_random));
+    reg("insert/runs", Box::new(test_insert_runs));
     reg("lookup", Box::new(test_lookup));
 
     info!("registered /pdata/btree/remove tests");
