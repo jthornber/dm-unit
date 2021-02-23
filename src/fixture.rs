@@ -33,8 +33,6 @@ pub struct Fixture {
 
     // Current indentation for function tracing.
     trace_indent: usize,
-
-
 }
 
 impl Fixture {
@@ -117,10 +115,10 @@ impl Fixture {
     // Call a named function in the vm.  Returns the contents of Ra.
     pub fn call_at(&mut self, code: Addr) -> Result<()> {
         use Reg::*;
-        
+
         // We need a unique address return control to us.
         let exit_addr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
-        
+
         self.vm.push_reg(Ra)?;
         self.vm.set_reg(Ra, exit_addr.0);
         self.vm.set_pc(code);

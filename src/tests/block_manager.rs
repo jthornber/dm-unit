@@ -7,7 +7,6 @@ use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};
 use libc::ENOMEM;
-use log::info;
 
 use Reg::*;
 
@@ -129,7 +128,6 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     reg("read-lock", Box::new(test_read_lock));
     reg("write-lock", Box::new(test_write_lock));
 
-    info!("registered /pdata/block-manager tests");
     Ok(())
 }
 

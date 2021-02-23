@@ -229,6 +229,7 @@ impl BlockManager {
     }
 
     pub fn read_lock(&mut self, mem: &mut Memory, loc: u64, _v_ptr: Addr) -> Result<Addr> {
+        self.nr_read_locks += 1;
         match self.locks.get_mut(&loc) {
             Some(Lock::Read { count, guest_ptr }) => {
                 // Already read locked, just increment the reference count,
@@ -271,6 +272,7 @@ impl BlockManager {
     }
 
     pub fn write_lock(&mut self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
+        self.nr_write_locks += 1;
         match self.locks.get_mut(&loc) {
             Some(Lock::Read { .. }) => Err(anyhow!(
                 "Can't write lock block since it's already read locked"
@@ -302,6 +304,7 @@ impl BlockManager {
     }
 
     pub fn write_lock_zero(&mut self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
+        self.nr_write_locks += 1;
         match self.locks.get_mut(&loc) {
             Some(Lock::Read { .. }) => Err(anyhow!(
                 "Can't write lock block since it's already read locked"

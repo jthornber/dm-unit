@@ -289,6 +289,136 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+struct Stats {
+    instrs: u64,
+    read_locks: u64,
+    write_locks: u64,
+}
+
+impl Stats {
+    fn collect_stats(fix: &Fixture) -> Self {
+        let bm = get_bm().unwrap();
+        Stats {
+            instrs: fix.vm.stats.instrs,
+            read_locks: bm.nr_read_locks,
+            write_locks: bm.nr_write_locks,
+        }
+    }
+
+    fn delta(&self, fix: &Fixture) -> Self {
+        let rhs = Stats::collect_stats(fix);
+        Stats {
+            instrs: rhs.instrs - self.instrs,
+            read_locks: rhs.read_locks - self.read_locks,
+            write_locks: rhs.write_locks - self.write_locks,
+        }
+    }
+
+
+}
+
+#[allow(dead_code)]
+struct BTreeTest<'a> {
+    fix: &'a mut Fixture,
+    bm: Addr,
+    tm: Addr,
+    sm: Addr,
+    sb: Addr,
+    info: BTreeInfo<Value64>,
+    root: u64,
+    baseline: Stats,
+}
+
+impl<'a> BTreeTest<'a> {
+    fn new(fix: &'a mut Fixture) -> Result<Self> {
+        let bm = dm_bm_create(fix, 1024)?;
+        let (tm, sm) = dm_tm_create(fix, bm, 0)?;
+        let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+
+        // FIXME: we should increment the superblock within the sm
+
+        let vtype: BTreeValueType<Value64> = BTreeValueType {
+            context: Addr(0),
+            inc_fn: Addr(0),
+            dec_fn: Addr(0),
+            eq_fn: Addr(0),
+            rust_value_type: PhantomData,
+        };
+        let info = BTreeInfo {
+            tm,
+            levels: 1,
+            vtype,
+        };
+        let root = dm_btree_empty(fix, &info)?;
+        let baseline = Stats::collect_stats(fix);
+
+        Ok(BTreeTest {
+            fix,
+            bm,
+            tm,
+            sm,
+            sb,
+            info,
+            root,
+            baseline,
+        })
+    }
+
+    fn insert(&mut self, key: u64) -> Result<()> {
+        let ks = vec![key];
+        let v = Value64(key_to_value(key));
+        self.root = dm_btree_insert(self.fix, &self.info, self.root, &ks, &v)?;
+        Ok(())
+    }
+
+    fn lookup(&mut self, key: u64) -> Result<()> {
+        let keys = vec![key];
+        let v = dm_btree_lookup(self.fix, &self.info, self.root, &keys)?;
+        ensure!(v == Value64(key_to_value(key)));
+        Ok(())
+    }
+
+    // This uses Rust code, rather than doing look ups via the kernel
+    // code.
+    fn check_keys_present(&self, keys: &[u64]) -> Result<()> {
+        check_keys_present(self.root, keys)
+    }
+
+    fn commit(&mut self) -> Result<()> {
+        dm_tm_pre_commit(self.fix, self.tm)?;
+        dm_tm_commit(self.fix, self.tm, self.sb)?;
+        self.sb = dm_bm_write_lock_zero(self.fix, self.bm, 0, Addr(0))?;
+        Ok(())
+    }
+
+    fn stats_start(&mut self) {
+        self.baseline = Stats::collect_stats(self.fix);
+    }
+
+    fn stats_report(&self, desc: &str, count: u64) -> Result<()> {
+        let delta = self.baseline.delta(self.fix);
+        info!(
+            "{}: residency = {}, instrs = {}, read_locks = {:.1}, write_locks = {:.1}",
+            desc, self.residency()?,
+            delta.instrs / count,
+            delta.read_locks as f64 / count as f64,
+            delta.write_locks as f64 / count as f64);
+        Ok(())
+    }
+
+    fn residency(&self) -> Result<usize> {
+        calc_residency(self.root)
+    }
+}
+
+impl<'a> Drop for BTreeTest<'a> {
+    fn drop(&mut self) {
+        dm_bm_unlock(self.fix, self.sb).expect("unlock superblock");
+        dm_tm_destroy(self.fix, self.tm).expect("destroy tm");
+        dm_bm_destroy(self.fix, self.bm).expect("destroy bm");
+    }
+}
+
 // keys contains the keys we wish to insert, in the order
 // that they should be inserted.
 fn do_insert_test_(
@@ -298,49 +428,35 @@ fn do_insert_test_(
     target_residency: usize,
 ) -> Result<()> {
     standard_globals(fix)?;
-    enable_traces(fix)?;
+    let mut bt = BTreeTest::new(fix)?;
 
-    let bm = dm_bm_create(fix, 1024)?;
-    let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
-    let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
-
-    let vtype: BTreeValueType<Value64> = BTreeValueType {
-        context: Addr(0),
-        inc_fn: Addr(0),
-        dec_fn: Addr(0),
-        eq_fn: Addr(0),
-        rust_value_type: PhantomData,
-    };
-    let info = BTreeInfo {
-        tm,
-        levels: 1,
-        vtype,
-    };
-    let mut root = dm_btree_empty(fix, &info)?;
-
-    for _ in 0..pass_count {
+    // First pass inserts, subsequent passes overwrite
+    for pass in 0..pass_count {
+        bt.stats_start();
         for k in keys {
-            let ks = vec![*k];
-            let v = Value64(key_to_value(*k));
-            root = dm_btree_insert(fix, &info, root, &ks, &v)?;
+            bt.insert(*k)?;
         }
 
-        let residency = calc_residency(root)?;
-
+        let residency = bt.residency()?;
         if residency < target_residency {
-            // return Err(anyhow!("Residency is too low ({}%)", residency));
+            return Err(anyhow!("Residency is too low ({}%)", residency));
         }
-        info!("residency = {}", residency);
+
+        let desc = if pass == 0 { "insert" } else { "overwrite" };
+        bt.stats_report(desc, keys.len() as u64)?;
     }
-    
-    dm_tm_pre_commit(fix, tm)?;
-    dm_tm_commit(fix, tm, sb)?;
 
-    // Check all entries are present
-    check_keys_present(root, &keys)?;
+    bt.commit()?;
 
-    dm_tm_destroy(fix, tm)?;
-    dm_bm_destroy(fix, bm)?;
+    // Lookup
+    bt.stats_start();
+    for k in keys {
+        bt.lookup(*k)?;
+    }
+    bt.stats_report("lookup", keys.len() as u64)?;
+    bt.commit()?;
+
+    bt.check_keys_present(&keys)?;
 
     Ok(())
 }
@@ -349,19 +465,19 @@ const KEY_COUNT: u64 = 10240;
 
 fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
     let keys: Vec<u64> = (0..KEY_COUNT).collect();
-    do_insert_test_(fix, &keys, 3, 75)
+    do_insert_test_(fix, &keys, 2, 75)
 }
 
 fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
     let keys: Vec<u64> = (0..KEY_COUNT).rev().collect();
-    do_insert_test_(fix, &keys, 3, 49)
+    do_insert_test_(fix, &keys, 2, 49)
 }
 
 fn test_insert_random(fix: &mut Fixture) -> Result<()> {
     let mut keys: Vec<u64> = (0..KEY_COUNT).rev().collect();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     keys.shuffle(&mut rng);
-    do_insert_test_(fix, &keys, 3, 68)
+    do_insert_test_(fix, &keys, 2, 75)
 }
 
 fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
@@ -390,51 +506,7 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
         }
     }
 
-    do_insert_test_(fix, &shuffled_keys, 3, 70)
-}
-
-fn test_lookup(fix: &mut Fixture) -> Result<()> {
-    standard_globals(fix)?;
-    enable_traces(fix)?;
-
-    let bm = dm_bm_create(fix, 1024)?;
-    let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
-
-    let vtype: BTreeValueType<Value64> = BTreeValueType {
-        context: Addr(0),
-        inc_fn: Addr(0),
-        dec_fn: Addr(0),
-        eq_fn: Addr(0),
-        rust_value_type: PhantomData,
-    };
-    let info = BTreeInfo {
-        tm,
-        levels: 1,
-        vtype,
-    };
-    let mut root = dm_btree_empty(fix, &info)?;
-
-    // FIXME: bump count up
-    let count = 1024u64;
-    for i in 0u64..count {
-        let keys = vec![i];
-        let v = Value64(i + 1000000);
-        root = dm_btree_insert(fix, &info, root, &keys, &v)?;
-    }
-
-    check_btree(root)?;
-
-    for i in 0u64..count {
-        let keys = vec![i];
-        let v = dm_btree_lookup(fix, &info, root, &keys)?;
-        ensure!(v == Value64(i + 1000000));
-    }
-
-    dm_btree_del(fix, &info, root)?;
-    dm_tm_destroy(fix, tm)?;
-    dm_bm_destroy(fix, bm)?;
-
-    Ok(())
+    do_insert_test_(fix, &shuffled_keys, 2, 80)
 }
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -445,13 +517,11 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     };
 
     reg("del/empty", Box::new(test_del_empty));
-    reg("insert/ascending", Box::new(test_insert_ascending));
-    reg("insert/descending", Box::new(test_insert_descending));
-    reg("insert/random", Box::new(test_insert_random));
-    reg("insert/runs", Box::new(test_insert_runs));
-    reg("lookup", Box::new(test_lookup));
+    reg("insert-overwrite-lookup/ascending", Box::new(test_insert_ascending));
+    reg("insert-overwrite-lookup/descending", Box::new(test_insert_descending));
+    reg("insert-overwrite-lookup/random", Box::new(test_insert_random));
+    reg("insert-overwrite-lookup/runs", Box::new(test_insert_runs));
 
-    info!("registered /pdata/btree/remove tests");
     Ok(())
 }
 

@@ -81,12 +81,6 @@ pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
     let bm_ptr = Addr(fix.vm.reg(A0));
     let bm = get_bm_mut()?;
 
-    info!(
-        "bm: nr_read_locks = {}, nr_write_locks = {}",
-        bm.nr_read_locks,
-        bm.nr_write_locks,
-    );
-
     let mut held = false;
     for key in bm.locks.keys() {
         warn!("Block {} still held", key);

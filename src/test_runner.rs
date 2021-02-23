@@ -201,7 +201,6 @@ impl<'a> TestRunner<'a> {
                 continue;
             }
 
-            info!(">>> {}", p);
             let components = path_components(p);
             formatter.print(&components);
 
@@ -210,14 +209,12 @@ impl<'a> TestRunner<'a> {
             if let Err(e) = (*t)(&mut fix) {
                 fail += 1;
                 println!(" FAIL");
-                info!("<<< {}: FAIL, {}", p, e);
+                info!("{}", e);
                 debug!("{}", fix.vm);
             } else {
                 pass += 1;
                 println!(" PASS");
-                info!("<<< {}: PASS", p);
             }
-            info!("{} instr", fix.vm.stats.instrs);
         }
 
         Ok((pass, fail))
