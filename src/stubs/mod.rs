@@ -40,6 +40,9 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
     fix.vm.mem.read(src, &mut bytes, PERM_READ)?;
     fix.vm.mem.write(dest, &bytes, PERM_WRITE)?;
     fix.vm.ret(dest.0);
+
+    // The vm instr count should reflect this expensive operation.
+    fix.vm.stats.instrs += (len * 3) / 8;
     Ok(())
 }
 
