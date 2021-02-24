@@ -1,3 +1,4 @@
+use crate::decode::*;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::memory::*;
@@ -16,13 +17,14 @@ use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
 use std::io;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
+use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
 
@@ -215,6 +217,13 @@ impl Unpack for Value64 {
     fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
         let (i, v) = le_u64(data)?;
         Ok((i, Value64(v)))
+    }
+}
+
+impl Pack for Value64 {
+    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
+        w.write_u64::<LittleEndian>(self.0)?;
+        Ok(())
     }
 }
 
@@ -701,6 +710,117 @@ fn test_cc_multiple_entries(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+fn mk_node<'a>(fix: &'a mut Fixture, nr_entries: usize) -> Result<(AutoGPtr<'a>, Addr)> {
+    let header = NodeHeader {
+        block: 1,
+        is_leaf: true,
+        nr_entries: nr_entries as u32,
+        max_entries: calc_max_entries::<Value64>() as u32,
+        value_size: Value64::guest_len() as u32,
+    };
+    let keys: Vec<u64> = (0..nr_entries as u64).collect();
+    let values: Vec<Value64> = (0..nr_entries as u64).map(|v| Value64(v)).collect();
+    let node = Node::Leaf {
+        header,
+        keys,
+        values,
+    };
+
+    let mut buffer = vec![0u8; BLOCK_SIZE];
+    let mut w = Cursor::new(&mut buffer);
+    pack_node(&node, &mut w)?;
+    drop(w);
+
+    let (mut fix, block) = auto_alloc(fix, BLOCK_SIZE)?;
+    fix.vm.mem.write(block, &buffer, PERM_WRITE)?;
+
+    Ok((fix, block))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Move {
+    dest: Addr,
+    src: Addr,
+    len: usize,
+}
+
+fn key_ptr(node: Addr, index: usize) -> Addr {
+    Addr(node.0 + 32 + index as u64 * 8)
+}
+
+fn value_ptr<V: Unpack>(node: Addr, index: usize) -> Addr {
+    let Addr(base) = key_ptr(node, calc_max_entries::<V>());
+    Addr(base + V::disk_size() as u64 * index as u64)
+}
+
+fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
+    let moves = Arc::new(Mutex::new(Vec::new()));
+
+    // Register a stub for memmove that captures call details
+    // but does nothing.
+    {
+        let moves = moves.clone();
+        let memmove = move |fix: &mut Fixture| -> Result<()> {
+            use Reg::*;
+            let dest = Addr(fix.vm.reg(A0));
+            let src = Addr(fix.vm.reg(A1));
+            let len = fix.vm.reg(A2) as usize;
+            let mut moves = moves.lock().unwrap();
+            moves.push(Move { dest, src, len });
+            fix.vm.ret(0);
+            Ok(())
+        };
+
+        fix.at_func("memmove", Box::new(memmove))?;
+    }
+
+    let (mut fix, node1_ptr) = mk_node(fix, 0)?;
+    let (mut fix, node2_ptr) = mk_node(&mut *fix, 100)?;
+
+    let mut dest = CopyCursor {
+        index: 0,
+        entries: vec![CursorEntry {
+            node: node1_ptr,
+            begin: 0,
+            end: 100,
+        }],
+    };
+
+    let mut src = CopyCursor {
+        index: 0,
+        entries: vec![CursorEntry {
+            node: node2_ptr,
+            begin: 0,
+            end: 100,
+        }],
+    };
+
+    redistribute_entries(&mut *fix, &mut dest, &mut src, 100)?;
+
+    let moves = moves.lock().unwrap();
+    info!("moves: {:?}", moves);
+    ensure!(
+        moves[0]
+            == Move {
+                dest: key_ptr(node1_ptr, 0),
+                src: key_ptr(node2_ptr, 0),
+                len: 100 * 8
+            }
+    );
+    ensure!(
+        moves[1]
+            == Move {
+                dest: value_ptr::<Value64>(node1_ptr, 0),
+                src: value_ptr::<Value64>(node2_ptr, 0),
+                len: 100 * 8
+            }
+    );
+
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let mut reg = move |path, func| {
         let mut p = "/pdata/btree/".to_string();
@@ -733,6 +853,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         "consume-cursor/multiple-entries",
         Box::new(test_cc_multiple_entries),
     );
+    reg("redistribute-entries", Box::new(test_redistribute_entries));
 
     Ok(())
 }

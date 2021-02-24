@@ -420,4 +420,25 @@ pub fn consume_cursor(fix: &mut Fixture, cursor: &mut CopyCursor, len: usize) ->
     Ok(())
 }
 
+pub fn redistribute_entries(
+    fix: &mut Fixture,
+    dest: &mut CopyCursor,
+    src: &mut CopyCursor,
+    len: usize,
+) -> Result<()> {
+    let (mut fix, dest_ptr) = auto_guest::<CopyCursor>(fix, dest, PERM_READ | PERM_WRITE)?;
+    let (mut fix, src_ptr) = auto_guest::<CopyCursor>(&mut *fix, src, PERM_READ | PERM_WRITE)?;
+
+    fix.vm.set_reg(A0, dest_ptr.0);
+    fix.vm.set_reg(A1, src_ptr.0);
+    fix.vm.set_reg(A2, len as u64);
+
+    fix.call_with_errno("redistribute_entries")?;
+
+    *dest = read_guest::<CopyCursor>(&fix.vm.mem, dest_ptr)?;
+    *src = read_guest::<CopyCursor>(&fix.vm.mem, src_ptr)?;
+
+    Ok(())
+}
+
 //-------------------------------
