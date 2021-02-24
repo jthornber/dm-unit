@@ -5,7 +5,7 @@ use crate::memory::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::debug;
+use log::*;
 use std::io;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
@@ -338,6 +338,86 @@ pub fn dm_btree_find_highest_key<G: Guest>(
     }
 
     Ok(rkeys)
+}
+
+//-------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorEntry {
+    pub node: Addr,
+    pub begin: u32,
+    pub end: u32,
+}
+
+impl Guest for CursorEntry {
+    fn guest_len() -> usize {
+        16
+    }
+
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_u64::<LittleEndian>(self.node.0)?;
+        w.write_u32::<LittleEndian>(self.begin)?;
+        w.write_u32::<LittleEndian>(self.end)
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let node = Addr(r.read_u64::<LittleEndian>()?);
+        let begin = r.read_u32::<LittleEndian>()?;
+        let end = r.read_u32::<LittleEndian>()?;
+
+        Ok(CursorEntry { node, begin, end })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CopyCursor {
+    pub index: u32,
+    pub entries: Vec<CursorEntry>,
+}
+
+impl Guest for CopyCursor {
+    fn guest_len() -> usize {
+        56
+    }
+
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        assert!(self.entries.len() <= 3);
+
+        w.write_u32::<LittleEndian>(self.entries.len() as u32)?;
+        w.write_u32::<LittleEndian>(self.index)?;
+        for e in &self.entries {
+            e.pack(w)?;
+        }
+        Ok(())
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let count = r.read_u32::<LittleEndian>()?;
+        assert!(count <= 3);
+
+        let index = r.read_u32::<LittleEndian>()?;
+
+        let mut entries = Vec::new();
+        for _ in 0..count {
+            entries.push(CursorEntry::unpack(r)?);
+        }
+
+        Ok(CopyCursor { index, entries })
+    }
+}
+
+pub fn consume_cursor(fix: &mut Fixture, cursor: &mut CopyCursor, len: usize) -> Result<()> {
+    let (mut fix, guest_ptr) = auto_guest::<CopyCursor>(fix, cursor, PERM_READ | PERM_WRITE)?;
+
+    fix.vm.set_reg(A0, guest_ptr.0);
+    fix.vm.set_reg(A1, len as u64);
+
+    fix.call_with_errno("consume_cursor")?;
+
+    let new_cursor = read_guest::<CopyCursor>(&fix.vm.mem, guest_ptr)?;
+    *cursor = new_cursor;
+
+    Ok(())
 }
 
 //-------------------------------

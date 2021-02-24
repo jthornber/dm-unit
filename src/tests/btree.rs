@@ -313,8 +313,6 @@ impl Stats {
             write_locks: rhs.write_locks - self.write_locks,
         }
     }
-
-
 }
 
 #[allow(dead_code)]
@@ -399,10 +397,12 @@ impl<'a> BTreeTest<'a> {
         let delta = self.baseline.delta(self.fix);
         info!(
             "{}: residency = {}, instrs = {}, read_locks = {:.1}, write_locks = {:.1}",
-            desc, self.residency()?,
+            desc,
+            self.residency()?,
             delta.instrs / count,
             delta.read_locks as f64 / count as f64,
-            delta.write_locks as f64 / count as f64);
+            delta.write_locks as f64 / count as f64
+        );
         Ok(())
     }
 
@@ -429,8 +429,10 @@ fn do_insert_test_(
 ) -> Result<()> {
     standard_globals(fix)?;
     let mut bt = BTreeTest::new(fix)?;
+    let commit_interval = 100;
 
     // First pass inserts, subsequent passes overwrite
+    let mut commit_counter = commit_interval;
     for pass in 0..pass_count {
         bt.stats_start();
         for k in keys {
@@ -444,6 +446,12 @@ fn do_insert_test_(
 
         let desc = if pass == 0 { "insert" } else { "overwrite" };
         bt.stats_report(desc, keys.len() as u64)?;
+
+        if commit_counter == 0 {
+            bt.commit()?;
+            commit_counter = commit_interval;
+        }
+        commit_counter -= 1;
     }
 
     bt.commit()?;
@@ -509,6 +517,190 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     do_insert_test_(fix, &shuffled_keys, 2, 80)
 }
 
+//-------------------------------
+
+// comsume_cursor() tests
+fn test_cc_empty_cursor_fails(fix: &mut Fixture) -> Result<()> {
+    let mut cursor = CopyCursor {
+        index: 0,
+        entries: Vec::new(),
+    };
+
+    ensure!(consume_cursor(fix, &mut cursor, 1).is_err());
+    Ok(())
+}
+
+fn test_cc_one_entry(fix: &mut Fixture) -> Result<()> {
+    // We don't need to point to real nodes for this test.
+    let null = Addr(0);
+
+    let mut cursor = CopyCursor {
+        index: 0,
+        entries: vec![CursorEntry {
+            node: null,
+            begin: 0,
+            end: 1024,
+        }],
+    };
+
+    let after = CopyCursor {
+        index: 0,
+        entries: vec![CursorEntry {
+            node: null,
+            begin: 16,
+            end: 1024,
+        }],
+    };
+
+    consume_cursor(fix, &mut cursor, 16)?;
+    ensure!(cursor == after);
+
+    let after = CopyCursor {
+        index: 0,
+        entries: vec![CursorEntry {
+            node: null,
+            begin: 512,
+            end: 1024,
+        }],
+    };
+    consume_cursor(fix, &mut cursor, 512 - 16)?;
+    ensure!(cursor == after);
+
+    let after = CopyCursor {
+        index: 1,
+        entries: vec![CursorEntry {
+            node: null,
+            begin: 512,
+            end: 1024,
+        }],
+    };
+    consume_cursor(fix, &mut cursor, 512)?;
+    ensure!(cursor == after);
+
+    // There should be no more entries
+    ensure!(consume_cursor(fix, &mut cursor, 1).is_err());
+
+    Ok(())
+}
+
+fn test_cc_two_entries(fix: &mut Fixture) -> Result<()> {
+    // We don't need to point to real nodes for this test.
+    let null = Addr(0);
+
+    let mut cursor = CopyCursor {
+        index: 0,
+        entries: vec![
+            CursorEntry {
+                node: null,
+                begin: 0,
+                end: 10,
+            },
+            CursorEntry {
+                node: null,
+                begin: 34,
+                end: 96,
+            },
+        ],
+    };
+
+    let after = CopyCursor {
+        index: 1,
+        entries: vec![
+            CursorEntry {
+                node: null,
+                begin: 0,
+                end: 10,
+            },
+            CursorEntry {
+                node: null,
+                begin: 36,
+                end: 96,
+            },
+        ],
+    };
+
+    consume_cursor(fix, &mut cursor, 12)?;
+    ensure!(cursor == after);
+
+    let after = CopyCursor {
+        index: 1,
+        entries: vec![
+            CursorEntry {
+                node: null,
+                begin: 0,
+                end: 10,
+            },
+            CursorEntry {
+                node: null,
+                begin: 46,
+                end: 96,
+            },
+        ],
+    };
+
+    consume_cursor(fix, &mut cursor, 10)?;
+    ensure!(cursor == after);
+
+    // Insufficient entries
+    ensure!(consume_cursor(fix, &mut cursor, 100).is_err());
+
+    Ok(())
+}
+
+fn test_cc_multiple_entries(fix: &mut Fixture) -> Result<()> {
+    // We don't need to point to real nodes for this test.
+    let null = Addr(0);
+
+    let mut cursor = CopyCursor {
+        index: 0,
+        entries: vec![
+            CursorEntry {
+                node: null,
+                begin: 0,
+                end: 10,
+            },
+            CursorEntry {
+                node: null,
+                begin: 34,
+                end: 96,
+            },
+            CursorEntry {
+                node: null,
+                begin: 17,
+                end: 34,
+            },
+        ],
+    };
+
+    let after = CopyCursor {
+        index: 2,
+        entries: vec![
+            CursorEntry {
+                node: null,
+                begin: 0,
+                end: 10,
+            },
+            CursorEntry {
+                node: null,
+                begin: 34,
+                end: 96,
+            },
+            CursorEntry {
+                node: null,
+                begin: 20,
+                end: 34,
+            },
+        ],
+    };
+
+    consume_cursor(fix, &mut cursor, 10 + (96 - 34) + 3)?;
+    ensure!(cursor == after);
+
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let mut reg = move |path, func| {
         let mut p = "/pdata/btree/".to_string();
@@ -517,10 +709,30 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     };
 
     reg("del/empty", Box::new(test_del_empty));
-    reg("insert-overwrite-lookup/ascending", Box::new(test_insert_ascending));
-    reg("insert-overwrite-lookup/descending", Box::new(test_insert_descending));
-    reg("insert-overwrite-lookup/random", Box::new(test_insert_random));
+    reg(
+        "insert-overwrite-lookup/ascending",
+        Box::new(test_insert_ascending),
+    );
+    reg(
+        "insert-overwrite-lookup/descending",
+        Box::new(test_insert_descending),
+    );
+    reg(
+        "insert-overwrite-lookup/random",
+        Box::new(test_insert_random),
+    );
     reg("insert-overwrite-lookup/runs", Box::new(test_insert_runs));
+
+    reg(
+        "consume-cursor/empty-cursor-fails",
+        Box::new(test_cc_empty_cursor_fails),
+    );
+    reg("consume-cursor/one-entry", Box::new(test_cc_one_entry));
+    reg("consume-cursor/two-entries", Box::new(test_cc_two_entries));
+    reg(
+        "consume-cursor/multiple-entries",
+        Box::new(test_cc_multiple_entries),
+    );
 
     Ok(())
 }
