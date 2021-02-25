@@ -569,7 +569,6 @@ impl VM {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 self.set_reg(rd, rs1.wrapping_sub(rs2) as i32 as i64 as u64);
-                debug!("subw {:x} <- {:x} - {:x}", self.reg(rd), rs1, rs2);
                 self.inc_pc(pc_increment);
             }
             SLLW { rd, rs1, rs2 } => {
