@@ -540,25 +540,20 @@ fn test_cc_empty_cursor_fails(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_cc_one_entry(fix: &mut Fixture) -> Result<()> {
-    // We don't need to point to real nodes for this test.
-    let null = Addr(0);
+    let mk_cursor = |begin, end| CursorEntry {
+        node: Addr(0),
+        begin,
+        end,
+    };
 
     let mut cursor = CopyCursor {
         index: 0,
-        entries: vec![CursorEntry {
-            node: null,
-            begin: 0,
-            end: 1024,
-        }],
+        entries: vec![mk_cursor(0, 1024)],
     };
 
     let after = CopyCursor {
         index: 0,
-        entries: vec![CursorEntry {
-            node: null,
-            begin: 16,
-            end: 1024,
-        }],
+        entries: vec![mk_cursor(16, 1024)],
     };
 
     consume_cursor(fix, &mut cursor, 16)?;
@@ -566,22 +561,14 @@ fn test_cc_one_entry(fix: &mut Fixture) -> Result<()> {
 
     let after = CopyCursor {
         index: 0,
-        entries: vec![CursorEntry {
-            node: null,
-            begin: 512,
-            end: 1024,
-        }],
+        entries: vec![mk_cursor(512, 1024)],
     };
     consume_cursor(fix, &mut cursor, 512 - 16)?;
     ensure!(cursor == after);
 
     let after = CopyCursor {
         index: 1,
-        entries: vec![CursorEntry {
-            node: null,
-            begin: 512,
-            end: 1024,
-        }],
+        entries: vec![mk_cursor(512, 1024)],
     };
     consume_cursor(fix, &mut cursor, 512)?;
     ensure!(cursor == after);
@@ -593,39 +580,20 @@ fn test_cc_one_entry(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_cc_two_entries(fix: &mut Fixture) -> Result<()> {
-    // We don't need to point to real nodes for this test.
-    let null = Addr(0);
+    let mk_cursor = |begin, end| CursorEntry {
+        node: Addr(0),
+        begin,
+        end,
+    };
 
     let mut cursor = CopyCursor {
         index: 0,
-        entries: vec![
-            CursorEntry {
-                node: null,
-                begin: 0,
-                end: 10,
-            },
-            CursorEntry {
-                node: null,
-                begin: 34,
-                end: 96,
-            },
-        ],
+        entries: vec![mk_cursor(0, 10), mk_cursor(34, 96)],
     };
 
     let after = CopyCursor {
         index: 1,
-        entries: vec![
-            CursorEntry {
-                node: null,
-                begin: 0,
-                end: 10,
-            },
-            CursorEntry {
-                node: null,
-                begin: 36,
-                end: 96,
-            },
-        ],
+        entries: vec![mk_cursor(0, 10), mk_cursor(36, 96)],
     };
 
     consume_cursor(fix, &mut cursor, 12)?;
@@ -633,18 +601,7 @@ fn test_cc_two_entries(fix: &mut Fixture) -> Result<()> {
 
     let after = CopyCursor {
         index: 1,
-        entries: vec![
-            CursorEntry {
-                node: null,
-                begin: 0,
-                end: 10,
-            },
-            CursorEntry {
-                node: null,
-                begin: 46,
-                end: 96,
-            },
-        ],
+        entries: vec![mk_cursor(0, 10), mk_cursor(46, 96)],
     };
 
     consume_cursor(fix, &mut cursor, 10)?;
@@ -657,49 +614,20 @@ fn test_cc_two_entries(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_cc_multiple_entries(fix: &mut Fixture) -> Result<()> {
-    // We don't need to point to real nodes for this test.
-    let null = Addr(0);
+    let mk_cursor = |begin, end| CursorEntry {
+        node: Addr(0),
+        begin,
+        end,
+    };
 
     let mut cursor = CopyCursor {
         index: 0,
-        entries: vec![
-            CursorEntry {
-                node: null,
-                begin: 0,
-                end: 10,
-            },
-            CursorEntry {
-                node: null,
-                begin: 34,
-                end: 96,
-            },
-            CursorEntry {
-                node: null,
-                begin: 17,
-                end: 34,
-            },
-        ],
+        entries: vec![mk_cursor(0, 10), mk_cursor(34, 96), mk_cursor(17, 34)],
     };
 
     let after = CopyCursor {
         index: 2,
-        entries: vec![
-            CursorEntry {
-                node: null,
-                begin: 0,
-                end: 10,
-            },
-            CursorEntry {
-                node: null,
-                begin: 34,
-                end: 96,
-            },
-            CursorEntry {
-                node: null,
-                begin: 20,
-                end: 34,
-            },
-        ],
+        entries: vec![mk_cursor(0, 10), mk_cursor(34, 96), mk_cursor(20, 34)],
     };
 
     consume_cursor(fix, &mut cursor, 10 + (96 - 34) + 3)?;
