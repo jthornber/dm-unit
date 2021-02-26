@@ -349,6 +349,12 @@ pub struct CursorEntry {
     pub end: u32,
 }
 
+impl CursorEntry {
+    pub fn new(node: Addr, begin: u32, end: u32) -> Self {
+        CursorEntry { node, begin, end }
+    }
+}
+
 impl Guest for CursorEntry {
     fn guest_len() -> usize {
         16
@@ -424,20 +430,101 @@ pub fn redistribute_entries(
     fix: &mut Fixture,
     dest: &mut CopyCursor,
     src: &mut CopyCursor,
-    len: usize,
 ) -> Result<()> {
     let (mut fix, dest_ptr) = auto_guest::<CopyCursor>(fix, dest, PERM_READ | PERM_WRITE)?;
     let (mut fix, src_ptr) = auto_guest::<CopyCursor>(&mut *fix, src, PERM_READ | PERM_WRITE)?;
 
     fix.vm.set_reg(A0, dest_ptr.0);
     fix.vm.set_reg(A1, src_ptr.0);
-    fix.vm.set_reg(A2, len as u64);
 
     fix.call_with_errno("redistribute_entries")?;
 
     *dest = read_guest::<CopyCursor>(&fix.vm.mem, dest_ptr)?;
     *src = read_guest::<CopyCursor>(&fix.vm.mem, src_ptr)?;
 
+    Ok(())
+}
+
+//-------------------------------
+
+pub struct ShadowSpine {
+    info: Addr,
+    nodes: Vec<Addr>,
+    root: u64,
+}
+
+impl Guest for ShadowSpine {
+    fn guest_len() -> usize {
+        40
+    }
+
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_u64::<LittleEndian>(self.info.0)?;
+        assert!(self.nodes.len() <= 2);
+        w.write_u32::<LittleEndian>(self.nodes.len() as u32)?;
+        w.write_u32::<LittleEndian>(0)?; // padding
+
+        match self.nodes.len() {
+            0 => {
+                w.write_u64::<LittleEndian>(0)?;
+                w.write_u64::<LittleEndian>(0)?;
+            }
+            1 => {
+                w.write_u64::<LittleEndian>(self.nodes[0].0)?;
+                w.write_u64::<LittleEndian>(0)?;
+            }
+            2 => {
+                w.write_u64::<LittleEndian>(self.nodes[0].0)?;
+                w.write_u64::<LittleEndian>(self.nodes[1].0)?;
+            }
+            _ => {
+                assert!(false);
+            }
+        }
+        w.write_u64::<LittleEndian>(self.root)?;
+        Ok(())
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let info = Addr(r.read_u64::<LittleEndian>()?);
+        let count = r.read_u32::<LittleEndian>()?;
+        let _padding = r.read_u32::<LittleEndian>()?;
+
+        assert!(count <= 3);
+
+        let mut nodes = Vec::new();
+        for _ in 0..count {
+            nodes.push(Addr(r.read_u64::<LittleEndian>()?));
+        }
+
+        for _ in count..2 {
+            let _ = r.read_u64::<LittleEndian>()?;
+        }
+
+        let root = r.read_u64::<LittleEndian>()?;
+
+        Ok(ShadowSpine { info, nodes, root })
+    }
+}
+
+pub fn split_one_into_two<V: Guest>(
+    fix: &mut Fixture,
+    spine: &mut ShadowSpine,
+    parent_index: usize,
+    vt: &BTreeValueType<V>,
+    key: u64,
+) -> Result<()> {
+    let (mut fix, spine_ptr) = auto_guest::<ShadowSpine>(fix, spine, PERM_READ | PERM_WRITE)?;
+    let (mut fix, vt_ptr) = auto_guest::<BTreeValueType<V>>(&mut *fix, vt, PERM_READ | PERM_WRITE)?;
+
+    fix.vm.set_reg(A0, spine_ptr.0);
+    fix.vm.set_reg(A1, parent_index as u64);
+    fix.vm.set_reg(A2, vt_ptr.0);
+    fix.vm.set_reg(A3, key);
+
+    fix.call_with_errno("split_one_into_two")?;
+
+    *spine = read_guest::<ShadowSpine>(&fix.vm.mem, spine_ptr)?;
     Ok(())
 }
 

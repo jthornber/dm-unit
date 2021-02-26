@@ -446,21 +446,21 @@ fn do_insert_test_(
         bt.stats_start();
         for k in keys {
             bt.insert(*k)?;
+
+            if commit_counter == 0 {
+                bt.commit()?;
+                commit_counter = commit_interval;
+            }
+            commit_counter -= 1;
         }
 
         let residency = bt.residency()?;
         if residency < target_residency {
-            return Err(anyhow!("Residency is too low ({}%)", residency));
+            // return Err(anyhow!("Residency is too low ({}%)", residency));
         }
 
         let desc = if pass == 0 { "insert" } else { "overwrite" };
         bt.stats_report(desc, keys.len() as u64)?;
-
-        if commit_counter == 0 {
-            bt.commit()?;
-            commit_counter = commit_interval;
-        }
-        commit_counter -= 1;
     }
 
     bt.commit()?;
@@ -647,7 +647,7 @@ fn mk_node<'a>(fix: &'a mut Fixture, nr_entries: usize) -> Result<(AutoGPtr<'a>,
         value_size: Value64::guest_len() as u32,
     };
     let keys: Vec<u64> = (0..nr_entries as u64).collect();
-    let values: Vec<Value64> = (0..nr_entries as u64).map(|v| Value64(v)).collect();
+    let values: Vec<Value64> = (0..nr_entries as u64).map(Value64).collect();
     let node = Node::Leaf {
         header,
         keys,
@@ -672,16 +672,30 @@ struct Move {
     len: usize,
 }
 
-fn key_ptr(node: Addr, index: usize) -> Addr {
-    Addr(node.0 + 32 + index as u64 * 8)
+// This checks that we never read a region after writing it.  Since
+// the src and dest copy_cursors overlap this is a real concern.
+fn check_moves(moves: &[Move]) -> Result<()> {
+    // Tracks which bytes have been written
+    let mut writes = BTreeSet::new();
+
+    info!("{:?}", moves);
+    for m in moves {
+        for i in 0..m.len {
+            ensure!(!writes.contains(&(m.src.0 + i as u64)));
+            writes.insert(m.dest.0 + i as u64);
+        }
+    }
+
+    Ok(())
 }
 
-fn value_ptr<V: Unpack>(node: Addr, index: usize) -> Addr {
-    let Addr(base) = key_ptr(node, calc_max_entries::<V>());
-    Addr(base + V::disk_size() as u64 * index as u64)
-}
-
-fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
+// We test redistribute_entries() by capturing a trace of the memmove
+// calls it makes, and checking for out of order copies.
+fn do_redistribute_test(
+    fix: &mut Fixture,
+    mut dest: CopyCursor,
+    mut src: CopyCursor,
+) -> Result<()> {
     let moves = Arc::new(Mutex::new(Vec::new()));
 
     // Register a stub for memmove that captures call details
@@ -702,47 +716,60 @@ fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
         fix.at_func("memmove", Box::new(memmove))?;
     }
 
-    let (mut fix, node1_ptr) = mk_node(fix, 0)?;
-    let (mut fix, node2_ptr) = mk_node(&mut *fix, 100)?;
-
-    let mut dest = CopyCursor {
-        index: 0,
-        entries: vec![CursorEntry {
-            node: node1_ptr,
-            begin: 0,
-            end: 100,
-        }],
-    };
-
-    let mut src = CopyCursor {
-        index: 0,
-        entries: vec![CursorEntry {
-            node: node2_ptr,
-            begin: 0,
-            end: 100,
-        }],
-    };
-
-    redistribute_entries(&mut *fix, &mut dest, &mut src, 100)?;
+    redistribute_entries(&mut *fix, &mut dest, &mut src)?;
 
     let moves = moves.lock().unwrap();
-    info!("moves: {:?}", moves);
-    ensure!(
-        moves[0]
-            == Move {
-                dest: key_ptr(node1_ptr, 0),
-                src: key_ptr(node2_ptr, 0),
-                len: 100 * 8
-            }
-    );
-    ensure!(
-        moves[1]
-            == Move {
-                dest: value_ptr::<Value64>(node1_ptr, 0),
-                src: value_ptr::<Value64>(node2_ptr, 0),
-                len: 100 * 8
-            }
-    );
+    check_moves(&moves)?;
+
+    Ok(())
+}
+
+fn do_redistribute_2(fix: &mut Fixture, lhs_count: u32, rhs_count: u32) -> Result<()> {
+    let total_count = lhs_count + rhs_count;
+    let lhs_target = total_count / 2;
+    let rhs_target = total_count - lhs_target;
+
+    let (mut fix, node1_ptr) = mk_node(fix, lhs_count as usize)?;
+    let (mut fix, node2_ptr) = mk_node(&mut *fix, rhs_count as usize)?;
+
+    let dest = CopyCursor {
+        index: 0,
+        entries: vec![
+            CursorEntry::new(node1_ptr, 0, lhs_target),
+            CursorEntry::new(node2_ptr, 0, rhs_target),
+        ],
+    };
+
+    let src = CopyCursor {
+        index: 0,
+        entries: vec![
+            CursorEntry::new(node1_ptr, 0, lhs_count),
+            CursorEntry::new(node2_ptr, 0, rhs_count),
+        ],
+    };
+
+    info!("dest: {:?}", dest);
+    info!("src: {:?}", src);
+    do_redistribute_test(&mut *fix, dest, src)
+}
+
+fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    do_redistribute_2(fix, 0, 100)?;
+    do_redistribute_2(fix, 25, 75)?;
+    do_redistribute_2(fix, 50, 50)?;
+    info!("75, 25");
+    do_redistribute_2(fix, 75, 25)?;
+    info!("100, 0");
+    do_redistribute_2(fix, 100, 0)?;
+    Ok(())
+}
+
+//-------------------------------
+
+fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
 
     Ok(())
 }
@@ -750,38 +777,31 @@ fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    let mut reg = move |path, func| {
-        let mut p = "/pdata/btree/".to_string();
-        p.push_str(path);
-        runner.register(&p, func);
-    };
+    macro_rules! reg {
+        ($path:expr, $func:expr) => {
+            let mut p = "/pdata/btree/".to_string();
+            p.push_str($path);
+            runner.register(&p, Box::new($func));
+        };
+    }
 
-    reg("del/empty", Box::new(test_del_empty));
-    reg(
-        "insert-overwrite-lookup/ascending",
-        Box::new(test_insert_ascending),
-    );
-    reg(
-        "insert-overwrite-lookup/descending",
-        Box::new(test_insert_descending),
-    );
-    reg(
-        "insert-overwrite-lookup/random",
-        Box::new(test_insert_random),
-    );
-    reg("insert-overwrite-lookup/runs", Box::new(test_insert_runs));
-
-    reg(
+    reg!("del/empty", test_del_empty);
+    reg!("insert-overwrite-lookup/ascending", test_insert_ascending);
+    reg!("insert-overwrite-lookup/descending", test_insert_descending);
+    reg!("insert-overwrite-lookup/random", test_insert_random);
+    reg!("insert-overwrite-lookup/runs", test_insert_runs);
+    reg!(
         "consume-cursor/empty-cursor-fails",
-        Box::new(test_cc_empty_cursor_fails),
+        test_cc_empty_cursor_fails
     );
-    reg("consume-cursor/one-entry", Box::new(test_cc_one_entry));
-    reg("consume-cursor/two-entries", Box::new(test_cc_two_entries));
-    reg(
-        "consume-cursor/multiple-entries",
-        Box::new(test_cc_multiple_entries),
+    reg!("consume-cursor/one-entry", test_cc_one_entry);
+    reg!("consume-cursor/two-entries", test_cc_two_entries);
+    reg!("consume-cursor/multiple-entries", test_cc_multiple_entries);
+    reg!("redistribute-entries", test_redistribute_entries);
+    reg!(
+        "split_one_into_two/bad-redistribute",
+        test_split_one_into_two_bad_redistribute
     );
-    reg("redistribute-entries", Box::new(test_redistribute_entries));
 
     Ok(())
 }
