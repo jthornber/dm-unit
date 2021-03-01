@@ -777,31 +777,54 @@ fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    macro_rules! reg {
-        ($path:expr, $func:expr) => {
-            let mut p = "/pdata/btree/".to_string();
-            p.push_str($path);
-            runner.register(&p, Box::new($func));
-        };
+    let mut prefix: Vec<&'static str> = Vec::new();
+
+    macro_rules! test_section {
+        ($path:expr, $($s:stmt)*) => {{
+            prefix.push($path);
+            $($s)*
+            prefix.pop().unwrap();
+        }}
     }
 
-    reg!("del/empty", test_del_empty);
-    reg!("insert-overwrite-lookup/ascending", test_insert_ascending);
-    reg!("insert-overwrite-lookup/descending", test_insert_descending);
-    reg!("insert-overwrite-lookup/random", test_insert_random);
-    reg!("insert-overwrite-lookup/runs", test_insert_runs);
-    reg!(
-        "consume-cursor/empty-cursor-fails",
-        test_cc_empty_cursor_fails
-    );
-    reg!("consume-cursor/one-entry", test_cc_one_entry);
-    reg!("consume-cursor/two-entries", test_cc_two_entries);
-    reg!("consume-cursor/multiple-entries", test_cc_multiple_entries);
-    reg!("redistribute-entries", test_redistribute_entries);
-    reg!(
-        "split_one_into_two/bad-redistribute",
-        test_split_one_into_two_bad_redistribute
-    );
+    macro_rules! test {
+        ($path:expr, $func:expr) => {{
+            prefix.push($path);
+            let p = prefix.concat();
+            prefix.pop().unwrap();
+            runner.register(&p, Box::new($func));
+        }};
+    }
+
+    test_section! {
+        "/pdata/btree/",
+        test!("del/empty", test_del_empty)
+
+        test_section! {
+            "insert-overtwrite-lookup/",
+            test!("ascending", test_insert_ascending)
+            test!("descending", test_insert_descending)
+            test!("random", test_insert_random)
+            test!("runs", test_insert_runs)
+        }
+
+        test_section! {
+            "consume_cursor/",
+            test!(
+                "empty-cursor-fails",
+                test_cc_empty_cursor_fails
+            )
+            test!("one-entry", test_cc_one_entry)
+            test!("two-entries", test_cc_two_entries)
+            test!("multiple-entries", test_cc_multiple_entries)
+        }
+
+        test!("redistribute-entries", test_redistribute_entries)
+        test!(
+            "split_one_into_two/bad-redistribute",
+            test_split_one_into_two_bad_redistribute
+        )
+    };
 
     Ok(())
 }
