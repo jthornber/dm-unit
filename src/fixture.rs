@@ -174,7 +174,19 @@ impl Fixture {
         }
         Ok(())
     }
-
+    
+    pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
+        self.call_at(loc)?;
+        let r = self.vm.reg(A0) as i64 as i32;
+        if r != 0 {
+            if r < 0 {
+                return Err(anyhow!("failed: {}", error_string(-r)));
+            } else {
+                return Err(anyhow!("failed: {}", r));
+            }
+        }
+        Ok(())
+    }
     pub fn at_addr(&mut self, loc: Addr, callback: FixCallback) {
         self.vm.add_breakpoint(loc);
         self.breakpoints.insert(loc.0, callback);

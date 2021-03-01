@@ -14,6 +14,7 @@ pub mod guest;
 pub mod loader;
 pub mod memory;
 pub mod primitive;
+pub mod stats;
 pub mod stubs;
 pub mod test_runner;
 pub mod tests;
