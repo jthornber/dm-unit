@@ -190,6 +190,31 @@ pdata
 All tests passed: 4
 ```
 
+Logging is controlled using the RUST_LOG environment variable, eg,
+
+```
+> export RUST_LOG=info
+> ./dm-unit -k ../riscv-kernel/ -t runs
+pdata 
+  btree 
+      insert-overtwrite-lookup 
+[2021-03-01T10:27:00Z INFO  dm_unit::tests::btree] insert: residency = 85, instrs = 3394, read_locks = 2.6, write_locks = 2.2
+[2021-03-01T10:27:05Z INFO  dm_unit::tests::btree] overwrite: residency = 85, instrs = 2606, read_locks = 2.5, write_locks = 2.2
+[2021-03-01T10:27:07Z INFO  dm_unit::tests::btree] lookup: residency = 85, instrs = 1141, read_locks = 2.0, write_locks = 0.0
+	    runs .................................................. PASS
+    All tests passed: 1
+```
+
+The 'debug' logging level is very verbose, showing each instructions
+executed by the emulator.  You may set log levels on a per code module
+basis:
+
+eg,
+```
+> export RUST_LOG=debug,dm_unit::vm=info
+```
+
+
 # Writing tests
 
 ## Example 1 - Forcing an error path
