@@ -29,25 +29,26 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
 
     standard_globals(fix)?;
 
-    let bm = dm_bm_create(fix, 10240)?;
+    let count = 100000;
+    let bm = dm_bm_create(fix, count + 100)?;
     let (tm, sm) = dm_tm_create(fix, bm, 0)?;
     let mut sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
 
     let commit_interval = 100;
 
-    let baseline = Stats::collect_stats(fix);
-    let count = 10000;
+    let mut baseline = Stats::collect_stats(fix);
     let mut commit_count = commit_interval;
     for _ in 0..count {
         let _b = sm_new_block(fix, sm)?;
 
         if commit_count == 0 {
             info!("committing");
-            stats_report(fix, &baseline, "new_block", count);
+            stats_report(fix, &baseline, "new_block", commit_interval);
             dm_tm_pre_commit(fix, tm)?;
             dm_tm_commit(fix, tm, sb)?;
             sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
             commit_count = commit_interval;
+            baseline = Stats::collect_stats(fix);
         } else {
             commit_count -= 1;
         }
