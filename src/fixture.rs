@@ -39,13 +39,21 @@ impl Fixture {
     pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Result<Self> {
         let mut module = PathBuf::new();
         module.push(kernel_dir);
-        module.push("drivers/md/persistent-data/dm-persistent-data.ko");
+        let module_path = |m| {
+            let mut module = module.clone();
+            module.push(m);
+            module
+        };
+        let modules: Vec<PathBuf> = [
+            "drivers/md/persistent-data/dm-persistent-data.ko",
+            "drivers/md/dm-thin-pool.ko",
+        ].iter().map(module_path).collect();
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
         let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
-        let symbols = load_elf(&mut vm.mem, module)?;
+        let symbols = load_module(&mut vm.mem, &modules[0])?;
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;
