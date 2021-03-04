@@ -431,7 +431,7 @@ fn do_insert_test_(
 
         let residency = bt.residency()?;
         if residency < target_residency {
-            // return Err(anyhow!("Residency is too low ({}%)", residency));
+            return Err(anyhow!("Residency is too low ({}%)", residency));
         }
 
         let desc = if pass == 0 { "insert" } else { "overwrite" };
@@ -776,7 +776,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("del/empty", test_del_empty)
 
         test_section! {
-            "insert-overtwrite-lookup/",
+            "insert-overwrite-lookup/",
             test!("ascending", test_insert_ascending)
             test!("descending", test_insert_descending)
             test!("random", test_insert_random)

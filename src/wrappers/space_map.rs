@@ -5,7 +5,6 @@ use crate::memory::*;
 
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::*;
 use std::io;
 use std::io::{Read, Write};
 
