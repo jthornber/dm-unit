@@ -42,14 +42,14 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
             stats_report(fix, &baseline, "new_block", 1);
         }
 
+        commit_count -= 1;
+
         if commit_count == 0 {
             dm_tm_pre_commit(fix, tm)?;
             dm_tm_commit(fix, tm, sb)?;
             sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
             commit_count = commit_interval;
             baseline = Stats::collect_stats(fix);
-        } else {
-            commit_count -= 1;
         }
     }
 
