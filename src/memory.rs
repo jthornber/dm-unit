@@ -2,7 +2,8 @@ use fixedbitset::FixedBitSet;
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
 use log::debug;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::cell::{Ref, RefCell, RefMut};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::result;
 use thiserror::Error;
@@ -176,27 +177,25 @@ impl MMap {
     }
 }
 
-struct MMapIndex {
+struct MMapNode {
     link: RBTreeLink,
-    begin: u64,
-    index: usize,
+    mmap: RefCell<MMap>,
 }
 
-impl MMapIndex {
-    fn new(begin: u64, index: usize) -> Self {
-        MMapIndex {
-            link: RBTreeLink::default(),
-            begin,
-            index,
+impl MMapNode {
+    fn new(mm: MMap) -> Self {
+        MMapNode {
+            link: RBTreeLink::new(),
+            mmap: RefCell::new(mm),
         }
     }
 }
 
-intrusive_adapter!(MMapAdapter = Box<MMapIndex>: MMapIndex { link: RBTreeLink });
+intrusive_adapter!(MMapAdapter = Box<MMapNode>: MMapNode { link: RBTreeLink });
 impl<'a> KeyAdapter<'a> for MMapAdapter {
     type Key = u64;
-    fn get_key(&self, mmi: &'a MMapIndex) -> u64 {
-        mmi.begin
+    fn get_key(&self, node: &'a MMapNode) -> u64 {
+        node.mmap.borrow().begin
     }
 }
 
@@ -205,11 +204,7 @@ impl<'a> KeyAdapter<'a> for MMapAdapter {
 /// Manages memory for the vm.  Tracks permissions at the byte level.
 /// Checks memory has been initialised before it's read.
 pub struct Memory {
-    index: RBTree<MMapAdapter>,
-
-    // Used to ensure each mmap has a unique index.
-    total_allocations: usize,
-    mmaps: BTreeMap<usize, MMap>,
+    mmaps: RBTree<MMapAdapter>,
 
     // We always want a heap, so I'm embedding it in the mmu.
     heap: Heap,
@@ -223,34 +218,22 @@ pub struct Memory {
 impl Memory {
     pub fn new(heap_begin: Addr, heap_end: Addr) -> Self {
         Memory {
-            index: RBTree::new(MMapAdapter::new()),
-            total_allocations: 0,
-            mmaps: BTreeMap::new(),
+            mmaps: RBTree::new(MMapAdapter::new()),
             heap: Heap::new(heap_begin, heap_end),
             allocations: BTreeMap::new(),
         }
     }
 
-    /// Inserts a MMap into both the mmaps vec, and the index rbtree.
-    fn insert_mm(&mut self, mm: MMap) {
-        let index = self.total_allocations;
-        self.total_allocations += 1;
-        let begin = mm.begin;
-        self.mmaps.insert(index, mm);
-        self.index.insert(Box::new(MMapIndex::new(begin, index)));
-    }
-
     // Checks there are no mappings in a particular range
     fn no_mappings(&self, begin: u64, end: u64) -> bool {
-        let mut cur = self.index.upper_bound(Bound::Included(&begin));
+        let mut cur = self.mmaps.upper_bound(Bound::Included(&begin));
 
         loop {
             if cur.is_null() {
                 break;
             }
 
-            let index = cur.get().unwrap().index;
-            let mm = self.mmaps.get(&index).unwrap();
+            let mm = cur.get().unwrap().mmap.borrow();
             if mm.begin >= end {
                 break;
             }
@@ -269,16 +252,18 @@ impl Memory {
         true
     }
 
+    fn insert_mm(&mut self, mm: MMap) {
+        self.mmaps.insert(Box::new(MMapNode::new(mm)));
+    }
+
     /// Remove an mmapped area.
     pub fn unmap(&mut self, begin: Addr) -> Result<()> {
-        let mut cur = self.index.find_mut(&begin.0);
+        let mut cur = self.mmaps.find_mut(&begin.0);
 
         if cur.is_null() {
             Err(MemErr::BadFree(begin))
         } else {
-            let index = cur.get().unwrap().index;
             cur.remove();
-            self.mmaps.remove(&index);
             Ok(())
         }
     }
@@ -296,7 +281,6 @@ impl Memory {
         assert!(self.no_mappings(begin.0, end.0));
 
         let mm = MMap::new(begin.0, end.0, perms);
-
         self.insert_mm(mm);
         Ok(())
     }
@@ -321,211 +305,119 @@ impl Memory {
         Ok(())
     }
 
-    /// Builds a vec of mmap indexes within a given address range.
-    fn get_indexes_(
-        &self,
-        mut begin: u64,
-        end: u64,
-        perms: u8,
-        allow_gaps: bool,
-    ) -> Result<VecDeque<usize>> {
-        let mut cursor = self.index.upper_bound(Bound::Included(&begin));
-        let mut indexes = VecDeque::new();
+    /// Gets the mmap that contains the given range or returns an error.  Assumes
+    /// a single mmap covers the whole range.
+    fn get_mmap(&self, begin: u64, end: u64, perms: u8) -> Result<Ref<MMap>> {
+        let cursor = self.mmaps.upper_bound(Bound::Included(&begin));
 
-        while begin < end {
-            if cursor.is_null() {
-                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-            }
-
-            let mi = cursor.get().unwrap();
-            let mm = &self
-                .mmaps
-                .get(&mi.index)
-                .expect("mm region present in index but not mmaps");
-
-            // begin must be within the region
-            if ((begin < mm.begin) || (begin >= mm.end)) && !allow_gaps {
-                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-            }
-
-            indexes.push_back(mi.index);
-            begin = mm.end;
-            cursor.move_next();
+        if cursor.is_null() {
+            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
         }
 
-        Ok(indexes)
+        let mm = cursor.get().unwrap().mmap.borrow();
+
+        // begin and end must be within the region
+        if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
+            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+        }
+
+        mm.check_perms(begin, perms)?;
+
+        Ok(mm)
     }
 
-    fn get_indexes(&self, begin: u64, end: u64, perms: u8) -> Result<VecDeque<usize>> {
-        self.get_indexes_(begin, end, perms, false)
+    fn get_mut_mmap<F>(&mut self, begin: u64, end: u64, perms: u8, func: F) -> Result<()>
+    where
+        F: FnOnce(RefMut<MMap>) -> Result<()>,
+    {
+        let cursor = self.mmaps.upper_bound_mut(Bound::Included(&begin));
+
+        if cursor.is_null() {
+            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+        }
+
+        let mm = cursor.get().unwrap().mmap.borrow_mut();
+
+        // begin and end must be within the region
+        if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
+            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+        }
+
+        mm.check_perms(begin, perms)?;
+        func(mm)
     }
 
     // Checks that a memory region is mapped with the particular permissions.
-    pub fn check_perms(&self, mut begin: Addr, end: Addr, perms: u8) -> Result<()> {
-        let mut indexes = self.get_indexes(begin.0, end.0, perms)?;
-
-        while begin < end {
-            if indexes.is_empty() {
-                return Err(MemErr::BadPerms(begin, perms));
-            }
-
-            let index = indexes.pop_front().unwrap();
-            let mm = &self.mmaps.get(&index).unwrap();
-
-            // begin must be within mm, otherwise we have a gap.
-            if begin.0 >= mm.end {
-                return Err(MemErr::BadPerms(begin, perms));
-            }
-
-            let len = std::cmp::min(end.0, mm.end) - begin.0;
-            mm.check_perms(begin.0, perms)?;
-            begin = Addr(begin.0 + len);
-        }
-
+    pub fn check_perms(&self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
+        let mm = self.get_mmap(begin.0, end.0, perms)?;
+        mm.check_perms(begin.0, perms)?;
         Ok(())
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
     /// not set for any byte in the range.
-    pub fn read(&self, begin: Addr, mut bytes: &mut [u8], perms: u8) -> Result<()> {
-        let mut begin = begin.0;
+    pub fn read(&self, begin: Addr, bytes: &mut [u8], perms: u8) -> Result<()> {
+        let begin = begin.0;
         let end = begin + (bytes.len() as u64);
-        let mut indexes = self.get_indexes(begin, end, perms)?;
+        let mm = self.get_mmap(begin, end, perms)?;
 
-        while begin < end {
-            if indexes.is_empty() {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            let index = indexes.pop_front().unwrap();
-            let mm = &self.mmaps.get(&index).unwrap();
-
-            // begin must be within mm, otherwise we have a gap.
-            if begin >= mm.end {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            let len = std::cmp::min(end, mm.end) - begin;
-            mm.read(begin, &mut bytes[0..(len as usize)], perms)?;
-
-            bytes = &mut bytes[(len as usize)..];
-            begin += len;
-        }
+        let len = end - begin;
+        mm.read(begin, &mut bytes[0..(len as usize)], perms)?;
 
         Ok(())
     }
 
     /// When reading basic blocks we don't know how much to read, so this method
     /// just returns what is in the individual mmap.
-    pub fn read_some(&self, begin: Addr, perms: u8) -> Result<&[u8]> {
+    pub fn read_some<F, V>(&self, begin: Addr, perms: u8, func: F) -> Result<V>
+    where
+        F: FnOnce(&[u8]) -> Result<V>,
+    {
         let begin = begin.0;
-        let mut indexes = self.get_indexes(begin, begin + 1, perms)?;
+        let mm = self.get_mmap(begin, begin + 1, perms)?;
 
-        if indexes.is_empty() {
-            Err(MemErr::BadPerms(Addr(begin), perms))
-        } else {
-            let index = indexes.pop_front().unwrap();
-            let mm = &self.mmaps.get(&index).unwrap();
-
-            // begin must be within mm, otherwise we have a gap.
-            if begin >= mm.end {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            let offset = (begin - mm.begin) as usize;
-            Ok(&mm.bytes[offset..])
-        }
+        let offset = (begin - mm.begin) as usize;
+        func(&mm.bytes[offset..])
     }
 
     /// Writes bytes to a memory range.  Fails in the bits in 'perms' are
     /// not set for any byte in the range.
-    pub fn write(&mut self, begin: Addr, mut bytes: &[u8], perms: u8) -> Result<()> {
-        let mut begin = begin.0;
+    pub fn write(&mut self, begin: Addr, bytes: &[u8], perms: u8) -> Result<()> {
+        let begin = begin.0;
         let end = begin + (bytes.len() as u64);
 
-        let mut indexes = self.get_indexes(begin, end, perms)?;
-
-        while begin < end {
-            if indexes.is_empty() {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            let index = indexes.pop_front().unwrap();
-            let mm = &mut self.mmaps.get_mut(&index).unwrap();
-
-            // begin must be within mm, otherwise we have a gap.
-            if begin >= mm.end {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            let len = std::cmp::min(end, mm.end) - begin;
+        self.get_mut_mmap(begin, end, perms, |mut mm| {
+            let len = end - begin;
             mm.write(begin, &bytes[0..(len as usize)], perms)?;
-
-            bytes = &bytes[(len as usize)..];
-            begin += len;
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Clears the 'written' bits for a region.  Used by the heap code when
     /// a block of memory is deallocated.
     pub fn forget(&mut self, begin: Addr, end: Addr) -> Result<()> {
-        let mut begin = begin.0;
+        let begin = begin.0;
         let end = end.0;
 
-        let mut indexes = self.get_indexes(begin, end, 0)?;
-
-        let mut mmaps = BTreeMap::new();
-        std::mem::swap(&mut mmaps, &mut self.mmaps);
-
-        while begin < end {
-            if indexes.is_empty() {
-                return Err(MemErr::BadPerms(Addr(begin), 0));
-            }
-
-            let index = indexes.pop_front().unwrap();
-            let mm = &mut mmaps.get_mut(&index).unwrap();
-
-            // begin must be within mm, otherwise we have a gap.
-            if begin >= mm.end {
-                return Err(MemErr::BadPerms(Addr(begin), 0));
-            }
-
-            let len = std::cmp::min(end, mm.end) - begin;
+        self.get_mut_mmap(begin, end, 0, |mut mm| {
             mm.forget(begin, end);
-            begin += len;
-        }
-
-        std::mem::swap(&mut mmaps, &mut self.mmaps);
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Accesses a primitive, loc must be 4 byte aligned.  `perm` checked.
     pub fn read_into<T: Primitive>(&mut self, loc: Addr, perms: u8) -> Result<T> {
         let begin = loc.0;
-        let mut indexes = self.get_indexes(begin, begin + 1, perms)?;
+        let mm = self.get_mmap(begin, begin + 1, perms)?;
 
-        if indexes.is_empty() {
-            Err(MemErr::BadPerms(Addr(begin), perms))
-        } else {
-            let index = indexes.pop_front().unwrap();
-            let mm = &self.mmaps.get(&index).unwrap();
+        let offset = (begin - mm.begin) as usize;
+        let bytes = &mm.bytes[offset..];
 
-            // begin must be within mm, otherwise we have a gap.
-            if begin >= mm.end {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            let offset = (begin - mm.begin) as usize;
-            let bytes = &mm.bytes[offset..];
-
-            if bytes.len() < ::core::mem::size_of::<T>() {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
-
-            Ok(unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const T) })
+        if bytes.len() < ::core::mem::size_of::<T>() {
+            return Err(MemErr::BadPerms(Addr(begin), perms));
         }
+
+        Ok(unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const T) })
     }
 
     // Allocates a block on the heap with specific permissions.
@@ -566,42 +458,17 @@ impl Memory {
     pub fn read_string(&mut self, ptr: Addr) -> Result<String> {
         // We assume the string is short, and grab the indexes for that max range.
         // Then read bytes from it.
-        let mut begin = ptr.0;
-        let end = begin + 256;
-
-        // We allow gaps since we don't know how much memory is mapped.
-        let mut indexes = self.get_indexes_(begin, end, PERM_READ, true)?;
-
         let mut buffer = Vec::new();
-        while begin < end {
-            if indexes.is_empty() {
-                return Err(MemErr::BadPerms(Addr(begin), PERM_READ));
-            }
-
-            let index = indexes.pop_front().unwrap();
-            let mm = &self.mmaps.get(&index).unwrap();
-
-            // begin must be within mm, otherwise we have a gap.
-            if begin >= mm.end {
-                return Err(MemErr::BadPerms(Addr(begin), PERM_READ));
-            }
-
-            let len = std::cmp::min(end, mm.end) - begin;
-            let start = (begin - mm.begin) as usize;
-            let stop = start + len as usize;
-            let mem = &mm.bytes[start..stop];
-
-            for byte in mem {
+        self.read_some(ptr, PERM_READ, |bytes| {
+            for byte in bytes {
                 if *byte == 0 {
-                    begin = end;
                     break;
                 }
 
                 buffer.push(*byte);
             }
-
-            begin += len;
-        }
+            Ok(())
+        })?;
 
         Ok(std::str::from_utf8(&buffer).unwrap().to_owned())
     }
