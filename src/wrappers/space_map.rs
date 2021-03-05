@@ -98,6 +98,28 @@ pub fn sm_new_block(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
+pub fn sm_get_nr_blocks(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    fix.vm.set_reg(A1, result_ptr.0);
+
+    fix.call_at_with_errno(sm.get_nr_blocks)?;
+    Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
+}
+
+pub fn sm_get_nr_free(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    fix.vm.set_reg(A1, result_ptr.0);
+
+    fix.call_at_with_errno(sm.get_nr_free)?;
+    Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
+}
+
 pub fn sm_commit(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
