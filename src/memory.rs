@@ -38,7 +38,7 @@ impl Addr {
 //-------------------------------------
 
 /// Indicates memory errors such as referencing unallocated memory.  Or bad permissions.
-#[derive(Error, Debug)]
+#[derive(Error, Clone, Copy, Debug)]
 pub enum MemErr {
     #[error("Memory is not mapped at {0:?}, looking for perms {1:?}")]
     UnmappedRegion(Addr, u8),
@@ -256,7 +256,10 @@ impl Memory {
             }
 
             if mm.end > begin && (mm.begin >= begin || mm.end < end) {
-                debug!("mapping clash: mm.begin = {:x}, mm.end = {:x}", mm.begin, mm.end);
+                debug!(
+                    "mapping clash: mm.begin = {:x}, mm.end = {:x}",
+                    mm.begin, mm.end
+                );
                 return false;
             }
 
@@ -412,13 +415,27 @@ impl Memory {
         Ok(())
     }
 
-    /*
-    pub fn read(&self, begin: Addr, bytes: &mut [u8], perms: u8) -> Result<()> {
-        let r = self.read_(begin, bytes, perms);
-        assert!(r.is_ok());
-        r
+    /// When reading basic blocks we don't know how much to read, so this method
+    /// just returns what is in the individual mmap.
+    pub fn read_some(&self, begin: Addr, perms: u8) -> Result<&[u8]> {
+        let begin = begin.0;
+        let mut indexes = self.get_indexes(begin, begin + 1, perms)?;
+
+        if indexes.is_empty() {
+            Err(MemErr::BadPerms(Addr(begin), perms))
+        } else {
+            let index = indexes.pop_front().unwrap();
+            let mm = &self.mmaps.get(&index).unwrap();
+
+            // begin must be within mm, otherwise we have a gap.
+            if begin >= mm.end {
+                return Err(MemErr::BadPerms(Addr(begin), perms));
+            }
+
+            let offset = (begin - mm.begin) as usize;
+            Ok(&mm.bytes[offset..])
+        }
     }
-    */
 
     /// Writes bytes to a memory range.  Fails in the bits in 'perms' are
     /// not set for any byte in the range.

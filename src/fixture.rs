@@ -1,9 +1,9 @@
-use crate::decode::Reg;
+use crate::decode::{BasicBlock, Reg};
 use crate::guest::*;
 use crate::loader::*;
 use crate::memory::*;
 use crate::memory::{Addr, PERM_EXEC};
-use crate::vm::*;
+use crate::vm::{self, *};
 
 use anyhow::{anyhow, Result};
 use elf::types::Symbol;
@@ -33,6 +33,9 @@ pub struct Fixture {
 
     // Current indentation for function tracing.
     trace_indent: usize,
+
+    // A cache of decoded basic blocks
+    bb_cache: BTreeMap<u64, vm::Result<BasicBlock>>,
 }
 
 impl Fixture {
@@ -47,7 +50,10 @@ impl Fixture {
         let modules: Vec<PathBuf> = [
             "drivers/md/persistent-data/dm-persistent-data.ko",
             "drivers/md/dm-thin-pool.ko",
-        ].iter().map(module_path).collect();
+        ]
+        .iter()
+        .map(module_path)
+        .collect();
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
         let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
@@ -63,6 +69,7 @@ impl Fixture {
             symbols,
             breakpoints: BTreeMap::new(),
             trace_indent: 0,
+            bb_cache: BTreeMap::new(),
         })
     }
 
@@ -87,7 +94,7 @@ impl Fixture {
     // Runs the vm, handling any breakpoints.
     fn run_vm(&mut self) -> Result<()> {
         loop {
-            match self.vm.run() {
+            match self.vm.run(&mut self.bb_cache) {
                 Ok(()) => return Ok(()),
                 Err(VmErr::Breakpoint) => {
                     let loc = self.vm.reg(Reg::PC);
@@ -126,6 +133,12 @@ impl Fixture {
 
         // We need a unique address return control to us.
         let exit_addr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
+
+        // Fill out a c.ebreak at this address because basic blocks are decoded
+        // before breakpoints are checked.
+        let ret: u16 = 0b1001000000000010;
+        let bytes = (ret as u32).to_le_bytes();
+        self.vm.mem.write(exit_addr, &bytes, 0)?;
 
         self.vm.push_reg(Ra)?;
         self.vm.set_reg(Ra, exit_addr.0);
@@ -182,7 +195,7 @@ impl Fixture {
         }
         Ok(())
     }
-    
+
     pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
         self.call_at(loc)?;
         let r = self.vm.reg(A0) as i64 as i32;

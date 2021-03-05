@@ -2,7 +2,7 @@ use crate::decode::*;
 use crate::memory::*;
 
 use log::debug;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use thiserror::Error;
 
@@ -72,7 +72,7 @@ pc   {:016x}"#,
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Clone, Copy, Debug)]
 pub enum VmErr {
     // FIXME: rename to MemoryError
     #[error("Bad memory access: {0:?}")]
@@ -258,7 +258,7 @@ impl VM {
         Ok(())
     }
 
-    pub fn step(&mut self) -> Result<()> {
+    pub fn step(&mut self, inst: Inst, pc_increment: u64) -> Result<()> {
         let pc = self.pc();
         if self.breakpoints.contains(&pc) {
             if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
@@ -268,23 +268,6 @@ impl VM {
             }
         } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
             self.last_bp = None;
-        }
-
-        let mut bits = self
-            .mem
-            .read_into::<u32>(pc, PERM_EXEC)
-            .map_err(VmErr::BadAccess)?;
-
-        let (inst, pc_increment) = decode_instr(bits).ok_or(VmErr::DecodeError(bits))?;
-        if pc_increment == 2 {
-            bits &= 0xffff;
-        }
-
-        if pc_increment == 2 {
-            // Compressed instruction
-            debug!("{:08x}: {:0>4x}    \t{}", pc, bits, inst);
-        } else {
-            debug!("{:08x}: {:0>8x}\t{}", pc, bits, inst);
         }
 
         self.stats.instrs += 1;
@@ -800,9 +783,40 @@ impl VM {
         Ok(())
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    fn find_basic_block<'a>(&self, bb_cache: &'a mut BTreeMap<u64, Result<BasicBlock>>) -> &'a Result<BasicBlock> {
+        let pc = self.pc();
+
+        bb_cache.entry(pc.0).or_insert_with(
+            || {
+                self
+                    .mem
+                    .read_some(pc, PERM_EXEC)
+                    .map_err(VmErr::BadAccess).and_then(
+                |bits| {
+                    decode_basic_block(pc.0, bits, 100)
+                    .map_err(VmErr::DecodeError)
+                })
+            })
+    }
+
+    fn exec_bb(&mut self, bb_cache: &mut BTreeMap<u64, Result<BasicBlock>>) -> Result<()> {
+        match self.find_basic_block(bb_cache) {
+            Ok(bb) => {
+                for (addr, inst, width) in bb {
+                    debug!("{:08x}: {}", addr, inst);
+                    self.step(*inst, *width as u64)?;
+                }
+                Ok(())
+            },
+            Err(e) => {
+                Err(*e)
+            }
+        }
+    }
+
+    pub fn run(&mut self, bb_cache: &mut BTreeMap<u64, Result<BasicBlock>>) -> Result<()> {
         loop {
-            self.step()?;
+            self.exec_bb(bb_cache)?;
         }
     }
 
