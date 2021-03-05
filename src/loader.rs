@@ -497,7 +497,7 @@ impl<'a> Loader<'a> {
                     .map_err(|_e| anyhow!("couldn't mmap zero section"))?;
             } else {
                 self.mem
-                    .mmap_bytes(begin, &s.data, perms)
+                    .mmap_bytes(begin, s.data.clone(), perms)
                     .map_err(|_e| anyhow!("couldn't mmap section"))?;
 
                 let new_len = len + s.shdr.size;

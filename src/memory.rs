@@ -1,4 +1,3 @@
-use fixedbitset::FixedBitSet;
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
 use log::debug;
@@ -72,19 +71,24 @@ struct MMap {
     begin: u64,
     end: u64,
     bytes: Vec<u8>,
-    written: FixedBitSet,
 }
 
 impl MMap {
-    fn new(begin: u64, end: u64, perms: u8) -> Self {
-        let len = (end - begin) as usize;
+    fn new(begin: u64, bytes: Vec<u8>, perms: u8) -> Self {
+        let end = begin + bytes.len() as u64;
         MMap {
             perms,
             begin,
             end,
-            bytes: vec![0u8; len],
-            written: FixedBitSet::with_capacity(len),
+            bytes,
         }
+    }
+
+    /// This changes the perms for a whole mmap region.  Used for
+    /// block_manager buffers so we can keep them mapped into the guest
+    /// always and avoid excess copying.
+    fn change_perms(&mut self, perms: u8) {
+        self.perms = perms;
     }
 
     /// Checks all 'perms' are present for this region.
@@ -96,28 +100,6 @@ impl MMap {
         Ok(())
     }
 
-    /// Checks that the bytes have been written for the given range.
-    fn check_written(&self, begin: u64, end: u64) -> Result<()> {
-        let begin = begin - self.begin;
-        let end = end - self.begin;
-        for b in begin..end {
-            if !self.written.contains(b as usize) {
-                // return Err(MemErr::BadRead(Addr(b + self.begin)));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Sets the written bits for a given range.
-    fn set_written(&mut self, begin: u64, end: u64, enabled: bool) {
-        let begin = begin - self.begin;
-        let end = end - self.begin;
-        for b in begin..end {
-            self.written.set(b as usize, enabled);
-        }
-    }
-
     /// Reads data from the region.  Fails if all the data can't be read
     /// from this region, or if any of the perms are not present.
     fn read(&self, begin: u64, bytes: &mut [u8], perms: u8) -> Result<()> {
@@ -126,7 +108,6 @@ impl MMap {
         assert!(end <= self.end);
 
         self.check_perms(begin, perms)?;
-        self.check_written(begin, end)?;
 
         let slice = &self.bytes[((begin - self.begin) as usize)..((end - self.begin) as usize)];
         bytes.copy_from_slice(slice);
@@ -145,26 +126,12 @@ impl MMap {
 
         let slice = &mut self.bytes[((begin - self.begin) as usize)..((end - self.begin) as usize)];
         slice.copy_from_slice(bytes);
-        self.set_written(begin, end, true);
 
         Ok(())
     }
 
-    /// Zeroes a region, setting the written bits.  Fails if all the
-    /// data can't be written to this region, or if any of the perms
-    /// are not pesent.
-    fn zero(&mut self, begin: u64, end: u64, perms: u8) -> Result<()> {
-        assert!(begin >= self.begin);
-        assert!(end <= self.end);
-
-        let zeroes = vec![0u8; (end - begin) as usize];
-        self.write(begin, &zeroes, perms)
-    }
-
     /// Trashes any data in the region, and clear the written bits.
     fn forget(&mut self, begin: u64, end: u64) {
-        self.set_written(begin, end, false);
-
         let begin = begin - self.begin;
         let end = end - self.begin;
         for b in begin..end {
@@ -271,36 +238,23 @@ impl Memory {
     /// Creates a new mapped region of memory with the specified perms.  The
     /// data will be uninitialised.
     pub fn mmap(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
-        assert!(begin.0 <= end.0);
-
-        // Nothing should be mapped in this range.  This is really
-        // checking the buddy allocator is working ok.  FIXME: paranoia,
-        // remove when confident.
-        //
-        //
-        assert!(self.no_mappings(begin.0, end.0));
-
-        let mm = MMap::new(begin.0, end.0, perms);
-        self.insert_mm(mm);
-        Ok(())
+        // FIXME: not sure how to create an uninitialised vec
+        self.mmap_zeroes(begin, end, perms)
     }
 
     /// Like mmap, but it intialises the data with zeroes and sets the written bits.
     pub fn mmap_zeroes(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
         assert!(begin.0 <= end.0);
-        let mut mm = MMap::new(begin.0, end.0, perms);
-        mm.zero(begin.0, end.0, 0)?;
+        let mm = MMap::new(begin.0, vec![0u8; (end.0 - begin.0) as usize], perms);
         self.insert_mm(mm);
         Ok(())
     }
 
-    /// Creates a new mapping with the given permissions and intialises
-    /// it with the given data.  This method is needed because perm may
-    /// not include PERM_WRITE, which would prevent self.write being
-    /// used to initialise the data.
-    pub fn mmap_bytes(&mut self, begin: Addr, bytes: &[u8], perms: u8) -> Result<()> {
-        let mut mm = MMap::new(begin.0, begin.0 + (bytes.len() as u64), perms);
-        mm.write(begin.0, bytes, 0)?;
+    /// Creates a new mapping with the given permissions and takes ownership
+    /// it with the given data.  This is an efficient way to pass data from
+    /// the host to the guest.
+    pub fn mmap_bytes(&mut self, begin: Addr, bytes: Vec<u8>, perms: u8) -> Result<()> {
+        let mm = MMap::new(begin.0, bytes, perms);
         self.insert_mm(mm);
         Ok(())
     }
@@ -347,11 +301,17 @@ impl Memory {
         func(mm)
     }
 
-    // Checks that a memory region is mapped with the particular permissions.
+    /// Checks that a memory region is mapped with the particular permissions.
     pub fn check_perms(&self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
         let mm = self.get_mmap(begin.0, end.0, perms)?;
         mm.check_perms(begin.0, perms)?;
         Ok(())
+    }
+
+    /// Changes the permissions for a region.  The region must correspond to a whole
+    /// mmap region, eg, the entirety of an alloc on the heap.
+    pub fn change_perms(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
+        self.get_mut_mmap(begin.0, end.0, 0, |mut mm| Ok(mm.change_perms(perms)))
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
@@ -405,8 +365,8 @@ impl Memory {
         })
     }
 
-    /// Accesses a primitive, loc must be 4 byte aligned.  `perm` checked.
-    pub fn read_into<T: Primitive>(&mut self, loc: Addr, perms: u8) -> Result<T> {
+    /// Accesses a primitive.  `perm` checked.
+    pub fn read_into<T: Primitive>(&self, loc: Addr, perms: u8) -> Result<T> {
         let begin = loc.0;
         let mm = self.get_mmap(begin, begin + 1, perms)?;
 
@@ -418,6 +378,21 @@ impl Memory {
         }
 
         Ok(unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const T) })
+    }
+
+    pub fn write_out<T: Primitive>(&mut self, v: T, begin: Addr, perms: u8) -> Result<()> {
+        let begin = begin.0;
+        self.get_mut_mmap(begin, begin + 1, perms, |mut mm| {
+            let offset = (begin - mm.begin) as usize;
+            let bytes = &mut mm.bytes[offset..];
+
+            if bytes.len() < ::core::mem::size_of::<T>() {
+                return Err(MemErr::BadPerms(Addr(begin), perms));
+            }
+
+            Ok(unsafe { core::ptr::write_unaligned(bytes.as_ptr() as *mut T, v) })
+        })?;
+        Ok(())
     }
 
     // Allocates a block on the heap with specific permissions.

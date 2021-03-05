@@ -394,36 +394,32 @@ impl VM {
             SB { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u8;
-                let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, PERM_WRITE)
+                    .write_out::<u8>(v, dest, PERM_WRITE)
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             SH { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u16;
-                let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, PERM_WRITE)
+                    .write_out::<u16>(v, dest, PERM_WRITE)
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             SW { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u32;
-                let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, PERM_WRITE)
+                    .write_out::<u32>(v, dest, PERM_WRITE)
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
             SD { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2);
-                let bytes = v.to_le_bytes();
                 self.mem
-                    .write(dest, &bytes, PERM_WRITE)
+                    .write_out::<u64>(v, dest, PERM_WRITE)
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
