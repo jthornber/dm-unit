@@ -502,11 +502,30 @@ impl Memory {
     }
 
     /// Accesses a primitive, loc must be 4 byte aligned.  `perm` checked.
-    pub fn read_into<T: Primitive>(&mut self, loc: Addr, perm: u8) -> Result<T> {
-        let mut dest = [0u8; 16];
-        self.read(loc, &mut dest[..::core::mem::size_of::<T>()], perm)?;
+    pub fn read_into<T: Primitive>(&mut self, loc: Addr, perms: u8) -> Result<T> {
+        let begin = loc.0;
+        let mut indexes = self.get_indexes(begin, begin + 1, perms)?;
 
-        Ok(unsafe { core::ptr::read_unaligned(dest.as_ptr() as *const T) })
+        if indexes.is_empty() {
+            Err(MemErr::BadPerms(Addr(begin), perms))
+        } else {
+            let index = indexes.pop_front().unwrap();
+            let mm = &self.mmaps.get(&index).unwrap();
+
+            // begin must be within mm, otherwise we have a gap.
+            if begin >= mm.end {
+                return Err(MemErr::BadPerms(Addr(begin), perms));
+            }
+
+            let offset = (begin - mm.begin) as usize;
+            let bytes = &mm.bytes[offset..];
+
+            if bytes.len() < ::core::mem::size_of::<T>() {
+                return Err(MemErr::BadPerms(Addr(begin), perms));
+            }
+
+            Ok(unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const T) })
+        }
     }
 
     // Allocates a block on the heap with specific permissions.
