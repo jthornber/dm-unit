@@ -330,65 +330,55 @@ impl VM {
             }
             LB { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 1];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self.mem.read_into::<i8>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, i8::from_le_bytes(bytes) as i64 as u64);
+                self.set_reg(rd, v as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             LH { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 2];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self.mem.read_into::<i16>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, i16::from_le_bytes(bytes) as i64 as u64);
+                self.set_reg(rd, v as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             LW { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 4];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self.mem.read_into::<i32>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, i32::from_le_bytes(bytes) as i64 as u64);
+                self.set_reg(rd, v as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             LD { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 8];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self
+                    .mem
+                    .read_into::<i64>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, i64::from_le_bytes(bytes) as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             LBU { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 1];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self
+                    .mem
+                    .read_into::<u8>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, u8::from_le_bytes(bytes) as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             LHU { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 2];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self.mem.read_into::<u16>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, u16::from_le_bytes(bytes) as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             LWU { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
-                let mut bytes = [0u8; 4];
-                self.mem
-                    .read(src, &mut bytes, PERM_READ)
+                let v = self.mem.read_into::<u32>(src, PERM_READ)
                     .map_err(VmErr::BadAccess)?;
-                self.set_reg(rd, u32::from_le_bytes(bytes) as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             SB { rs1, rs2, imm } => {
@@ -783,20 +773,18 @@ impl VM {
         Ok(())
     }
 
-    fn find_basic_block<'a>(&self, bb_cache: &'a mut BTreeMap<u64, Result<BasicBlock>>) -> &'a Result<BasicBlock> {
+    fn find_basic_block<'a>(
+        &self,
+        bb_cache: &'a mut BTreeMap<u64, Result<BasicBlock>>,
+    ) -> &'a Result<BasicBlock> {
         let pc = self.pc();
 
-        bb_cache.entry(pc.0).or_insert_with(
-            || {
-                self
-                    .mem
-                    .read_some(pc, PERM_EXEC)
-                    .map_err(VmErr::BadAccess).and_then(
-                |bits| {
-                    decode_basic_block(pc.0, bits, 100)
-                    .map_err(VmErr::DecodeError)
-                })
-            })
+        bb_cache.entry(pc.0).or_insert_with(|| {
+            self.mem
+                .read_some(pc, PERM_EXEC)
+                .map_err(VmErr::BadAccess)
+                .and_then(|bits| decode_basic_block(pc.0, bits, 100).map_err(VmErr::DecodeError))
+        })
     }
 
     fn exec_bb(&mut self, bb_cache: &mut BTreeMap<u64, Result<BasicBlock>>) -> Result<()> {
@@ -807,10 +795,8 @@ impl VM {
                     self.step(*inst, *width as u64)?;
                 }
                 Ok(())
-            },
-            Err(e) => {
-                Err(*e)
             }
+            Err(e) => Err(*e),
         }
     }
 
