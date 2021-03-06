@@ -14,8 +14,8 @@ impl Stats {
         let bm = get_bm().unwrap();
         Stats {
             instrs: fix.vm.stats.instrs,
-            read_locks: bm.nr_read_locks,
-            write_locks: bm.nr_write_locks,
+            read_locks: bm.get_nr_read_locks(),
+            write_locks: bm.get_nr_write_locks(),
         }
     }
 

@@ -56,8 +56,7 @@ impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
 
 #[allow(dead_code)]
 fn check_btree(root: u64) -> Result<()> {
-    let engine = get_bm()?.engine.clone();
-    let walker = BTreeWalker::new(engine, false);
+    let walker = BTreeWalker::new(get_bm()?, false);
     let visitor = NoopVisitor {};
     let mut path = Vec::new();
 
@@ -105,7 +104,7 @@ fn calc_max_entries<V: Unpack>() -> usize {
 // Because this is a walk it implicitly checks the btree.  Returns
 // average residency as a _percentage_.
 fn calc_residency(root: u64) -> Result<usize> {
-    let engine = get_bm()?.engine.clone();
+    let engine = get_bm()?;
     let walker = BTreeWalker::new(engine, false);
     let visitor = ResidencyVisitor {
         nr_entries: AtomicU32::new(0),
@@ -170,7 +169,7 @@ impl NodeVisitor<Value64> for EntryVisitor {
 }
 
 fn check_keys_present(root: u64, keys: &[u64]) -> Result<()> {
-    let engine = get_bm()?.engine.clone();
+    let engine = get_bm()?;
     let walker = BTreeWalker::new(engine, false);
     let visitor = EntryVisitor {
         seen: Mutex::new(BTreeSet::new()),

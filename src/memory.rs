@@ -84,13 +84,6 @@ impl MMap {
         }
     }
 
-    /// This changes the perms for a whole mmap region.  Used for
-    /// block_manager buffers so we can keep them mapped into the guest
-    /// always and avoid excess copying.
-    fn change_perms(&mut self, perms: u8) {
-        self.perms = perms;
-    }
-
     /// Checks all 'perms' are present for this region.
     fn check_perms(&self, begin: u64, perms: u8) -> Result<()> {
         if (self.perms & perms) != perms {
@@ -191,6 +184,7 @@ impl Memory {
         }
     }
 
+/*
     // Checks there are no mappings in a particular range
     fn no_mappings(&self, begin: u64, end: u64) -> bool {
         let mut cur = self.mmaps.upper_bound(Bound::Included(&begin));
@@ -218,20 +212,26 @@ impl Memory {
 
         true
     }
+    */
 
     fn insert_mm(&mut self, mm: MMap) {
         self.mmaps.insert(Box::new(MMapNode::new(mm)));
     }
 
     /// Remove an mmapped area.
-    pub fn unmap(&mut self, begin: Addr) -> Result<()> {
+    pub fn unmap(&mut self, begin: Addr) -> Result<Vec<u8>> {
         let mut cur = self.mmaps.find_mut(&begin.0);
 
         if cur.is_null() {
             Err(MemErr::BadFree(begin))
         } else {
+            let mut bytes = Vec::new();
+
+            let mut mm = cur.get().unwrap().mmap.borrow_mut();
+            std::mem::swap(&mut mm.bytes, &mut bytes);
+            drop(mm);
             cur.remove();
-            Ok(())
+            Ok(bytes)
         }
     }
 
@@ -306,12 +306,6 @@ impl Memory {
         let mm = self.get_mmap(begin.0, end.0, perms)?;
         mm.check_perms(begin.0, perms)?;
         Ok(())
-    }
-
-    /// Changes the permissions for a region.  The region must correspond to a whole
-    /// mmap region, eg, the entirety of an alloc on the heap.
-    pub fn change_perms(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
-        self.get_mut_mmap(begin.0, end.0, 0, |mut mm| Ok(mm.change_perms(perms)))
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
@@ -395,6 +389,8 @@ impl Memory {
         Ok(())
     }
 
+    // FIXME: always use alloc_bytes?  Forces client to decide
+    // how memory is initialised.
     // Allocates a block on the heap with specific permissions.
     pub fn alloc_perms(&mut self, len: usize, perms: u8) -> Result<Addr> {
         // We allocate an extra word before and after the block to
@@ -410,20 +406,34 @@ impl Memory {
         Ok(ptr)
     }
 
+    pub fn alloc_bytes(&mut self, bytes: Vec<u8>, perms: u8) -> Result<Addr> {
+        // We allocate an extra word before and after the block to
+        // detect overwrites.
+        let len = bytes.len();
+        let extra_len = len + 8;
+        let ptr = self.heap.alloc(extra_len)?;
+        self.allocations.insert(ptr.0, extra_len);
+
+        // mmap just the central part that may be used.
+        let ptr = Addr(ptr.0 + 4);
+        self.mmap_bytes(ptr, bytes, perms)?;
+        Ok(ptr)
+    }
+
     // Allocates a block on the heap with read/write permissions.  The
     // common case.
     pub fn alloc(&mut self, len: usize) -> Result<Addr> {
         self.alloc_perms(len, PERM_READ | PERM_WRITE)
     }
 
-    pub fn free(&mut self, ptr: Addr) -> Result<()> {
+    // Free returns the bytes that made up the allocation.  Useful for
+    // bouncing block manager buffers between host and guest.
+    pub fn free(&mut self, ptr: Addr) -> Result<Vec<u8>> {
         let heap_ptr = Addr(ptr.0 - 4);
 
-        if let Some(extra_len) = self.allocations.remove(&heap_ptr.0) {
+        if let Some(_extra_len) = self.allocations.remove(&heap_ptr.0) {
             self.heap.free(heap_ptr)?;
-            self.unmap(ptr)?;
-            assert!(self.no_mappings(ptr.0, ptr.0 + extra_len as u64 - 8_u64));
-            Ok(())
+            self.unmap(ptr)
         } else {
             Err(MemErr::BadFree(ptr))
         }
