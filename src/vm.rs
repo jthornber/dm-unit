@@ -796,7 +796,7 @@ impl VM {
         match self.find_basic_block(bb_cache) {
             Ok(bb) => {
                 for (addr, inst, width) in bb {
-                    debug!("{:08x}: {}", addr, inst);
+                    // debug!("{:08x}: {}", addr, inst);
                     self.step(*inst, *width as u64)?;
                 }
                 Ok(())
