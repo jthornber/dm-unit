@@ -19,6 +19,8 @@ impl InstCache {
         }
     }
 
+    /// If loc occurs in any other block (eg, jumping back in a loop),
+    /// that that block will be truncated.
     pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Rc<BasicBlock> {
         let r = Rc::new(bb);
         self.basic_blocks.insert(loc, r.clone());
@@ -27,6 +29,11 @@ impl InstCache {
 
     pub fn get(&self, loc: u64) -> Option<Rc<BasicBlock>> {
         self.basic_blocks.get(&loc).map(|rc| rc.clone())
+    }
+
+    /// Removes any blocks that contain loc (there can be only one).
+    pub fn invalidate(&mut self, _loc: u64) {
+
     }
 }
 
@@ -812,11 +819,9 @@ impl VM {
             Some(bb) => bb,
         };
 
-        // FIXME: finish
         if bb.breakpoint {
             if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
                 self.last_bp = Some(pc);
-                // debug!("hit breakpoint at {:?}", pc);
                 return Err(VmErr::Breakpoint);
             }
         } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
@@ -832,25 +837,17 @@ impl VM {
 
     pub fn run(&mut self) -> Result<()> {
         loop {
-            if self.breakpoints.contains(&pc.0) {
-                if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
-                    self.last_bp = Some(pc);
-                    // debug!("hit breakpoint at {:?}", pc);
-                    return Err(VmErr::Breakpoint);
-                }
-            } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
-                self.last_bp = None;
-            }
-
             self.exec_bb()?;
         }
     }
 
     pub fn add_breakpoint(&mut self, loc: Addr) {
         self.breakpoints.insert(loc.0);
+        self.inst_cache.invalidate(loc.0);
     }
 
     pub fn rm_breakpoint(&mut self, loc: Addr) -> bool {
+        self.inst_cache.invalidate(loc.0);
         self.breakpoints.remove(&loc.0)
     }
 }
