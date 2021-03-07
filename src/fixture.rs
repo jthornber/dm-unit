@@ -13,7 +13,8 @@ use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use Reg::*;
 
@@ -145,13 +146,12 @@ impl Fixture {
         self.vm.set_pc(code);
 
         // FIXME: use AtommicBool
-        let completed = Arc::new(Mutex::new(false));
+        let completed = Arc::new(AtomicBool::new(false));
         {
             let completed = completed.clone();
 
             let callback = move |fix: &mut Fixture| {
-                let mut completed = completed.lock().unwrap();
-                *completed = true;
+                completed.store(true, Ordering::Relaxed);
                 fix.vm.pop_reg(Ra)?;
                 Err(anyhow!("call complete, exiting"))
             };
@@ -167,8 +167,7 @@ impl Fixture {
                 todo!();
             }
             Err(e) => {
-                let completed = completed.lock().unwrap();
-                if *completed {
+                if completed.load(Ordering::Relaxed) {
                     self.bp_rm(exit_addr);
                     Ok(())
                 } else {
