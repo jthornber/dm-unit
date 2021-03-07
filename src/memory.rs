@@ -383,7 +383,8 @@ impl Memory {
                 return Err(MemErr::BadPerms(Addr(begin), perms));
             }
 
-            Ok(unsafe { core::ptr::write_unaligned(bytes.as_ptr() as *mut T, v) })
+            unsafe { core::ptr::write_unaligned(bytes.as_ptr() as *mut T, v) };
+            Ok(())
         })?;
         Ok(())
     }
