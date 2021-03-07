@@ -353,7 +353,7 @@ impl<'a> DerefMut for AutoGPtr<'a> {
     }
 }
 
-pub fn auto_alloc<'a>(fix: &'a mut Fixture, len: usize) -> Result<(AutoGPtr<'a>, Addr)> {
+pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
     let ptr = fix.vm.mem.alloc(len)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }

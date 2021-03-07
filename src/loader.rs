@@ -192,7 +192,7 @@ impl<'a> Loader<'a> {
         // Build a vector of symbols for each section.
         let mut syms_by_section = BTreeMap::new();
         for (index, s) in syms.iter().enumerate() {
-            syms_by_section.entry(s.shndx).or_insert(Vec::new());
+            syms_by_section.entry(s.shndx).or_insert_with(Vec::new);
             let v = syms_by_section.get_mut(&s.shndx).unwrap();
             v.push(index);
         }
@@ -308,7 +308,7 @@ impl<'a> Loader<'a> {
         rs: Vec<&elf::Section>,
         indexes: &BTreeMap<u16, String>,
         bases: &BTreeMap<String, Addr>,
-        syms: &Vec<Symbol>,
+        syms: &[Symbol],
     ) -> Result<()> {
         for r in rs {
             let (_, rlocs) = nom::multi::many0(parse_relocation)(&r.data)

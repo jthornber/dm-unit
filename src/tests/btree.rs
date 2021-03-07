@@ -612,7 +612,7 @@ fn test_cc_multiple_entries(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-fn mk_node<'a>(fix: &'a mut Fixture, nr_entries: usize) -> Result<(AutoGPtr<'a>, Addr)> {
+fn mk_node(fix: & mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
     let header = NodeHeader {
         block: 1,
         is_leaf: true,

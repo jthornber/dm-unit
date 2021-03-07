@@ -16,7 +16,7 @@ use Reg::*;
 // We only support a single bm atm.
 static mut BLOCK_MANAGER: Option<(Addr, Arc<BlockManager>)> = None;
 
-pub fn get_bm<'a>() -> Result<Arc<BlockManager>> {
+pub fn get_bm() -> Result<Arc<BlockManager>> {
     unsafe {
         match &BLOCK_MANAGER {
             None => Err(anyhow!("no block manager created")),
@@ -140,14 +140,14 @@ pub fn bm_unlock(fix: &mut Fixture) -> Result<()> {
 
 pub fn bm_block_location(fix: &mut Fixture) -> Result<()> {
     let gb_ptr = fix.vm.reg(A0);
-    let gb = read_guest::<GBlock>(&mut fix.vm.mem, Addr(gb_ptr))?;
+    let gb = read_guest::<GBlock>(&fix.vm.mem, Addr(gb_ptr))?;
     fix.vm.ret(gb.loc);
     Ok(())
 }
 
 pub fn bm_block_data(fix: &mut Fixture) -> Result<()> {
     let gb_ptr = fix.vm.reg(A0);
-    let gb = read_guest::<GBlock>(&mut fix.vm.mem, Addr(gb_ptr))?;
+    let gb = read_guest::<GBlock>(&fix.vm.mem, Addr(gb_ptr))?;
     fix.vm.ret(gb.data.0);
     Ok(())
 }

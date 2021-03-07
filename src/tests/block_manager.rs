@@ -63,7 +63,7 @@ fn test_read_lock(fix: &mut Fixture) -> Result<()> {
     fix.vm.mem.read(data1, &mut buf, PERM_READ)?;
 
     // confirm we can't write to the data
-    ensure!(fix.vm.mem.write(data1, &mut buf, PERM_WRITE).is_err());
+    ensure!(fix.vm.mem.write(data1, &buf, PERM_WRITE).is_err());
     fix.vm.mem.read(data1, &mut buf, PERM_READ)?;
 
     // We should be able to lock again.
@@ -75,7 +75,7 @@ fn test_read_lock(fix: &mut Fixture) -> Result<()> {
     fix.vm.mem.read(data2, &mut buf, PERM_READ)?;
 
     // confirm we can't write to the data
-    ensure!(fix.vm.mem.write(data2, &mut buf, PERM_WRITE).is_err());
+    ensure!(fix.vm.mem.write(data2, &buf, PERM_WRITE).is_err());
 
     dm_bm_unlock(fix, b1)?;
     dm_bm_unlock(fix, b2)?;

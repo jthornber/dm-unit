@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 //-------------------------------
 
-fn path_components(path: &String) -> Vec<String> {
+fn path_components(path: &str) -> Vec<String> {
     path.trim_start_matches('/')
         .split('/')
         .map(|s| s.to_string())
@@ -47,7 +47,7 @@ impl PathFormatter {
         print!("{}", space);
     }
 
-    fn print(&mut self, components: &Vec<String>) {
+    fn print(&mut self, components: &[String]) {
         let mut last_path = Vec::new();
         let mut common = true;
         let mut width = 0;
