@@ -3,7 +3,32 @@ use crate::memory::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::rc::Rc;
 use thiserror::Error;
+
+//-----------------------------
+
+pub struct InstCache {
+    basic_blocks: BTreeMap<u64, Rc<BasicBlock>>,
+}
+
+impl InstCache {
+    pub fn new() -> Self {
+        InstCache {
+            basic_blocks: BTreeMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Rc<BasicBlock> {
+        let r = Rc::new(bb);
+        self.basic_blocks.insert(loc, r.clone());
+        r
+    }
+
+    pub fn get(&self, loc: u64) -> Option<Rc<BasicBlock>> {
+        self.basic_blocks.get(&loc).map(|rc| rc.clone())
+    }
+}
 
 //-----------------------------
 
@@ -16,9 +41,10 @@ pub struct Stats {
 pub struct VM {
     reg: Vec<u64>,
     pub mem: Memory,
-    breakpoints: BTreeSet<Addr>,
+    breakpoints: BTreeSet<u64>,
     last_bp: Option<Addr>,
     pub stats: Stats,
+    inst_cache: InstCache,
 }
 
 impl fmt::Display for VM {
@@ -103,6 +129,7 @@ impl VM {
             breakpoints: BTreeSet::new(),
             last_bp: None,
             stats: Stats { instrs: 0 },
+            inst_cache: InstCache::new(),
         }
     }
 
@@ -259,16 +286,6 @@ impl VM {
 
     pub fn step(&mut self, inst: Inst, pc_increment: u64) -> Result<()> {
         let pc = self.pc();
-        if self.breakpoints.contains(&pc) {
-            if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
-                self.last_bp = Some(pc);
-                // debug!("hit breakpoint at {:?}", pc);
-                return Err(VmErr::Breakpoint);
-            }
-        } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
-            self.last_bp = None;
-        }
-
         self.stats.instrs += 1;
 
         use Inst::*;
@@ -778,44 +795,63 @@ impl VM {
         Ok(())
     }
 
-    fn find_basic_block<'a>(
-        &self,
-        bb_cache: &'a mut BTreeMap<u64, Result<BasicBlock>>,
-    ) -> &'a Result<BasicBlock> {
+    fn exec_bb(&mut self) -> Result<()> {
         let pc = self.pc();
-        bb_cache.entry(pc.0).or_insert_with(|| {
-            let bb = self.mem.read_some(pc, PERM_EXEC, |bytes| {
-                Ok(decode_basic_block(pc.0, bytes, 100).map_err(VmErr::DecodeError))
-            });
-            bb.unwrap()
-        })
-    }
+        let bb = match self.inst_cache.get(pc.0) {
+            None => {
+                let bb = self
+                    .mem
+                    .read_some(pc, PERM_EXEC, |bytes| {
+                        decode_basic_block(pc.0, bytes, 100, &self.breakpoints)
+                            .map_err(VmErr::DecodeError)
+                    })
+                    .map_err(VmErr::BadAccess)?;
 
-    fn exec_bb(&mut self, bb_cache: &mut BTreeMap<u64, Result<BasicBlock>>) -> Result<()> {
-        match self.find_basic_block(bb_cache) {
-            Ok(bb) => {
-                for (_addr, inst, width) in bb {
-                    // debug!("{:08x}: {}", addr, inst);
-                    self.step(*inst, *width as u64)?;
-                }
-                Ok(())
+                self.inst_cache.insert(pc.0, bb?)
             }
-            Err(e) => Err(*e),
+            Some(bb) => bb,
+        };
+
+        // FIXME: finish
+        if bb.breakpoint {
+            if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
+                self.last_bp = Some(pc);
+                // debug!("hit breakpoint at {:?}", pc);
+                return Err(VmErr::Breakpoint);
+            }
+        } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
+            self.last_bp = None;
         }
+
+        for (inst, width) in &bb.instrs {
+            // debug!("{:08x}: {}", addr, inst);
+            self.step(*inst, *width as u64)?;
+        }
+        Ok(())
     }
 
-    pub fn run(&mut self, bb_cache: &mut BTreeMap<u64, Result<BasicBlock>>) -> Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         loop {
-            self.exec_bb(bb_cache)?;
+            if self.breakpoints.contains(&pc.0) {
+                if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
+                    self.last_bp = Some(pc);
+                    // debug!("hit breakpoint at {:?}", pc);
+                    return Err(VmErr::Breakpoint);
+                }
+            } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {
+                self.last_bp = None;
+            }
+
+            self.exec_bb()?;
         }
     }
 
     pub fn add_breakpoint(&mut self, loc: Addr) {
-        self.breakpoints.insert(loc);
+        self.breakpoints.insert(loc.0);
     }
 
     pub fn rm_breakpoint(&mut self, loc: Addr) -> bool {
-        self.breakpoints.remove(&loc)
+        self.breakpoints.remove(&loc.0)
     }
 }
 

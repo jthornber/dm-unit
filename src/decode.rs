@@ -1,5 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use log::*;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Cursor;
 
@@ -1422,16 +1423,31 @@ fn is_branch(inst: Inst) -> bool {
     )
 }
 
-pub type BasicBlock = Vec<(u64, Inst, u8)>;
+//----------------------------------
+
+#[allow(dead_code)]
+pub struct BasicBlock {
+    // The addresses this basic block covers
+    pub begin: u64,
+    pub end: u64,
+
+    // Set if the first instruction has a breakpoint against it
+    pub breakpoint: bool,
+
+    pub instrs: Vec<(Inst, u8)>,
+}
 
 /// Decodes a basic block.  Returns an error if it can't decode at least one instruction.
 pub fn decode_basic_block(
-    mut base: u64,
+    base: u64,
     bytes: &[u8],
     mut max_instrs: usize,
+    breakpoints: &BTreeSet<u64>,
 ) -> std::result::Result<BasicBlock, u32> {
-    let mut bb = Vec::with_capacity(8);
+    let mut pc = base;
+    let mut instrs = Vec::with_capacity(8);
     let mut r = Cursor::new(bytes);
+    let is_bp = breakpoints.contains(&pc);
 
     while let Ok(low_bits) = r.read_u16::<LittleEndian>() {
         let (inst, width) = if (low_bits & 3) == 3 {
@@ -1441,11 +1457,11 @@ pub fn decode_basic_block(
                 if let Some(inst) = decode_32bit_instr(bits) {
                     (inst, 4u8)
                 } else {
-                    debug!("decode failed at 0x{:x}", base);
+                    debug!("decode failed at 0x{:x}", pc);
                     return Err(bits);
                 }
             } else {
-                debug!("decode failed at 0x{:x}", base);
+                debug!("decode failed at 0x{:x}", pc);
                 return Err(low_bits as u32);
             }
         } else {
@@ -1453,14 +1469,18 @@ pub fn decode_basic_block(
             if let Some(inst) = decode_16bit_instr(low_bits) {
                 (inst, 2u8)
             } else {
-                debug!("decode failed at 0x{:x}", base);
+                debug!("decode failed at 0x{:x}", pc);
                 return Err(low_bits as u32);
             }
         };
 
-        // debug!("decoded: 0x{:x} {}", base, inst);
-        bb.push((base, inst, width));
-        base += width as u64;
+        // debug!("decoded: 0x{:x} {}", pc, inst);
+        instrs.push((inst, width));
+        pc += width as u64;
+
+        if breakpoints.contains(&pc) {
+            break;
+        }
 
         max_instrs -= 1;
         if max_instrs == 0 || is_branch(inst) {
@@ -1468,5 +1488,12 @@ pub fn decode_basic_block(
         }
     }
 
-    Ok(bb)
+    Ok(BasicBlock {
+        begin: base,
+        end: pc,
+        breakpoint: is_bp,
+        instrs,
+    })
 }
+
+//----------------------------------

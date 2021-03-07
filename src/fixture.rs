@@ -1,9 +1,9 @@
-use crate::decode::{BasicBlock, Reg};
+use crate::decode::Reg;
 use crate::guest::*;
 use crate::loader::*;
 use crate::memory::*;
 use crate::memory::{Addr, PERM_EXEC};
-use crate::vm::{self, *};
+use crate::vm::*;
 
 use anyhow::{anyhow, Result};
 use elf::types::Symbol;
@@ -34,9 +34,6 @@ pub struct Fixture {
 
     // Current indentation for function tracing.
     trace_indent: usize,
-
-    // A cache of decoded basic blocks
-    bb_cache: BTreeMap<u64, vm::Result<BasicBlock>>,
 }
 
 impl Fixture {
@@ -70,7 +67,6 @@ impl Fixture {
             symbols,
             breakpoints: BTreeMap::new(),
             trace_indent: 0,
-            bb_cache: BTreeMap::new(),
         })
     }
 
@@ -95,7 +91,7 @@ impl Fixture {
     // Runs the vm, handling any breakpoints.
     fn run_vm(&mut self) -> Result<()> {
         loop {
-            match self.vm.run(&mut self.bb_cache) {
+            match self.vm.run() {
                 Ok(()) => return Ok(()),
                 Err(VmErr::Breakpoint) => {
                     let loc = self.vm.reg(Reg::PC);

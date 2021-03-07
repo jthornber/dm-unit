@@ -324,13 +324,13 @@ impl Memory {
     /// just returns what is in the individual mmap.
     pub fn read_some<F, V>(&self, begin: Addr, perms: u8, func: F) -> Result<V>
     where
-        F: FnOnce(&[u8]) -> Result<V>,
+        F: FnOnce(&[u8]) -> V,
     {
         let begin = begin.0;
         let mm = self.get_mmap(begin, begin + 1, perms)?;
 
         let offset = (begin - mm.begin) as usize;
-        func(&mm.bytes[offset..])
+        Ok(func(&mm.bytes[offset..]))
     }
 
     /// Writes bytes to a memory range.  Fails in the bits in 'perms' are
@@ -452,7 +452,6 @@ impl Memory {
 
                 buffer.push(*byte);
             }
-            Ok(())
         })?;
 
         Ok(std::str::from_utf8(&buffer).unwrap().to_owned())
