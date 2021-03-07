@@ -1,7 +1,6 @@
 use crate::decode::*;
 use crate::memory::*;
 
-use log::debug;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use thiserror::Error;
@@ -795,7 +794,7 @@ impl VM {
     fn exec_bb(&mut self, bb_cache: &mut BTreeMap<u64, Result<BasicBlock>>) -> Result<()> {
         match self.find_basic_block(bb_cache) {
             Ok(bb) => {
-                for (addr, inst, width) in bb {
+                for (_addr, inst, width) in bb {
                     // debug!("{:08x}: {}", addr, inst);
                     self.step(*inst, *width as u64)?;
                 }

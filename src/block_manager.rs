@@ -129,10 +129,6 @@ impl BMInner {
         }
     }
 
-    fn residency(&self) -> usize {
-        self.locks.len()
-    }
-
     // FIXME: self isn't used
     fn v_prep(&self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
         use Reg::*;
@@ -458,18 +454,6 @@ impl BlockManager {
         inner.unlock(fix, gb_ptr)
     }
 
-    pub fn flush(&self) {
-        // Noop, since we write as soon as blocks are unlocked.
-    }
-
-    pub fn set_read_only(&self, _ro: bool) {
-        todo!();
-    }
-
-    pub fn is_read_only(&self) -> bool {
-        todo!();
-    }
-
     pub fn get_nr_read_locks(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
         inner.nr_read_locks
@@ -497,6 +481,21 @@ impl BlockManager {
             }
         }
         count
+    }
+
+    pub fn flush(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.flush();
+    }
+
+    pub fn set_read_only(&self, ro: bool) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.set_read_only(ro);
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.is_read_only()
     }
 }
 

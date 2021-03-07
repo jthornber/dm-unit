@@ -1,6 +1,5 @@
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
-use log::debug;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
