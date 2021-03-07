@@ -111,108 +111,108 @@ fn sign_extend(x: i32, nbits: u32) -> i32 {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Inst {
-    LUI { rd: Reg, imm: i32 },
-    AUIPC { rd: Reg, imm: i32 },
+    Lui { rd: Reg, imm: i32 },
+    Auipc { rd: Reg, imm: i32 },
 
-    JAL { rd: Reg, imm: i32 },
-    JALR { rd: Reg, rs: Reg, imm: i32 },
+    Jal { rd: Reg, imm: i32 },
+    Jalr { rd: Reg, rs: Reg, imm: i32 },
 
-    BEQ { rs1: Reg, rs2: Reg, imm: i32 },
-    BNE { rs1: Reg, rs2: Reg, imm: i32 },
-    BLT { rs1: Reg, rs2: Reg, imm: i32 },
-    BGE { rs1: Reg, rs2: Reg, imm: i32 },
-    BLTU { rs1: Reg, rs2: Reg, imm: i32 },
-    BGEU { rs1: Reg, rs2: Reg, imm: i32 },
+    Beq { rs1: Reg, rs2: Reg, imm: i32 },
+    Bne { rs1: Reg, rs2: Reg, imm: i32 },
+    Blt { rs1: Reg, rs2: Reg, imm: i32 },
+    Bge { rs1: Reg, rs2: Reg, imm: i32 },
+    Bltu { rs1: Reg, rs2: Reg, imm: i32 },
+    Bgeu { rs1: Reg, rs2: Reg, imm: i32 },
 
-    LB { rd: Reg, rs: Reg, imm: i32 },
-    LH { rd: Reg, rs: Reg, imm: i32 },
-    LW { rd: Reg, rs: Reg, imm: i32 },
-    LWU { rd: Reg, rs: Reg, imm: i32 },
-    LD { rd: Reg, rs: Reg, imm: i32 },
+    Lb { rd: Reg, rs: Reg, imm: i32 },
+    Lh { rd: Reg, rs: Reg, imm: i32 },
+    Lw { rd: Reg, rs: Reg, imm: i32 },
+    Lwu { rd: Reg, rs: Reg, imm: i32 },
+    Ld { rd: Reg, rs: Reg, imm: i32 },
 
-    LBU { rd: Reg, rs: Reg, imm: i32 },
-    LHU { rd: Reg, rs: Reg, imm: i32 },
+    Lbu { rd: Reg, rs: Reg, imm: i32 },
+    Lhu { rd: Reg, rs: Reg, imm: i32 },
 
-    SB { rs1: Reg, rs2: Reg, imm: i32 },
-    SH { rs1: Reg, rs2: Reg, imm: i32 },
-    SW { rs1: Reg, rs2: Reg, imm: i32 },
-    SD { rs1: Reg, rs2: Reg, imm: i32 },
+    Sb { rs1: Reg, rs2: Reg, imm: i32 },
+    Sh { rs1: Reg, rs2: Reg, imm: i32 },
+    Sw { rs1: Reg, rs2: Reg, imm: i32 },
+    Sd { rs1: Reg, rs2: Reg, imm: i32 },
 
-    ADDI { rd: Reg, rs: Reg, imm: i32 },
-    ADDIW { rd: Reg, rs: Reg, imm: i32 },
-    SLTI { rd: Reg, rs: Reg, imm: i32 },
-    SLTIU { rd: Reg, rs: Reg, imm: i32 },
-    XORI { rd: Reg, rs: Reg, imm: i32 },
-    ORI { rd: Reg, rs: Reg, imm: i32 },
-    ANDI { rd: Reg, rs: Reg, imm: i32 },
-    SLLI { rd: Reg, rs: Reg, shamt: i32 },
-    SLLIW { rd: Reg, rs: Reg, shamt: u32 },
-    SRLI { rd: Reg, rs: Reg, shamt: u32 },
-    SRLIW { rd: Reg, rs: Reg, shamt: u32 },
-    SRAIW { rd: Reg, rs: Reg, shamt: u32 },
-    SRAI { rd: Reg, rs: Reg, shamt: u32 },
+    Addi { rd: Reg, rs: Reg, imm: i32 },
+    Addiw { rd: Reg, rs: Reg, imm: i32 },
+    Slti { rd: Reg, rs: Reg, imm: i32 },
+    Sltiu { rd: Reg, rs: Reg, imm: i32 },
+    Xori { rd: Reg, rs: Reg, imm: i32 },
+    Ori { rd: Reg, rs: Reg, imm: i32 },
+    Andi { rd: Reg, rs: Reg, imm: i32 },
+    Slli { rd: Reg, rs: Reg, shamt: i32 },
+    Slliw { rd: Reg, rs: Reg, shamt: u32 },
+    Srli { rd: Reg, rs: Reg, shamt: u32 },
+    Srliw { rd: Reg, rs: Reg, shamt: u32 },
+    Sraiw { rd: Reg, rs: Reg, shamt: u32 },
+    Srai { rd: Reg, rs: Reg, shamt: u32 },
 
-    ADD { rd: Reg, rs1: Reg, rs2: Reg },
-    ADDW { rd: Reg, rs1: Reg, rs2: Reg },
-    SUB { rd: Reg, rs1: Reg, rs2: Reg },
-    SUBW { rd: Reg, rs1: Reg, rs2: Reg },
-    SLL { rd: Reg, rs1: Reg, rs2: Reg },
-    SLLW { rd: Reg, rs1: Reg, rs2: Reg },
-    SRLW { rd: Reg, rs1: Reg, rs2: Reg },
-    SRAW { rd: Reg, rs1: Reg, rs2: Reg },
-    SLT { rd: Reg, rs1: Reg, rs2: Reg },
-    SLTU { rd: Reg, rs1: Reg, rs2: Reg },
+    Add { rd: Reg, rs1: Reg, rs2: Reg },
+    Addw { rd: Reg, rs1: Reg, rs2: Reg },
+    Sub { rd: Reg, rs1: Reg, rs2: Reg },
+    Subw { rd: Reg, rs1: Reg, rs2: Reg },
+    Sll { rd: Reg, rs1: Reg, rs2: Reg },
+    Sllw { rd: Reg, rs1: Reg, rs2: Reg },
+    Srlw { rd: Reg, rs1: Reg, rs2: Reg },
+    Sraw { rd: Reg, rs1: Reg, rs2: Reg },
+    Slt { rd: Reg, rs1: Reg, rs2: Reg },
+    Sltu { rd: Reg, rs1: Reg, rs2: Reg },
 
-    XOR { rd: Reg, rs1: Reg, rs2: Reg },
-    SRL { rd: Reg, rs1: Reg, rs2: Reg },
-    SRA { rd: Reg, rs1: Reg, rs2: Reg },
-    OR { rd: Reg, rs1: Reg, rs2: Reg },
-    AND { rd: Reg, rs1: Reg, rs2: Reg },
+    Xor { rd: Reg, rs1: Reg, rs2: Reg },
+    Srl { rd: Reg, rs1: Reg, rs2: Reg },
+    Sra { rd: Reg, rs1: Reg, rs2: Reg },
+    Or { rd: Reg, rs1: Reg, rs2: Reg },
+    And { rd: Reg, rs1: Reg, rs2: Reg },
 
     // mul
-    MUL { rd: Reg, rs1: Reg, rs2: Reg },
-    MULH { rd: Reg, rs1: Reg, rs2: Reg },
-    MULHSU { rd: Reg, rs1: Reg, rs2: Reg },
-    MULHU { rd: Reg, rs1: Reg, rs2: Reg },
-    MULW { rd: Reg, rs1: Reg, rs2: Reg },
-    DIV { rd: Reg, rs1: Reg, rs2: Reg },
-    DIVU { rd: Reg, rs1: Reg, rs2: Reg },
-    DIVW { rd: Reg, rs1: Reg, rs2: Reg },
-    DIVUW { rd: Reg, rs1: Reg, rs2: Reg },
-    REM { rd: Reg, rs1: Reg, rs2: Reg },
-    REMU { rd: Reg, rs1: Reg, rs2: Reg },
-    REMW { rd: Reg, rs1: Reg, rs2: Reg },
-    REMUW { rd: Reg, rs1: Reg, rs2: Reg },
+    Mul { rd: Reg, rs1: Reg, rs2: Reg },
+    Mulh { rd: Reg, rs1: Reg, rs2: Reg },
+    Mulhsu { rd: Reg, rs1: Reg, rs2: Reg },
+    Mulhu { rd: Reg, rs1: Reg, rs2: Reg },
+    Mulw { rd: Reg, rs1: Reg, rs2: Reg },
+    Div { rd: Reg, rs1: Reg, rs2: Reg },
+    Divu { rd: Reg, rs1: Reg, rs2: Reg },
+    Divw { rd: Reg, rs1: Reg, rs2: Reg },
+    Divuw { rd: Reg, rs1: Reg, rs2: Reg },
+    Rem { rd: Reg, rs1: Reg, rs2: Reg },
+    Remu { rd: Reg, rs1: Reg, rs2: Reg },
+    Remw { rd: Reg, rs1: Reg, rs2: Reg },
+    Remuw { rd: Reg, rs1: Reg, rs2: Reg },
 
-    FENCE,
-    FENCEI,
+    Fence,
+    Fencei,
 
-    ECALL,
-    EBREAK,
+    Ecall,
+    Ebreak,
 
     // atomics
-    LRW { rd: Reg, rs: Reg },
-    SCW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOSWAPW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOADDW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOXORW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOANDW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOORW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMINW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMAXW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMINUW { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMAXUW { rd: Reg, rs1: Reg, rs2: Reg },
-    LRD { rd: Reg, rs: Reg },
-    SCD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOSWAPD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOADDD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOXORD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOANDD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOORD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMIND { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMAXD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMINUD { rd: Reg, rs1: Reg, rs2: Reg },
-    AMOMAXUD { rd: Reg, rs1: Reg, rs2: Reg },
+    Lrw { rd: Reg, rs: Reg },
+    Scw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoswapw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoaddw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoxorw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoandw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoorw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amominw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amomaxw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amominuw { rd: Reg, rs1: Reg, rs2: Reg },
+    Amomaxuw { rd: Reg, rs1: Reg, rs2: Reg },
+    Lrd { rd: Reg, rs: Reg },
+    Scd { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoswapd { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoaddd { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoxord { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoandd { rd: Reg, rs1: Reg, rs2: Reg },
+    Amoord { rd: Reg, rs1: Reg, rs2: Reg },
+    Amomind { rd: Reg, rs1: Reg, rs2: Reg },
+    Amomaxd { rd: Reg, rs1: Reg, rs2: Reg },
+    Amominud { rd: Reg, rs1: Reg, rs2: Reg },
+    Amomaxud { rd: Reg, rs1: Reg, rs2: Reg },
 }
 
 impl fmt::Display for Inst {
@@ -221,11 +221,11 @@ impl fmt::Display for Inst {
         use Reg::*;
 
         match self {
-            LUI { rd, imm } => write!(f, "lui\t{},0x{:x}", rd, imm),
-            AUIPC { rd, imm } => write!(f, "auipc\t{},0x{:x}", rd, imm),
+            Lui { rd, imm } => write!(f, "lui\t{},0x{:x}", rd, imm),
+            Auipc { rd, imm } => write!(f, "auipc\t{},0x{:x}", rd, imm),
 
-            JAL { rd, imm } => write!(f, "jal\t{},0x{:x}", rd, imm),
-            JALR { rd, rs, imm } => {
+            Jal { rd, imm } => write!(f, "jal\t{},0x{:x}", rd, imm),
+            Jalr { rd, rs, imm } => {
                 if *rd == Zero && *rs == Ra && *imm == 0 {
                     write!(f, "ret")
                 } else {
@@ -233,118 +233,118 @@ impl fmt::Display for Inst {
                 }
             }
 
-            BEQ { rs1, rs2, imm } => {
+            Beq { rs1, rs2, imm } => {
                 if *rs2 == Zero {
                     write!(f, "beqz\t{},{}", rs1, imm)
                 } else {
                     write!(f, "beq\t{},{},{}", rs1, rs2, imm)
                 }
             }
-            BNE { rs1, rs2, imm } => write!(f, "bne\t{},{},{}", rs1, rs2, imm),
-            BLT { rs1, rs2, imm } => write!(f, "blt\t{},{},{}", rs1, rs2, imm),
-            BGE { rs1, rs2, imm } => write!(f, "bge\t{},{},{}", rs1, rs2, imm),
-            BLTU { rs1, rs2, imm } => write!(f, "bltu\t{},{},{}", rs1, rs2, imm),
-            BGEU { rs1, rs2, imm } => write!(f, "bgeu\t{},{},{}", rs1, rs2, imm),
+            Bne { rs1, rs2, imm } => write!(f, "bne\t{},{},{}", rs1, rs2, imm),
+            Blt { rs1, rs2, imm } => write!(f, "blt\t{},{},{}", rs1, rs2, imm),
+            Bge { rs1, rs2, imm } => write!(f, "bge\t{},{},{}", rs1, rs2, imm),
+            Bltu { rs1, rs2, imm } => write!(f, "bltu\t{},{},{}", rs1, rs2, imm),
+            Bgeu { rs1, rs2, imm } => write!(f, "bgeu\t{},{},{}", rs1, rs2, imm),
 
-            LB { rd, rs, imm } => write!(f, "lb\t{},{}({})", rd, imm, rs),
-            LH { rd, rs, imm } => write!(f, "lh\t{},{}({})", rd, imm, rs),
-            LW { rd, rs, imm } => write!(f, "lw\t{},{}({})", rd, imm, rs),
-            LWU { rd, rs, imm } => write!(f, "lwu\t{},{}({})", rd, imm, rs),
-            LD { rd, rs, imm } => write!(f, "ld\t{},{}({})", rd, imm, rs),
+            Lb { rd, rs, imm } => write!(f, "lb\t{},{}({})", rd, imm, rs),
+            Lh { rd, rs, imm } => write!(f, "lh\t{},{}({})", rd, imm, rs),
+            Lw { rd, rs, imm } => write!(f, "lw\t{},{}({})", rd, imm, rs),
+            Lwu { rd, rs, imm } => write!(f, "lwu\t{},{}({})", rd, imm, rs),
+            Ld { rd, rs, imm } => write!(f, "ld\t{},{}({})", rd, imm, rs),
 
-            LBU { rd, rs, imm } => write!(f, "lbu\t{},{}({})", rd, imm, rs),
-            LHU { rd, rs, imm } => write!(f, "lhu\t{},{}({})", rd, imm, rs),
+            Lbu { rd, rs, imm } => write!(f, "lbu\t{},{}({})", rd, imm, rs),
+            Lhu { rd, rs, imm } => write!(f, "lhu\t{},{}({})", rd, imm, rs),
 
-            SB { rs1, rs2, imm } => write!(f, "sb\t{},{}({})", rs2, imm, rs1),
-            SH { rs1, rs2, imm } => write!(f, "sh\t{},{}({})", rs2, imm, rs1),
-            SW { rs1, rs2, imm } => write!(f, "sw\t{},{}({})", rs2, imm, rs1),
-            SD { rs1, rs2, imm } => write!(f, "sd\t{},{}({})", rs2, imm, rs1),
+            Sb { rs1, rs2, imm } => write!(f, "sb\t{},{}({})", rs2, imm, rs1),
+            Sh { rs1, rs2, imm } => write!(f, "sh\t{},{}({})", rs2, imm, rs1),
+            Sw { rs1, rs2, imm } => write!(f, "sw\t{},{}({})", rs2, imm, rs1),
+            Sd { rs1, rs2, imm } => write!(f, "sd\t{},{}({})", rs2, imm, rs1),
 
-            ADDI { rd, rs, imm } => {
+            Addi { rd, rs, imm } => {
                 if *rs == Zero {
                     write!(f, "li\t{},{}", rd, imm)
                 } else {
                     write!(f, "addi\t{},{},{}", rd, rs, imm)
                 }
             }
-            ADDIW { rd, rs, imm } => write!(f, "addiw\t{},{},{}", rd, rs, imm),
-            SLTI { rd, rs, imm } => write!(f, "slti\t{},{},{}", rd, rs, imm),
-            SLTIU { rd, rs, imm } => write!(f, "sltiu\t{},{},{}", rd, rs, imm),
-            XORI { rd, rs, imm } => write!(f, "xori\t{},{},{}", rd, rs, imm),
-            ORI { rd, rs, imm } => write!(f, "ori\t{},{},{}", rd, rs, imm),
-            ANDI { rd, rs, imm } => write!(f, "andi\t{},{},{}", rd, rs, imm),
-            SLLI { rd, rs, shamt } => write!(f, "slli\t{},{},{}", rd, rs, shamt),
-            SLLIW { rd, rs, shamt } => write!(f, "slliw\t{},{},{}", rd, rs, shamt),
-            SRLI { rd, rs, shamt } => write!(f, "srli\t{},{},{}", rd, rs, shamt),
-            SRLIW { rd, rs, shamt } => write!(f, "srliw\t{},{},{}", rd, rs, shamt),
-            SRAIW { rd, rs, shamt } => write!(f, "sraiw\t{},{},{}", rd, rs, shamt),
-            SRAI { rd, rs, shamt } => write!(f, "srai\t{},{},{}", rd, rs, shamt),
+            Addiw { rd, rs, imm } => write!(f, "addiw\t{},{},{}", rd, rs, imm),
+            Slti { rd, rs, imm } => write!(f, "slti\t{},{},{}", rd, rs, imm),
+            Sltiu { rd, rs, imm } => write!(f, "sltiu\t{},{},{}", rd, rs, imm),
+            Xori { rd, rs, imm } => write!(f, "xori\t{},{},{}", rd, rs, imm),
+            Ori { rd, rs, imm } => write!(f, "ori\t{},{},{}", rd, rs, imm),
+            Andi { rd, rs, imm } => write!(f, "andi\t{},{},{}", rd, rs, imm),
+            Slli { rd, rs, shamt } => write!(f, "slli\t{},{},{}", rd, rs, shamt),
+            Slliw { rd, rs, shamt } => write!(f, "slliw\t{},{},{}", rd, rs, shamt),
+            Srli { rd, rs, shamt } => write!(f, "srli\t{},{},{}", rd, rs, shamt),
+            Srliw { rd, rs, shamt } => write!(f, "srliw\t{},{},{}", rd, rs, shamt),
+            Sraiw { rd, rs, shamt } => write!(f, "sraiw\t{},{},{}", rd, rs, shamt),
+            Srai { rd, rs, shamt } => write!(f, "srai\t{},{},{}", rd, rs, shamt),
 
-            ADD { rd, rs1, rs2 } => {
+            Add { rd, rs1, rs2 } => {
                 if *rs1 == Zero {
                     write!(f, "mv\t{},{}", rd, rs2)
                 } else {
                     write!(f, "add\t{},{},{}", rd, rs1, rs2)
                 }
             }
-            ADDW { rd, rs1, rs2 } => write!(f, "addw\t{},{},{}", rd, rs1, rs2),
-            SUB { rd, rs1, rs2 } => write!(f, "sub\t{},{},{}", rd, rs1, rs2),
-            SUBW { rd, rs1, rs2 } => write!(f, "subw\t{},{},{}", rd, rs1, rs2),
-            SLL { rd, rs1, rs2 } => write!(f, "sll\t{},{},{}", rd, rs1, rs2),
-            SLLW { rd, rs1, rs2 } => write!(f, "sllw\t{},{},{}", rd, rs1, rs2),
-            SRLW { rd, rs1, rs2 } => write!(f, "srlw\t{},{},{}", rd, rs1, rs2),
-            SRAW { rd, rs1, rs2 } => write!(f, "sraw\t{},{},{}", rd, rs1, rs2),
-            SLT { rd, rs1, rs2 } => write!(f, "slt\t{},{},{}", rd, rs1, rs2),
-            SLTU { rd, rs1, rs2 } => write!(f, "sltu\t{},{},{}", rd, rs1, rs2),
+            Addw { rd, rs1, rs2 } => write!(f, "addw\t{},{},{}", rd, rs1, rs2),
+            Sub { rd, rs1, rs2 } => write!(f, "sub\t{},{},{}", rd, rs1, rs2),
+            Subw { rd, rs1, rs2 } => write!(f, "subw\t{},{},{}", rd, rs1, rs2),
+            Sll { rd, rs1, rs2 } => write!(f, "sll\t{},{},{}", rd, rs1, rs2),
+            Sllw { rd, rs1, rs2 } => write!(f, "sllw\t{},{},{}", rd, rs1, rs2),
+            Srlw { rd, rs1, rs2 } => write!(f, "srlw\t{},{},{}", rd, rs1, rs2),
+            Sraw { rd, rs1, rs2 } => write!(f, "sraw\t{},{},{}", rd, rs1, rs2),
+            Slt { rd, rs1, rs2 } => write!(f, "slt\t{},{},{}", rd, rs1, rs2),
+            Sltu { rd, rs1, rs2 } => write!(f, "sltu\t{},{},{}", rd, rs1, rs2),
 
-            XOR { rd, rs1, rs2 } => write!(f, "xor\t{},{},{}", rd, rs1, rs2),
-            SRL { rd, rs1, rs2 } => write!(f, "srl\t{},{},{}", rd, rs1, rs2),
-            SRA { rd, rs1, rs2 } => write!(f, "sra\t{},{},{}", rd, rs1, rs2),
-            OR { rd, rs1, rs2 } => write!(f, "or\t{},{},{}", rd, rs1, rs2),
-            AND { rd, rs1, rs2 } => write!(f, "and\t{},{},{}", rd, rs1, rs2),
+            Xor { rd, rs1, rs2 } => write!(f, "xor\t{},{},{}", rd, rs1, rs2),
+            Srl { rd, rs1, rs2 } => write!(f, "srl\t{},{},{}", rd, rs1, rs2),
+            Sra { rd, rs1, rs2 } => write!(f, "sra\t{},{},{}", rd, rs1, rs2),
+            Or { rd, rs1, rs2 } => write!(f, "or\t{},{},{}", rd, rs1, rs2),
+            And { rd, rs1, rs2 } => write!(f, "and\t{},{},{}", rd, rs1, rs2),
 
-            MUL { rd, rs1, rs2 } => write!(f, "mul\t{},{},{}", rd, rs1, rs2),
-            MULH { rd, rs1, rs2 } => write!(f, "mulh\t{},{},{}", rd, rs1, rs2),
-            MULHSU { rd, rs1, rs2 } => write!(f, "mulhsu\t{},{},{}", rd, rs1, rs2),
-            MULHU { rd, rs1, rs2 } => write!(f, "mulhu\t{},{},{}", rd, rs1, rs2),
-            MULW { rd, rs1, rs2 } => write!(f, "mulw\t{},{},{}", rd, rs1, rs2),
-            DIV { rd, rs1, rs2 } => write!(f, "div\t{},{},{}", rd, rs1, rs2),
-            DIVU { rd, rs1, rs2 } => write!(f, "divu\t{},{},{}", rd, rs1, rs2),
-            DIVW { rd, rs1, rs2 } => write!(f, "divw\t{},{},{}", rd, rs1, rs2),
-            DIVUW { rd, rs1, rs2 } => write!(f, "divuw\t{},{},{}", rd, rs1, rs2),
-            REM { rd, rs1, rs2 } => write!(f, "rem\t{},{},{}", rd, rs1, rs2),
-            REMU { rd, rs1, rs2 } => write!(f, "remu\t{},{},{}", rd, rs1, rs2),
-            REMW { rd, rs1, rs2 } => write!(f, "remw\t{},{},{}", rd, rs1, rs2),
-            REMUW { rd, rs1, rs2 } => write!(f, "remuw\t{},{},{}", rd, rs1, rs2),
+            Mul { rd, rs1, rs2 } => write!(f, "mul\t{},{},{}", rd, rs1, rs2),
+            Mulh { rd, rs1, rs2 } => write!(f, "mulh\t{},{},{}", rd, rs1, rs2),
+            Mulhsu { rd, rs1, rs2 } => write!(f, "mulhsu\t{},{},{}", rd, rs1, rs2),
+            Mulhu { rd, rs1, rs2 } => write!(f, "mulhu\t{},{},{}", rd, rs1, rs2),
+            Mulw { rd, rs1, rs2 } => write!(f, "mulw\t{},{},{}", rd, rs1, rs2),
+            Div { rd, rs1, rs2 } => write!(f, "div\t{},{},{}", rd, rs1, rs2),
+            Divu { rd, rs1, rs2 } => write!(f, "divu\t{},{},{}", rd, rs1, rs2),
+            Divw { rd, rs1, rs2 } => write!(f, "divw\t{},{},{}", rd, rs1, rs2),
+            Divuw { rd, rs1, rs2 } => write!(f, "divuw\t{},{},{}", rd, rs1, rs2),
+            Rem { rd, rs1, rs2 } => write!(f, "rem\t{},{},{}", rd, rs1, rs2),
+            Remu { rd, rs1, rs2 } => write!(f, "remu\t{},{},{}", rd, rs1, rs2),
+            Remw { rd, rs1, rs2 } => write!(f, "remw\t{},{},{}", rd, rs1, rs2),
+            Remuw { rd, rs1, rs2 } => write!(f, "remuw\t{},{},{}", rd, rs1, rs2),
 
-            FENCE => write!(f, "fence"),
-            FENCEI => write!(f, "fence_i"),
+            Fence => write!(f, "fence"),
+            Fencei => write!(f, "fence_i"),
 
-            ECALL => write!(f, "ecall"),
-            EBREAK => write!(f, "ebreak"),
+            Ecall => write!(f, "ecall"),
+            Ebreak => write!(f, "ebreak"),
 
-            LRW { rd, rs } => write!(f, "lr.w {},{}", rd, rs),
-            SCW { rd, rs1, rs2 } => write!(f, "sc.w {},{},({})", rd, rs1, rs2),
-            AMOSWAPW { rd, rs1, rs2 } => write!(f, "amoswap.w {},{},({})", rd, rs1, rs2),
-            AMOADDW { rd, rs1, rs2 } => write!(f, "amoadd.w {},{},({})", rd, rs1, rs2),
-            AMOXORW { rd, rs1, rs2 } => write!(f, "amoxor.w {},{},({})", rd, rs1, rs2),
-            AMOANDW { rd, rs1, rs2 } => write!(f, "amoand.w {},{},({})", rd, rs1, rs2),
-            AMOORW { rd, rs1, rs2 } => write!(f, "amoor.w {},{},({})", rd, rs1, rs2),
-            AMOMINW { rd, rs1, rs2 } => write!(f, "amomin.w {},{},({})", rd, rs1, rs2),
-            AMOMAXW { rd, rs1, rs2 } => write!(f, "amomax.w {},{},({})", rd, rs1, rs2),
-            AMOMINUW { rd, rs1, rs2 } => write!(f, "amominu.w {},{},({})", rd, rs1, rs2),
-            AMOMAXUW { rd, rs1, rs2 } => write!(f, "amomaxu.w {},{},({})", rd, rs1, rs2),
-            LRD { rd, rs } => write!(f, "lr.d {},{}", rd, rs),
-            SCD { rd, rs1, rs2 } => write!(f, "sc.d {},{},({})", rd, rs1, rs2),
-            AMOSWAPD { rd, rs1, rs2 } => write!(f, "amoswap.d {},{},({})", rd, rs1, rs2),
-            AMOADDD { rd, rs1, rs2 } => write!(f, "amoadd.d {},{},({})", rd, rs1, rs2),
-            AMOXORD { rd, rs1, rs2 } => write!(f, "amoxor.d {},{},({})", rd, rs1, rs2),
-            AMOANDD { rd, rs1, rs2 } => write!(f, "amoand.d {},{},({})", rd, rs1, rs2),
-            AMOORD { rd, rs1, rs2 } => write!(f, "amoor.d {},{},({})", rd, rs1, rs2),
-            AMOMIND { rd, rs1, rs2 } => write!(f, "amomin.d {},{},({})", rd, rs1, rs2),
-            AMOMAXD { rd, rs1, rs2 } => write!(f, "amomax.d {},{},({})", rd, rs1, rs2),
-            AMOMINUD { rd, rs1, rs2 } => write!(f, "amominu.d {},{},({})", rd, rs1, rs2),
-            AMOMAXUD { rd, rs1, rs2 } => write!(f, "amomaxu.d {},{},({})", rd, rs1, rs2),
+            Lrw { rd, rs } => write!(f, "lr.w {},{}", rd, rs),
+            Scw { rd, rs1, rs2 } => write!(f, "sc.w {},{},({})", rd, rs1, rs2),
+            Amoswapw { rd, rs1, rs2 } => write!(f, "amoswap.w {},{},({})", rd, rs1, rs2),
+            Amoaddw { rd, rs1, rs2 } => write!(f, "amoadd.w {},{},({})", rd, rs1, rs2),
+            Amoxorw { rd, rs1, rs2 } => write!(f, "amoxor.w {},{},({})", rd, rs1, rs2),
+            Amoandw { rd, rs1, rs2 } => write!(f, "amoand.w {},{},({})", rd, rs1, rs2),
+            Amoorw { rd, rs1, rs2 } => write!(f, "amoor.w {},{},({})", rd, rs1, rs2),
+            Amominw { rd, rs1, rs2 } => write!(f, "amomin.w {},{},({})", rd, rs1, rs2),
+            Amomaxw { rd, rs1, rs2 } => write!(f, "amomax.w {},{},({})", rd, rs1, rs2),
+            Amominuw { rd, rs1, rs2 } => write!(f, "amominu.w {},{},({})", rd, rs1, rs2),
+            Amomaxuw { rd, rs1, rs2 } => write!(f, "amomaxu.w {},{},({})", rd, rs1, rs2),
+            Lrd { rd, rs } => write!(f, "lr.d {},{}", rd, rs),
+            Scd { rd, rs1, rs2 } => write!(f, "sc.d {},{},({})", rd, rs1, rs2),
+            Amoswapd { rd, rs1, rs2 } => write!(f, "amoswap.d {},{},({})", rd, rs1, rs2),
+            Amoaddd { rd, rs1, rs2 } => write!(f, "amoadd.d {},{},({})", rd, rs1, rs2),
+            Amoxord { rd, rs1, rs2 } => write!(f, "amoxor.d {},{},({})", rd, rs1, rs2),
+            Amoandd { rd, rs1, rs2 } => write!(f, "amoand.d {},{},({})", rd, rs1, rs2),
+            Amoord { rd, rs1, rs2 } => write!(f, "amoor.d {},{},({})", rd, rs1, rs2),
+            Amomind { rd, rs1, rs2 } => write!(f, "amomin.d {},{},({})", rd, rs1, rs2),
+            Amomaxd { rd, rs1, rs2 } => write!(f, "amomax.d {},{},({})", rd, rs1, rs2),
+            Amominud { rd, rs1, rs2 } => write!(f, "amominu.d {},{},({})", rd, rs1, rs2),
+            Amomaxud { rd, rs1, rs2 } => write!(f, "amomaxu.d {},{},({})", rd, rs1, rs2),
         }
     }
 }
@@ -506,21 +506,21 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
     let inst = match opcode {
         0b0110111 => {
             let inst = UType::from(bits);
-            LUI {
+            Lui {
                 rd: inst.rd,
                 imm: inst.imm,
             }
         }
         0b0010111 => {
             let inst = UType::from(bits);
-            AUIPC {
+            Auipc {
                 rd: inst.rd,
                 imm: inst.imm,
             }
         }
         0b1101111 => {
             let inst = JType::from(bits);
-            JAL {
+            Jal {
                 rd: inst.rd,
                 imm: inst.imm,
             }
@@ -528,7 +528,7 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
         0b1100111 => {
             let inst = IType::from(bits);
             match inst.func {
-                0b000 => JALR {
+                0b000 => Jalr {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
@@ -543,32 +543,32 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             let inst = BType::from(bits);
 
             match inst.func {
-                0b000 => BEQ {
+                0b000 => Beq {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b001 => BNE {
+                0b001 => Bne {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b100 => BLT {
+                0b100 => Blt {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b101 => BGE {
+                0b101 => Bge {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b110 => BLTU {
+                0b110 => Bltu {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b111 => BGEU {
+                0b111 => Bgeu {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
@@ -582,37 +582,37 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             // Loads
             let inst = IType::from(bits);
             match inst.func {
-                0b000 => LB {
+                0b000 => Lb {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b001 => LH {
+                0b001 => Lh {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b010 => LW {
+                0b010 => Lw {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b011 => LD {
+                0b011 => Ld {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b100 => LBU {
+                0b100 => Lbu {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b101 => LHU {
+                0b101 => Lhu {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b110 => LWU {
+                0b110 => Lwu {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
@@ -626,22 +626,22 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             // Stores
             let inst = SType::from(bits);
             match inst.func {
-                0b000 => SB {
+                0b000 => Sb {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b001 => SH {
+                0b001 => Sh {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b010 => SW {
+                0b010 => Sw {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
                 },
-                0b011 => SD {
+                0b011 => Sd {
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                     imm: inst.imm,
@@ -655,32 +655,32 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             // Immediate arithmetic
             let inst = IType::from(bits);
             match inst.func {
-                0b000 => ADDI {
+                0b000 => Addi {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b010 => SLTI {
+                0b010 => Slti {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b011 => SLTIU {
+                0b011 => Sltiu {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b100 => XORI {
+                0b100 => Xori {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b110 => ORI {
+                0b110 => Ori {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
                 },
-                0b111 => ANDI {
+                0b111 => Andi {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
@@ -689,7 +689,7 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     let mode = (inst.imm >> 6) & 0b111111;
                     let shamt = inst.imm & 0b111111;
                     match mode {
-                        0b000000 => SLLI {
+                        0b000000 => Slli {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt,
@@ -703,12 +703,12 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     let mode = (inst.imm >> 6) & 0b111111;
                     let shamt = inst.imm & 0b111111;
                     match mode {
-                        0b000000 => SRLI {
+                        0b000000 => Srli {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt: shamt as u32,
                         },
-                        0b010000 => SRAI {
+                        0b010000 => Srai {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt: shamt as u32,
@@ -727,92 +727,92 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             // Register arithmetic
             let inst = RType::from(bits);
             match (inst.func7, inst.func3) {
-                (0b0000000, 0b000) => ADD {
+                (0b0000000, 0b000) => Add {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0100000, 0b000) => SUB {
+                (0b0100000, 0b000) => Sub {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b001) => SLL {
+                (0b0000000, 0b001) => Sll {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b010) => SLT {
+                (0b0000000, 0b010) => Slt {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b011) => SLTU {
+                (0b0000000, 0b011) => Sltu {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b100) => XOR {
+                (0b0000000, 0b100) => Xor {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b101) => SRL {
+                (0b0000000, 0b101) => Srl {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0100000, 0b101) => SRA {
+                (0b0100000, 0b101) => Sra {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b110) => OR {
+                (0b0000000, 0b110) => Or {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b111) => AND {
+                (0b0000000, 0b111) => And {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b000) => MUL {
+                (0b0000001, 0b000) => Mul {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b001) => MULH {
+                (0b0000001, 0b001) => Mulh {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b010) => MULHSU {
+                (0b0000001, 0b010) => Mulhsu {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b011) => MULHU {
+                (0b0000001, 0b011) => Mulhu {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b100) => DIV {
+                (0b0000001, 0b100) => Div {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b101) => DIVU {
+                (0b0000001, 0b101) => Divu {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b110) => REM {
+                (0b0000001, 0b110) => Rem {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b111) => REMU {
+                (0b0000001, 0b111) => Remu {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
@@ -825,7 +825,7 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
         0b0011011 => {
             let inst = IType::from(bits);
             match inst.func {
-                0b000 => ADDIW {
+                0b000 => Addiw {
                     rd: inst.rd,
                     rs: inst.rs,
                     imm: inst.imm,
@@ -834,7 +834,7 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     let mode = (inst.imm >> 5) & 0b1111111;
                     let shamt = (inst.imm & 0b11111) as u32;
                     match mode {
-                        0b0000000 => SLLIW {
+                        0b0000000 => Slliw {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt,
@@ -848,12 +848,12 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     let mode = (inst.imm >> 5) & 0b1111111;
                     let shamt = (inst.imm & 0b11111) as u32;
                     match mode {
-                        0b0000000 => SRLIW {
+                        0b0000000 => Srliw {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt,
                         },
-                        0b0100000 => SRAIW {
+                        0b0100000 => Sraiw {
                             rd: inst.rd,
                             rs: inst.rs,
                             shamt,
@@ -871,52 +871,52 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
         0b0111011 => {
             let inst = RType::from(bits);
             match (inst.func7, inst.func3) {
-                (0b0000000, 0b000) => ADDW {
+                (0b0000000, 0b000) => Addw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0100000, 0b000) => SUBW {
+                (0b0100000, 0b000) => Subw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b001) => SLLW {
+                (0b0000000, 0b001) => Sllw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000000, 0b101) => SRLW {
+                (0b0000000, 0b101) => Srlw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0100000, 0b101) => SRAW {
+                (0b0100000, 0b101) => Sraw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b000) => MULW {
+                (0b0000001, 0b000) => Mulw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b100) => DIVW {
+                (0b0000001, 0b100) => Divw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b101) => DIVUW {
+                (0b0000001, 0b101) => Divuw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b110) => REMW {
+                (0b0000001, 0b110) => Remw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
                 },
-                (0b0000001, 0b111) => REMUW {
+                (0b0000001, 0b111) => Remuw {
                     rd: inst.rd,
                     rs1: inst.rs1,
                     rs2: inst.rs2,
@@ -926,12 +926,12 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                 }
             }
         }
-        0b0001111 => FENCE {},
+        0b0001111 => Fence {},
         0b1110011 => {
             if (bits >> 7) == 0 {
-                ECALL
+                Ecall
             } else if (bits >> 20) == 1 {
-                EBREAK
+                Ebreak
             } else {
                 return None;
             }
@@ -940,56 +940,56 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
             let inst = RType::from(bits);
             match inst.func3 {
                 0b010 => match inst.func7 >> 2 {
-                    0b00010 => LRW {
+                    0b00010 => Lrw {
                         rd: inst.rd,
                         rs: inst.rs1,
                     },
-                    0b00011 => SCW {
+                    0b00011 => Scw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b00001 => AMOSWAPW {
+                    0b00001 => Amoswapw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b00000 => AMOADDW {
+                    0b00000 => Amoaddw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b00100 => AMOXORW {
+                    0b00100 => Amoxorw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b01100 => AMOANDW {
+                    0b01100 => Amoandw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b01000 => AMOORW {
+                    0b01000 => Amoorw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b10000 => AMOMINW {
+                    0b10000 => Amominw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b10100 => AMOMAXW {
+                    0b10100 => Amomaxw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b11000 => AMOMINUW {
+                    0b11000 => Amominuw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b11100 => AMOMAXUW {
+                    0b11100 => Amomaxuw {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
@@ -999,56 +999,56 @@ fn decode_32bit_instr(bits: u32) -> Option<Inst> {
                     }
                 },
                 0b011 => match inst.func7 >> 2 {
-                    0b00010 => LRD {
+                    0b00010 => Lrd {
                         rd: inst.rd,
                         rs: inst.rs1,
                     },
-                    0b00011 => SCD {
+                    0b00011 => Scd {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b00001 => AMOSWAPD {
+                    0b00001 => Amoswapd {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b00000 => AMOADDD {
+                    0b00000 => Amoaddd {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b00100 => AMOXORD {
+                    0b00100 => Amoxord {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b01100 => AMOANDD {
+                    0b01100 => Amoandd {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b01000 => AMOORD {
+                    0b01000 => Amoord {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b10000 => AMOMIND {
+                    0b10000 => Amomind {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b10100 => AMOMAXD {
+                    0b10100 => Amomaxd {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b11000 => AMOMINUD {
+                    0b11000 => Amominud {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
                     },
-                    0b11100 => AMOMAXUD {
+                    0b11100 => Amomaxud {
                         rd: inst.rd,
                         rs1: inst.rs1,
                         rs2: inst.rs2,
@@ -1090,7 +1090,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5_4 = (bits >> 11) & 0b11;
                     let imm = (imm_9_6 << 6) | (imm_5_4 << 4) | (imm_3 << 3) | (imm_2 << 2);
                     let imm = sign_extend(imm as i32, 9);
-                    ADDI { rd, rs: Sp, imm }
+                    Addi { rd, rs: Sp, imm }
                 }
                 0b010 => {
                     // LW
@@ -1101,7 +1101,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_6 = (bits >> 5) & 0b1;
                     let imm = (imm_6 << 6) | (imm_5_3 << 3) | (imm_2 << 2);
                     let imm = imm as i32;
-                    LW { rd, rs, imm }
+                    Lw { rd, rs, imm }
                 }
                 0b011 => {
                     // LD
@@ -1111,7 +1111,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_7_6 = (bits >> 5) & 0b11;
                     let imm = (imm_7_6 << 6) | (imm_5_3 << 3);
                     let imm = imm as i32;
-                    LD { rd, rs, imm }
+                    Ld { rd, rs, imm }
                 }
                 0b110 => {
                     // SW
@@ -1122,7 +1122,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_6 = (bits >> 5) & 0b1;
                     let imm = (imm_6 << 6) | (imm_5_3 << 3) | (imm_2 << 2);
                     let imm = imm as i32;
-                    SW { rs1, rs2, imm }
+                    Sw { rs1, rs2, imm }
                 }
                 0b111 => {
                     // SD
@@ -1132,7 +1132,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_7_6 = (bits >> 5) & 0b11;
                     let imm = (imm_7_6 << 6) | (imm_5_3 << 3);
                     let imm = imm as i32;
-                    SD { rs1, rs2, imm }
+                    Sd { rs1, rs2, imm }
                 }
                 _ => {
                     return None;
@@ -1148,7 +1148,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_4_0 = (bits >> 2) & 0b11111;
                     let imm = (imm_5 << 5) | imm_4_0;
                     let imm = sign_extend(imm as i32, 5);
-                    ADDI { rd, rs: rd, imm }
+                    Addi { rd, rs: rd, imm }
                 }
                 0b001 => {
                     // ADDIW
@@ -1157,7 +1157,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_4_0 = (bits >> 2) & 0b11111;
                     let imm = (imm_5 << 5) | imm_4_0;
                     let imm = sign_extend(imm as i32, 5);
-                    ADDIW { rd, rs: rd, imm }
+                    Addiw { rd, rs: rd, imm }
                 }
                 0b010 => {
                     // LI
@@ -1166,7 +1166,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_4_0 = (bits >> 2) & 0b11111;
                     let imm = (imm_5 << 5) | imm_4_0;
                     let imm = sign_extend(imm as i32, 5);
-                    ADDI { rd, rs: Zero, imm }
+                    Addi { rd, rs: Zero, imm }
                 }
                 0b011 => {
                     if ((bits >> 7) & 0b11111) == 2 {
@@ -1182,7 +1182,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                             | (imm_5 << 5)
                             | (imm_4 << 4);
                         let imm = sign_extend(imm as i32, 9);
-                        ADDI {
+                        Addi {
                             rd: Sp,
                             rs: Sp,
                             imm,
@@ -1194,7 +1194,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         let imm_16_12 = (bits >> 2) & 0b11111;
                         let imm = ((imm_17 as u32) << 17) | ((imm_16_12 as u32) << 12);
                         let imm = sign_extend(imm as i32, 17);
-                        LUI { rd, imm: imm >> 12 }
+                        Lui { rd, imm: imm >> 12 }
                     }
                 }
                 0b100 => {
@@ -1206,7 +1206,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                             let imm_4_0 = (bits >> 2) & 0b11111;
                             let imm = (imm_5 << 5) | imm_4_0;
                             let shamt = imm as u32;
-                            SRLI { rd, rs: rd, shamt }
+                            Srli { rd, rs: rd, shamt }
                         }
                         0b01 => {
                             // SRAI
@@ -1215,7 +1215,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                             let imm_4_0 = (bits >> 2) & 0b11111;
                             let imm = (imm_5 << 5) | imm_4_0;
                             let shamt = imm as u32;
-                            SRAI { rd, rs: rd, shamt }
+                            Srai { rd, rs: rd, shamt }
                         }
                         0b10 => {
                             // ANDI
@@ -1224,18 +1224,18 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                             let imm_4_0 = (bits >> 2) & 0b11111;
                             let imm = (imm_5 << 5) | imm_4_0;
                             let imm = sign_extend(imm as i32, 5);
-                            ANDI { rd, rs: rd, imm }
+                            Andi { rd, rs: rd, imm }
                         }
                         0b11 => {
                             let rd = creg_at(bits, 7);
                             let rs2 = creg_at(bits, 2);
                             match ((bits >> 12) & 0b1, (bits >> 5) & 0b11) {
-                                (0b0, 0b00) => SUB { rd, rs1: rd, rs2 },
-                                (0b0, 0b01) => XOR { rd, rs1: rd, rs2 },
-                                (0b0, 0b10) => OR { rd, rs1: rd, rs2 },
-                                (0b0, 0b11) => AND { rd, rs1: rd, rs2 },
-                                (0b1, 0b00) => SUBW { rd, rs1: rd, rs2 },
-                                (0b1, 0b01) => ADDW { rd, rs1: rd, rs2 },
+                                (0b0, 0b00) => Sub { rd, rs1: rd, rs2 },
+                                (0b0, 0b01) => Xor { rd, rs1: rd, rs2 },
+                                (0b0, 0b10) => Or { rd, rs1: rd, rs2 },
+                                (0b0, 0b11) => And { rd, rs1: rd, rs2 },
+                                (0b1, 0b00) => Subw { rd, rs1: rd, rs2 },
+                                (0b1, 0b01) => Addw { rd, rs1: rd, rs2 },
                                 _ => return None,
                             }
                         }
@@ -1263,7 +1263,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_4 << 4)
                         | (imm_3_1 << 1);
                     let imm = sign_extend(imm as i32, 11);
-                    JAL { rd: Zero, imm }
+                    Jal { rd: Zero, imm }
                 }
                 0b110 => {
                     // BEQZ
@@ -1279,7 +1279,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_4_3 << 3)
                         | (imm_2_1 << 1);
                     let imm = sign_extend(imm as i32, 8);
-                    BEQ {
+                    Beq {
                         rs1,
                         rs2: Zero,
                         imm,
@@ -1299,7 +1299,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                         | (imm_4_3 << 3)
                         | (imm_2_1 << 1);
                     let imm = sign_extend(imm as i32, 8);
-                    BNE {
+                    Bne {
                         rs1,
                         rs2: Zero,
                         imm,
@@ -1319,7 +1319,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5 = (bits >> 12) & 0b1;
                     let imm = (imm_5 << 5) | imm_4_0;
                     let shamt = imm as i32;
-                    SLLI { rd, rs: rd, shamt }
+                    Slli { rd, rs: rd, shamt }
                 }
                 0b010 => {
                     // LWSP
@@ -1329,7 +1329,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5 = (bits >> 12) & 0b1;
                     let imm = (imm_7_6 << 6) | (imm_5 << 5) | (imm_4_2 << 2);
                     let imm = imm as i32;
-                    LW { rd, rs: Sp, imm }
+                    Lw { rd, rs: Sp, imm }
                 }
                 0b011 => {
                     // LDSP
@@ -1339,22 +1339,22 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5 = (bits >> 12) & 0b1;
                     let imm = (imm_8_6 << 6) | (imm_5 << 5) | (imm_4_3 << 3);
                     let imm = imm as i32;
-                    LD { rd, rs: Sp, imm }
+                    Ld { rd, rs: Sp, imm }
                 }
                 0b100 => {
                     let imm12 = (bits >> 12) & 0b1;
                     let rs1 = reg_at(bits as u32, 7);
                     let rs2 = reg_at(bits as u32, 2);
                     match (imm12, rs1, rs2) {
-                        (0, rs, Reg::Zero) => JALR {
+                        (0, rs, Reg::Zero) => Jalr {
                             rd: Zero,
                             rs,
                             imm: 0,
                         },
-                        (0, rd, rs2) => ADD { rd, rs1: Zero, rs2 },
-                        (1, Zero, Zero) => EBREAK,
-                        (1, rs, Zero) => JALR { rd: Ra, rs, imm: 0 },
-                        (1, rd, rs2) => ADD { rd, rs1: rd, rs2 },
+                        (0, rd, rs2) => Add { rd, rs1: Zero, rs2 },
+                        (1, Zero, Zero) => Ebreak,
+                        (1, rs, Zero) => Jalr { rd: Ra, rs, imm: 0 },
+                        (1, rd, rs2) => Add { rd, rs1: rd, rs2 },
                         _ => {
                             return None;
                         }
@@ -1367,7 +1367,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5_2 = (bits >> 9) & 0b1111;
                     let imm = (imm_7_6 << 6) | (imm_5_2 << 2);
                     let imm = imm as i32;
-                    SW { rs1: Sp, rs2, imm }
+                    Sw { rs1: Sp, rs2, imm }
                 }
                 0b111 => {
                     // SDSP
@@ -1376,7 +1376,7 @@ fn decode_16bit_instr(bits: u16) -> Option<Inst> {
                     let imm_5_3 = (bits >> 10) & 0b111;
                     let imm = (imm_8_6 << 6) | (imm_5_3 << 3);
                     let imm = imm as i32;
-                    SD { rs1: Sp, rs2, imm }
+                    Sd { rs1: Sp, rs2, imm }
                 }
                 _ => {
                     return None;
@@ -1407,19 +1407,19 @@ pub fn decode_instr(bits: u32) -> Option<(Inst, u64)> {
 fn is_branch(inst: Inst) -> bool {
     use Inst::*;
 
-    match inst {
-        JAL { .. } => true,
-        JALR { .. } => true,
-        BEQ { .. } => true,
-        BNE { .. } => true,
-        BLT { .. } => true,
-        BGE { .. } => true,
-        BLTU { .. } => true,
-        BGEU { .. } => true,
-        ECALL => true,
-        EBREAK => true,
-        _ => false,
-    }
+    matches!(
+        inst,
+        Jal { .. }
+            | Jalr { .. }
+            | Beq { .. }
+            | Bne { .. }
+            | Blt { .. }
+            | Bge { .. }
+            | Bltu { .. }
+            | Bgeu { .. }
+            | Ecall
+            | Ebreak
+    )
 }
 
 pub type BasicBlock = Vec<(u64, Inst, u8)>;
@@ -1470,4 +1470,3 @@ pub fn decode_basic_block(
 
     Ok(bb)
 }
-

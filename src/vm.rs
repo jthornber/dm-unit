@@ -273,37 +273,37 @@ impl VM {
 
         use Inst::*;
         match inst {
-            LUI { rd, imm } => {
+            Lui { rd, imm } => {
                 self.set_reg(rd, (imm << 12) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            AUIPC { rd, imm } => {
+            Auipc { rd, imm } => {
                 self.set_reg(rd, pc.0.wrapping_add((imm << 12) as i64 as u64));
                 self.inc_pc(pc_increment);
             }
-            JAL { rd, imm } => {
+            Jal { rd, imm } => {
                 let dest = pc.0.wrapping_add(imm as i64 as u64);
                 let ret = pc.0.wrapping_add(pc_increment);
 
                 self.set_reg(PC, dest);
                 self.set_reg(rd, ret);
             }
-            JALR { rd, rs, imm } => {
+            Jalr { rd, rs, imm } => {
                 let dest = self.reg(rs).wrapping_add(imm as i64 as u64);
                 let ret = pc.0.wrapping_add(pc_increment);
 
                 self.set_reg(rd, ret);
                 self.set_reg(PC, dest);
             }
-            BEQ { rs1, rs2, imm } => {
+            Beq { rs1, rs2, imm } => {
                 let dest = self.pc().0.wrapping_add(imm as i64 as u64);
                 self.branch(self.reg(rs1) == self.reg(rs2), dest, pc_increment);
             }
-            BNE { rs1, rs2, imm } => {
+            Bne { rs1, rs2, imm } => {
                 let dest = self.pc().0.wrapping_add(imm as i64 as u64);
                 self.branch(self.reg(rs1) != self.reg(rs2), dest, pc_increment);
             }
-            BLT { rs1, rs2, imm } => {
+            Blt { rs1, rs2, imm } => {
                 let dest = self.pc().0.wrapping_add(imm as i64 as u64);
                 self.branch(
                     (self.reg(rs1) as i64) < (self.reg(rs2) as i64),
@@ -311,7 +311,7 @@ impl VM {
                     pc_increment,
                 );
             }
-            BGE { rs1, rs2, imm } => {
+            Bge { rs1, rs2, imm } => {
                 let dest = self.pc().0.wrapping_add(imm as i64 as u64);
                 self.branch(
                     (self.reg(rs1) as i64) >= (self.reg(rs2) as i64),
@@ -319,15 +319,15 @@ impl VM {
                     pc_increment,
                 );
             }
-            BLTU { rs1, rs2, imm } => {
+            Bltu { rs1, rs2, imm } => {
                 let dest = self.pc().0.wrapping_add(imm as i64 as u64);
                 self.branch(self.reg(rs1) < self.reg(rs2), dest, pc_increment);
             }
-            BGEU { rs1, rs2, imm } => {
+            Bgeu { rs1, rs2, imm } => {
                 let dest = self.pc().0.wrapping_add(imm as i64 as u64);
                 self.branch(self.reg(rs1) >= self.reg(rs2), dest, pc_increment);
             }
-            LB { rd, rs, imm } => {
+            Lb { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -336,7 +336,7 @@ impl VM {
                 self.set_reg(rd, v as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            LH { rd, rs, imm } => {
+            Lh { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -345,7 +345,7 @@ impl VM {
                 self.set_reg(rd, v as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            LW { rd, rs, imm } => {
+            Lw { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -354,7 +354,7 @@ impl VM {
                 self.set_reg(rd, v as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            LD { rd, rs, imm } => {
+            Ld { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -363,7 +363,7 @@ impl VM {
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            LBU { rd, rs, imm } => {
+            Lbu { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -372,7 +372,7 @@ impl VM {
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            LHU { rd, rs, imm } => {
+            Lhu { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -381,7 +381,7 @@ impl VM {
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            LWU { rd, rs, imm } => {
+            Lwu { rd, rs, imm } => {
                 let src = Addr(self.reg(rs).wrapping_add(imm as i64 as u64));
                 let v = self
                     .mem
@@ -390,7 +390,7 @@ impl VM {
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            SB { rs1, rs2, imm } => {
+            Sb { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u8;
                 self.mem
@@ -398,7 +398,7 @@ impl VM {
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
-            SH { rs1, rs2, imm } => {
+            Sh { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u16;
                 self.mem
@@ -406,7 +406,7 @@ impl VM {
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
-            SW { rs1, rs2, imm } => {
+            Sw { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2) as u32;
                 self.mem
@@ -414,7 +414,7 @@ impl VM {
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
-            SD { rs1, rs2, imm } => {
+            Sd { rs1, rs2, imm } => {
                 let dest = Addr(self.reg(rs1).wrapping_add(imm as i64 as u64));
                 let v = self.reg(rs2);
                 self.mem
@@ -422,16 +422,16 @@ impl VM {
                     .map_err(VmErr::BadAccess)?;
                 self.inc_pc(pc_increment);
             }
-            ADDI { rd, rs, imm } => {
+            Addi { rd, rs, imm } => {
                 self.set_reg(rd, self.reg(rs).wrapping_add(imm as i64 as u64));
                 self.inc_pc(pc_increment);
             }
-            ADDIW { rd, rs, imm } => {
+            Addiw { rd, rs, imm } => {
                 let rs = self.reg(rs) as u32;
                 self.set_reg(rd, rs.wrapping_add(imm as u32) as i32 as u32 as u64);
                 self.inc_pc(pc_increment);
             }
-            SLTI { rd, rs, imm } => {
+            Slti { rd, rs, imm } => {
                 let v = if (self.reg(rs) as i64) < (imm as i64) {
                     1
                 } else {
@@ -440,7 +440,7 @@ impl VM {
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
-            SLTIU { rd, rs, imm } => {
+            Sltiu { rd, rs, imm } => {
                 let v = if (self.reg(rs) as u64) < (imm as u64) {
                     1
                 } else {
@@ -449,44 +449,44 @@ impl VM {
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
-            XORI { rd, rs, imm } => {
+            Xori { rd, rs, imm } => {
                 self.set_reg(rd, self.reg(rs) ^ (imm as i64 as u64));
                 self.inc_pc(pc_increment);
             }
-            ORI { rd, rs, imm } => {
+            Ori { rd, rs, imm } => {
                 self.set_reg(rd, self.reg(rs) | (imm as i64 as u64));
                 self.inc_pc(pc_increment);
             }
-            ANDI { rd, rs, imm } => {
+            Andi { rd, rs, imm } => {
                 self.set_reg(rd, self.reg(rs) & (imm as i64 as u64));
                 self.inc_pc(pc_increment);
             }
-            SLLI { rd, rs, shamt } => {
+            Slli { rd, rs, shamt } => {
                 self.set_reg(rd, self.reg(rs) << shamt);
                 self.inc_pc(pc_increment);
             }
-            SRLI { rd, rs, shamt } => {
+            Srli { rd, rs, shamt } => {
                 self.set_reg(rd, self.reg(rs) >> shamt);
                 self.inc_pc(pc_increment);
             }
-            SRAI { rd, rs, shamt } => {
+            Srai { rd, rs, shamt } => {
                 self.set_reg(rd, ((self.reg(rs) as i64) >> shamt) as u64);
                 self.inc_pc(pc_increment);
             }
-            ADD { rd, rs1, rs2 } => {
+            Add { rd, rs1, rs2 } => {
                 self.set_reg(rd, self.reg(rs1).wrapping_add(self.reg(rs2)));
                 self.inc_pc(pc_increment);
             }
-            SUB { rd, rs1, rs2 } => {
+            Sub { rd, rs1, rs2 } => {
                 self.set_reg(rd, self.reg(rs1).wrapping_sub(self.reg(rs2)));
                 self.inc_pc(pc_increment);
             }
-            SLL { rd, rs1, rs2 } => {
+            Sll { rd, rs1, rs2 } => {
                 let shamt = self.reg(rs2) & 0b111111;
                 self.set_reg(rd, self.reg(rs1) << shamt);
                 self.inc_pc(pc_increment);
             }
-            SLT { rd, rs1, rs2 } => {
+            Slt { rd, rs1, rs2 } => {
                 let v = if (self.reg(rs1) as i64) < (self.reg(rs2) as i64) {
                     1
                 } else {
@@ -495,114 +495,114 @@ impl VM {
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
-            SLTU { rd, rs1, rs2 } => {
+            Sltu { rd, rs1, rs2 } => {
                 let v = if self.reg(rs1) < self.reg(rs2) { 1 } else { 0 };
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
-            XOR { rd, rs1, rs2 } => {
+            Xor { rd, rs1, rs2 } => {
                 self.set_reg(rd, self.reg(rs1) ^ self.reg(rs2));
                 self.inc_pc(pc_increment);
             }
-            SRL { rd, rs1, rs2 } => {
+            Srl { rd, rs1, rs2 } => {
                 let shamt = self.reg(rs2) & 0b111111;
                 self.set_reg(rd, self.reg(rs1) >> shamt);
                 self.inc_pc(pc_increment);
             }
-            SRA { rd, rs1, rs2 } => {
+            Sra { rd, rs1, rs2 } => {
                 let shamt = self.reg(rs2) & 0b111111;
                 self.set_reg(rd, ((self.reg(rs1) as i64) >> shamt) as u64);
                 self.inc_pc(pc_increment);
             }
-            OR { rd, rs1, rs2 } => {
+            Or { rd, rs1, rs2 } => {
                 self.set_reg(rd, self.reg(rs1) | self.reg(rs2));
                 self.inc_pc(pc_increment);
             }
-            AND { rd, rs1, rs2 } => {
+            And { rd, rs1, rs2 } => {
                 self.set_reg(rd, self.reg(rs1) & self.reg(rs2));
                 self.inc_pc(pc_increment);
             }
-            SLLIW { rd, rs, shamt } => {
+            Slliw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
                 self.set_reg(rd, (rs << shamt) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SRLIW { rd, rs, shamt } => {
+            Srliw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as u32;
                 self.set_reg(rd, (rs >> shamt) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SRAIW { rd, rs, shamt } => {
+            Sraiw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
                 self.set_reg(rd, ((rs as i32) >> shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            ADDW { rd, rs1, rs2 } => {
+            Addw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 self.set_reg(rd, rs1.wrapping_add(rs2) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SUBW { rd, rs1, rs2 } => {
+            Subw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 self.set_reg(rd, rs1.wrapping_sub(rs2) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SLLW { rd, rs1, rs2 } => {
+            Sllw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 let shamt = rs2 & 0b11111;
                 self.set_reg(rd, (rs1 << shamt) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SRLW { rd, rs1, rs2 } => {
+            Srlw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 let shamt = rs2 & 0b11111;
                 self.set_reg(rd, (rs1 >> shamt) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SRAW { rd, rs1, rs2 } => {
+            Sraw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 let shamt = rs2 & 0b11111;
                 self.set_reg(rd, ((rs1 as i32) >> shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            MUL { rd, rs1, rs2 } => {
+            Mul { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 self.set_reg(rd, rs1.wrapping_mul(rs2));
                 self.inc_pc(pc_increment);
             }
 
-            MULH { rd, rs1, rs2 } => {
+            Mulh { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64 as u128;
                 let rs2 = self.reg(rs2) as i64 as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
-            MULHSU { rd, rs1, rs2 } => {
+            Mulhsu { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64 as u128;
                 let rs2 = self.reg(rs2) as u64 as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
-            MULHU { rd, rs1, rs2 } => {
+            Mulhu { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u64 as u128;
                 let rs2 = self.reg(rs2) as u64 as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
-            DIV { rd, rs1, rs2 } => {
+            Div { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64;
                 let rs2 = self.reg(rs2) as i64;
                 let v = if rs2 == 0 { -1 } else { rs1.wrapping_div(rs2) };
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            DIVU { rd, rs1, rs2 } => {
+            Divu { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 let v = if rs2 == 0 {
@@ -613,35 +613,35 @@ impl VM {
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
-            REM { rd, rs1, rs2 } => {
+            Rem { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64;
                 let rs2 = self.reg(rs2) as i64;
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            REMU { rd, rs1, rs2 } => {
+            Remu { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
-            MULW { rd, rs1, rs2 } => {
+            Mulw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 let v = (rs1 as u32).wrapping_mul(rs2 as u32);
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            DIVW { rd, rs1, rs2 } => {
+            Divw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
                 let v = if rs2 == 0 { -1 } else { rs1.wrapping_div(rs2) };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            DIVUW { rd, rs1, rs2 } => {
+            Divuw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
                 let v = if rs2 == 0 {
@@ -652,125 +652,125 @@ impl VM {
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            REMW { rd, rs1, rs2 } => {
+            Remw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            REMUW { rd, rs1, rs2 } => {
+            Remuw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
-            FENCE {} => {
+            Fence {} => {
                 self.inc_pc(pc_increment);
             }
-            FENCEI {} => {
+            Fencei {} => {
                 self.inc_pc(pc_increment);
             }
 
-            LRW { rd, rs } => {
+            Lrw { rd, rs } => {
                 self.set_reg(rd, self.deref_u32(rs)? as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SCW { rd, rs1, rs2 } => {
+            Scw { rd, rs1, rs2 } => {
                 self.set_deref_u32(rs1, self.reg(rs2) as u32)?;
                 self.set_reg(rd, 0);
                 self.inc_pc(pc_increment);
             }
-            AMOSWAPW { rd, rs1, rs2 } => {
+            Amoswapw { rd, rs1, rs2 } => {
                 let t = self.deref_u32(rs1)?;
                 self.set_deref_u32(rs1, self.reg(rs2) as u32)?;
                 self.set_reg(rd, t as i32 as u32 as u64);
                 self.inc_pc(pc_increment);
             }
-            AMOADDW { rd, rs1, rs2 } => {
+            Amoaddw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, |l, r| l + r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOXORW { rd, rs1, rs2 } => {
+            Amoxorw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, |l, r| l ^ r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOANDW { rd, rs1, rs2 } => {
+            Amoandw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, |l, r| l & r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOORW { rd, rs1, rs2 } => {
+            Amoorw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, |l, r| l | r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMINW { rd, rs1, rs2 } => {
+            Amominw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, |l, r| i32::min(l as i32, r as i32) as u32)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMAXW { rd, rs1, rs2 } => {
+            Amomaxw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, |l, r| i32::max(l as i32, r as i32) as u32)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMINUW { rd, rs1, rs2 } => {
+            Amominuw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, u32::min)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMAXUW { rd, rs1, rs2 } => {
+            Amomaxuw { rd, rs1, rs2 } => {
                 self.amo_op_u32(rd, rs1, rs2, u32::max)?;
                 self.inc_pc(pc_increment);
             }
-            LRD { rd, rs } => {
+            Lrd { rd, rs } => {
                 self.set_reg(rd, self.deref_u64(rs)? as i64 as u64);
                 self.inc_pc(pc_increment);
             }
-            SCD { rd, rs1, rs2 } => {
+            Scd { rd, rs1, rs2 } => {
                 self.set_deref_u64(rs1, self.reg(rs2))?;
                 self.set_reg(rd, 0);
                 self.inc_pc(pc_increment);
             }
-            AMOSWAPD { rd, rs1, rs2 } => {
+            Amoswapd { rd, rs1, rs2 } => {
                 let t = self.deref_u64(rs1)?;
                 self.set_deref_u64(rs1, self.reg(rs2))?;
                 self.set_reg(rd, t);
                 self.inc_pc(pc_increment);
             }
-            AMOADDD { rd, rs1, rs2 } => {
+            Amoaddd { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| l + r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOXORD { rd, rs1, rs2 } => {
+            Amoxord { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| l ^ r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOANDD { rd, rs1, rs2 } => {
+            Amoandd { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| l & r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOORD { rd, rs1, rs2 } => {
+            Amoord { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| l | r)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMIND { rd, rs1, rs2 } => {
+            Amomind { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| i64::min(l as i64, r as i64) as u64)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMAXD { rd, rs1, rs2 } => {
+            Amomaxd { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, |l, r| i64::max(l as i64, r as i64) as u64)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMINUD { rd, rs1, rs2 } => {
+            Amominud { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, u64::min)?;
                 self.inc_pc(pc_increment);
             }
-            AMOMAXUD { rd, rs1, rs2 } => {
+            Amomaxud { rd, rs1, rs2 } => {
                 self.amo_op_u64(rd, rs1, rs2, u64::max)?;
                 self.inc_pc(pc_increment);
             }
-            ECALL => {
+            Ecall => {
                 return Err(VmErr::ECall);
             }
-            EBREAK => {
+            Ebreak => {
                 return Err(VmErr::EBreak);
             }
         }
