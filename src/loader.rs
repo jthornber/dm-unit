@@ -22,60 +22,60 @@ fn next_word(ptr: u64) -> u64 {
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 #[repr(usize)]
 enum RelocationType {
-    RNONE = 0,
+    Rnone = 0,
     R32 = 1,
     R64 = 2,
-    RRELATIVE = 3,
-    RCOPY = 4,
-    RJUMP_SLOT = 5,
-    RTLS_DTPMOD32 = 6,
-    RTLS_DTPMOD64 = 7,
-    RTLS_DTPREL32 = 8,
-    RTLS_DTPREL64 = 9,
-    RTLS_TPREL32 = 10,
-    RTLS_TPREL64 = 11,
-    RBRANCH = 16,
-    RJAL = 17,
-    RCALL = 18,
-    RCALL_PLT = 19,
-    RGOT_HI20 = 20,
-    RTLS_GOT_HI20 = 21,
-    RTLS_GD_HI20 = 22,
-    RPCREL_HI20 = 23,
-    RPCREL_LO12_I = 24,
-    RPCREL_LO12_S = 25,
-    RHI20 = 26,
-    RLO12_I = 27,
-    RLO12_S = 28,
-    RTPREL_HI20 = 29,
-    RTPREL_LO12_I = 30,
-    RTPREL_LO12_S = 31,
-    RTPREL_ADD = 32,
-    RADD8 = 33,
-    RADD16 = 34,
-    RADD32 = 35,
-    RADD64 = 36,
-    RSUB8 = 37,
-    RSUB16 = 38,
-    RSUB32 = 39,
-    RSUB64 = 40,
-    RGNU_VTINHERIT = 41,
-    RGNU_VTENTRY = 42,
-    RALIGN = 43,
-    RRVC_BRANCH = 44,
-    RRVC_JUMP = 45,
-    RLUI = 46,
-    RGPREL_I = 47,
-    RGPREL_S = 48,
-    RTPREL_I = 49,
-    RTPREL_S = 50,
-    RRELAX = 51,
-    RSUB6 = 52,
-    RSET6 = 53,
-    RSET8 = 54,
-    RSET16 = 55,
-    RSET32 = 56,
-    R32_PCREL = 57,
+    Rrelative = 3,
+    Rcopy = 4,
+    Rjump_slot = 5,
+    Rtls_dtpmod32 = 6,
+    Rtls_dtpmod64 = 7,
+    Rtls_dtprel32 = 8,
+    Rtls_dtprel64 = 9,
+    Rtls_tprel32 = 10,
+    Rtls_tprel64 = 11,
+    Rbranch = 16,
+    Rjal = 17,
+    Rcall = 18,
+    Rcall_plt = 19,
+    Rgot_hi20 = 20,
+    Rtls_got_hi20 = 21,
+    Rtls_gd_hi20 = 22,
+    Rpcrel_hi20 = 23,
+    Rpcrel_lo12_i = 24,
+    Rpcrel_lo12_s = 25,
+    Rhi20 = 26,
+    Rlo12_i = 27,
+    Rlo12_s = 28,
+    Rtprel_hi20 = 29,
+    Rtprel_lo12_i = 30,
+    Rtprel_lo12_s = 31,
+    Rtprel_add = 32,
+    Radd8 = 33,
+    Radd16 = 34,
+    Radd32 = 35,
+    Radd64 = 36,
+    Rsub8 = 37,
+    Rsub16 = 38,
+    Rsub32 = 39,
+    Rsub64 = 40,
+    Rgnu_vtinherit = 41,
+    Rgnu_vtentry = 42,
+    Ralign = 43,
+    Rrvc_branch = 44,
+    Rrvc_jump = 45,
+    Rlui = 46,
+    Rgprel_i = 47,
+    Rgprel_s = 48,
+    Rtprel_i = 49,
+    Rtprel_s = 50,
+    Rrelax = 51,
+    Rsub6 = 52,
+    Rset6 = 53,
+    Rset8 = 54,
+    Rset16 = 55,
+    Rset32 = 56,
+    R32_pcrel = 57,
 }
 
 impl From<u32> for RelocationType {
@@ -139,12 +139,12 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
     let mut compound = Vec::new();
     while i < rlocs.len() {
         let rloc = &rlocs[i];
-        if rloc.rtype == RPCREL_HI20 {
+        if rloc.rtype == Rpcrel_hi20 {
             // the next entry is probably the corresponding lo12
             i += 1;
             if i < rlocs.len() {
                 let rloc2 = &rlocs[i];
-                if rloc2.rtype == RPCREL_LO12_I {
+                if rloc2.rtype == Rpcrel_lo12_i {
                     compound.push(CompoundRel::Pair(rloc.clone(), rloc2.clone()));
                     i += 1;
                 } else {
@@ -387,7 +387,7 @@ impl<'a> Loader<'a> {
             R64 => {
                 self.mutate_u64(location, |_old| sym.0)?;
             }
-            RBRANCH => {
+            Rbranch => {
                 let offset = addr_offset(sym, location) as u32;
 
                 let imm12 = (offset & 0x1000) << (31 - 12);
@@ -398,7 +398,7 @@ impl<'a> Loader<'a> {
                     (old & 0x1fff07f) | imm12 | imm11 | imm10_5 | imm4_1
                 })?;
             }
-            RJAL => {
+            Rjal => {
                 let offset = addr_offset(sym, location) as u32;
                 let imm20 = (offset & 0x100000) << (31 - 20);
                 let imm19_12 = offset & 0xff000;
@@ -408,7 +408,7 @@ impl<'a> Loader<'a> {
                     (old & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
                 })?;
             }
-            RCALL => {
+            Rcall => {
                 let offset = addr_offset(sym, location);
 
                 let hi20: u32 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
@@ -417,23 +417,23 @@ impl<'a> Loader<'a> {
                 let location = Addr(location.0 + 4);
                 self.mutate_u32(location, |old| (old & 0xfffff) | (lo12 << 20))?;
             }
-            RPCREL_HI20 => {
+            Rpcrel_hi20 => {
                 let offset = addr_offset(sym, location);
                 let hi20 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
                 self.mutate_u32(location, |old| (old & 0xfff) | hi20)?;
             }
-            RPCREL_LO12_I => {
+            Rpcrel_lo12_i => {
                 self.mutate_u32(location, |old| {
                     (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
                 })?;
             }
-            RADD32 => {
+            Radd32 => {
                 self.mutate_u32(location, |old| old + sym.0 as u32)?;
             }
-            RSUB32 => {
+            Rsub32 => {
                 self.mutate_u32(location, |old| old.wrapping_sub(sym.0 as u32))?;
             }
-            RRVC_BRANCH => {
+            Rrvc_branch => {
                 let offset = addr_offset(sym, location) as u16;
 
                 let imm8 = (offset & 0x100) << (12 - 8);
@@ -445,7 +445,7 @@ impl<'a> Loader<'a> {
                     (old & 0xe383) | imm8 | imm7_6 | imm5 | imm4_3 | imm2_1
                 })?;
             }
-            RRVC_JUMP => {
+            Rrvc_jump => {
                 let offset = addr_offset(sym, location) as u16;
 
                 let imm11 = (offset & 0x800) << (12 - 11);
