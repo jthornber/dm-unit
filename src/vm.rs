@@ -263,7 +263,7 @@ impl VM {
         if self.breakpoints.contains(&pc) {
             if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
                 self.last_bp = Some(pc);
-                debug!("hit breakpoint at {:?}", pc);
+                // debug!("hit breakpoint at {:?}", pc);
                 return Err(VmErr::Breakpoint);
             }
         } else if self.last_bp.is_some() && pc != self.last_bp.unwrap() {

@@ -156,7 +156,7 @@ impl Fixture {
                 Err(anyhow!("call complete, exiting"))
             };
 
-            self.at_addr(exit_addr, Box::new(callback));
+            self.bp_at_addr(exit_addr, Box::new(callback));
         }
 
         let result = self.run_vm();
@@ -169,7 +169,7 @@ impl Fixture {
             Err(e) => {
                 let completed = completed.lock().unwrap();
                 if *completed {
-                    // FIXME: pop Ra from the stack
+                    self.bp_rm(exit_addr);
                     Ok(())
                 } else {
                     Err(e)
@@ -208,14 +208,20 @@ impl Fixture {
         }
         Ok(())
     }
-    pub fn at_addr(&mut self, loc: Addr, callback: FixCallback) {
+
+    pub fn bp_at_addr(&mut self, loc: Addr, callback: FixCallback) {
         self.vm.add_breakpoint(loc);
         self.breakpoints.insert(loc.0, callback);
     }
 
+    pub fn bp_rm(&mut self, loc: Addr) {
+        self.vm.rm_breakpoint(loc);
+        self.breakpoints.remove(&loc.0);
+    }
+
     pub fn at_func(&mut self, name: &str, callback: FixCallback) -> Result<()> {
         let func_addr = self.lookup_fn(name)?;
-        self.at_addr(func_addr, callback);
+        self.bp_at_addr(func_addr, callback);
         Ok(())
     }
 
@@ -285,7 +291,7 @@ impl Fixture {
         };
 
         self.at_func(func, Box::new(entry_callback))?;
-        self.at_addr(trampoline, Box::new(exit_callback));
+        self.bp_at_addr(trampoline, Box::new(exit_callback));
 
         Ok(())
     }
