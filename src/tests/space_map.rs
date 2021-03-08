@@ -24,9 +24,6 @@ fn stats_report(fix: &Fixture, baseline: &Stats, desc: &str, count: u64) {
 }
 
 fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
-    fix.trace_func("sm_metadata_new_block")?;
-    fix.trace_func("sm_metadata_new_block_")?;
-
     standard_globals(fix)?;
 
     let count = 10000;

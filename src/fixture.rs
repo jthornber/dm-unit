@@ -124,18 +124,26 @@ impl Fixture {
         }
     }
 
-    // Call a named function in the vm.  Returns the contents of Ra.
-    pub fn call_at(&mut self, code: Addr) -> Result<()> {
-        use Reg::*;
-
+    // Sometimes we need a unique location to set a breakpoint, to do this
+    // we allocate a word on the heap and fill it out with an ebreak.
+    fn alloc_ebreak(&mut self) -> Result<Addr> {
         // We need a unique address return control to us.
-        let exit_addr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
+        let ptr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
 
         // Fill out a c.ebreak at this address because basic blocks are decoded
         // before breakpoints are checked.
         let ret: u16 = 0b1001000000000010;
         let bytes = (ret as u32).to_le_bytes();
-        self.vm.mem.write(exit_addr, &bytes, 0)?;
+        self.vm.mem.write(ptr, &bytes, 0)?;
+        Ok(ptr)
+    }
+
+    // Call a named function in the vm.  Returns the contents of Ra.
+    pub fn call_at(&mut self, code: Addr) -> Result<()> {
+        use Reg::*;
+
+        // We need a unique address return control to us.
+        let exit_addr = self.alloc_ebreak()?;
 
         self.vm.push_reg(Ra)?;
         self.vm.set_reg(Ra, exit_addr.0);
@@ -260,7 +268,7 @@ impl Fixture {
     /// is returned to where we can set the breakpoint.
     pub fn trace_func(&mut self, func: &str) -> Result<()> {
         let name = func.to_string();
-        let trampoline = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
+        let trampoline = self.alloc_ebreak()?;
 
         let entry_callback = {
             let name = name.clone();
