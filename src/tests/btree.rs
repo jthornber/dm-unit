@@ -1,4 +1,3 @@
-use crate::decode::*;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::memory::*;
@@ -18,14 +17,13 @@ use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
 use std::io;
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
-use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
 
@@ -514,116 +512,9 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-// comsume_cursor() tests
-fn test_cc_empty_cursor_fails(fix: &mut Fixture) -> Result<()> {
-    let mut cursor = CopyCursor {
-        index: 0,
-        entries: Vec::new(),
-    };
-
-    ensure!(consume_cursor(fix, &mut cursor, 1).is_err());
-    Ok(())
-}
-
-fn test_cc_one_entry(fix: &mut Fixture) -> Result<()> {
-    let mk_cursor = |begin, end| CursorEntry {
-        node: Addr(0),
-        begin,
-        end,
-    };
-
-    let mut cursor = CopyCursor {
-        index: 0,
-        entries: vec![mk_cursor(0, 1024)],
-    };
-
-    let after = CopyCursor {
-        index: 0,
-        entries: vec![mk_cursor(16, 1024)],
-    };
-
-    consume_cursor(fix, &mut cursor, 16)?;
-    ensure!(cursor == after);
-
-    let after = CopyCursor {
-        index: 0,
-        entries: vec![mk_cursor(512, 1024)],
-    };
-    consume_cursor(fix, &mut cursor, 512 - 16)?;
-    ensure!(cursor == after);
-
-    let after = CopyCursor {
-        index: 1,
-        entries: vec![mk_cursor(512, 1024)],
-    };
-    consume_cursor(fix, &mut cursor, 512)?;
-    ensure!(cursor == after);
-
-    // There should be no more entries
-    ensure!(consume_cursor(fix, &mut cursor, 1).is_err());
-
-    Ok(())
-}
-
-fn test_cc_two_entries(fix: &mut Fixture) -> Result<()> {
-    let mk_cursor = |begin, end| CursorEntry {
-        node: Addr(0),
-        begin,
-        end,
-    };
-
-    let mut cursor = CopyCursor {
-        index: 0,
-        entries: vec![mk_cursor(0, 10), mk_cursor(34, 96)],
-    };
-
-    let after = CopyCursor {
-        index: 1,
-        entries: vec![mk_cursor(0, 10), mk_cursor(36, 96)],
-    };
-
-    consume_cursor(fix, &mut cursor, 12)?;
-    ensure!(cursor == after);
-
-    let after = CopyCursor {
-        index: 1,
-        entries: vec![mk_cursor(0, 10), mk_cursor(46, 96)],
-    };
-
-    consume_cursor(fix, &mut cursor, 10)?;
-    ensure!(cursor == after);
-
-    // Insufficient entries
-    ensure!(consume_cursor(fix, &mut cursor, 100).is_err());
-
-    Ok(())
-}
-
-fn test_cc_multiple_entries(fix: &mut Fixture) -> Result<()> {
-    let mk_cursor = |begin, end| CursorEntry {
-        node: Addr(0),
-        begin,
-        end,
-    };
-
-    let mut cursor = CopyCursor {
-        index: 0,
-        entries: vec![mk_cursor(0, 10), mk_cursor(34, 96), mk_cursor(17, 34)],
-    };
-
-    let after = CopyCursor {
-        index: 2,
-        entries: vec![mk_cursor(0, 10), mk_cursor(34, 96), mk_cursor(20, 34)],
-    };
-
-    consume_cursor(fix, &mut cursor, 10 + (96 - 34) + 3)?;
-    ensure!(cursor == after);
-
-    Ok(())
-}
-
 //-------------------------------
 
+/*
 fn mk_node(fix: &mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
     let header = NodeHeader {
         block: 1,
@@ -759,6 +650,7 @@ fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
 
     Ok(())
 }
+*/
 
 //-------------------------------
 
@@ -793,23 +685,6 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("random", test_insert_random)
             test!("runs", test_insert_runs)
         }
-
-        test_section! {
-            "consume_cursor/",
-            test!(
-                "empty-cursor-fails",
-                test_cc_empty_cursor_fails
-            )
-            test!("one-entry", test_cc_one_entry)
-            test!("two-entries", test_cc_two_entries)
-            test!("multiple-entries", test_cc_multiple_entries)
-        }
-
-        test!("redistribute-entries", test_redistribute_entries)
-        test!(
-            "split_one_into_two/bad-redistribute",
-            test_split_one_into_two_bad_redistribute
-        )
     };
 
     Ok(())
