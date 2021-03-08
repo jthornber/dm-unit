@@ -108,6 +108,13 @@ pub struct BMInner {
 
     pub nr_read_locks: u64,
     pub nr_write_locks: u64,
+    pub nr_prepares: u64,
+}
+
+impl Drop for BMInner {
+    fn drop(&mut self) {
+        info!("{} prepares", self.nr_prepares);
+    }
 }
 
 impl BMInner {
@@ -117,6 +124,7 @@ impl BMInner {
             locks: BTreeMap::new(),
             nr_read_locks: 0,
             nr_write_locks: 0,
+            nr_prepares: 0,
         }
     }
 
@@ -151,8 +159,7 @@ impl BMInner {
         }
     }
 
-    // FIXME: self isn't used
-    fn v_prep(&self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
+    fn v_prep(&mut self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
         use Reg::*;
 
         if v_ptr.is_null() {
@@ -169,6 +176,7 @@ impl BMInner {
             fix.call_at(v.prepare)?;
         }
 
+        self.nr_prepares += 1;
         Ok(())
     }
 
