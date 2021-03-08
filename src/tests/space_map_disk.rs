@@ -36,6 +36,14 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
     let sm_disk = dm_sm_disk_create(fix, tm, nr_data_blocks)?;
     let mut sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
 
+    let nr_blocks = sm_get_nr_blocks(fix, sm_disk)?;
+    let nr_free = sm_get_nr_free(fix, sm_disk)?;
+    info!("sm_disk initial status: nr_blocks={}, nr_free={}", nr_blocks, nr_free);
+
+    let nr_blocks = sm_get_nr_blocks(fix, _sm)?;
+    let nr_free = sm_get_nr_free(fix, _sm)?;
+    info!("sm_metadata initial status: nr_blocks={}, nr_free={}", nr_blocks, nr_free);
+
     let commit_interval = 1000;
 
     let mut baseline = Stats::collect_stats(fix);
@@ -55,6 +63,15 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
             dm_tm_commit(fix, tm, sb)?;
             sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
             commit_count = commit_interval;
+
+            let nr_blocks = sm_get_nr_blocks(fix, sm_disk)?;
+            let nr_free = sm_get_nr_free(fix, sm_disk)?;
+            info!("sm_disk nr_blocks={}, nr_free={}", nr_blocks, nr_free);
+
+            let nr_blocks = sm_get_nr_blocks(fix, _sm)?;
+            let nr_free = sm_get_nr_free(fix, _sm)?;
+            info!("sm_meta nr_blocks={}, nr_free={}", nr_blocks, nr_free);
+
             baseline = Stats::collect_stats(fix);
         }
     }
