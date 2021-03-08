@@ -211,7 +211,9 @@ impl<'a> TestRunner<'a> {
                 println!(" FAIL");
                 info!("{}", e);
                 debug!("{}", fix.vm);
+                drop(fix);
             } else {
+                drop(fix);
                 pass += 1;
                 println!(" PASS");
             }

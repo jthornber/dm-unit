@@ -1,6 +1,8 @@
 use crate::decode::*;
 use crate::memory::*;
 
+use log::*;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
@@ -9,7 +11,7 @@ use thiserror::Error;
 //-----------------------------
 
 pub struct InstCache {
-    basic_blocks: BTreeMap<u64, Rc<BasicBlock>>,
+    basic_blocks: BTreeMap<u64, Rc<RefCell<BasicBlock>>>,
 }
 
 impl InstCache {
@@ -21,20 +23,18 @@ impl InstCache {
 
     /// If loc occurs in any other block (eg, jumping back in a loop),
     /// that that block will be truncated.
-    pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Rc<BasicBlock> {
-        let r = Rc::new(bb);
+    pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Rc<RefCell<BasicBlock>> {
+        let r = Rc::new(RefCell::new(bb));
         self.basic_blocks.insert(loc, r.clone());
         r
     }
 
-    pub fn get(&self, loc: u64) -> Option<Rc<BasicBlock>> {
+    pub fn get(&self, loc: u64) -> Option<Rc<RefCell<BasicBlock>>> {
         self.basic_blocks.get(&loc).map(|rc| rc.clone())
     }
 
     /// Removes any blocks that contain loc (there can be only one).
-    pub fn invalidate(&mut self, _loc: u64) {
-
-    }
+    pub fn invalidate(&mut self, _loc: u64) {}
 }
 
 //-----------------------------
@@ -52,6 +52,17 @@ pub struct VM {
     last_bp: Option<Addr>,
     pub stats: Stats,
     inst_cache: InstCache,
+    next_bb_hits: u64,
+    next_bb_misses: u64,
+}
+
+impl Drop for VM {
+    fn drop(&mut self) {
+        let hits = self.next_bb_hits as f64;
+        let total = (self.next_bb_misses + self.next_bb_hits) as f64;
+        let percent = (hits * 100.0) / total;
+        debug!("next bb hits {:.0}%", percent);
+    }
 }
 
 impl fmt::Display for VM {
@@ -137,6 +148,8 @@ impl VM {
             last_bp: None,
             stats: Stats { instrs: 0 },
             inst_cache: InstCache::new(),
+            next_bb_hits: 0,
+            next_bb_misses: 0,
         }
     }
 
@@ -802,7 +815,7 @@ impl VM {
         Ok(())
     }
 
-    fn exec_bb(&mut self) -> Result<()> {
+    fn find_bb(&mut self) -> Result<Rc<RefCell<BasicBlock>>> {
         let pc = self.pc();
         let bb = match self.inst_cache.get(pc.0) {
             None => {
@@ -819,6 +832,31 @@ impl VM {
             Some(bb) => bb,
         };
 
+        Ok(bb)
+    }
+
+    fn follow_or_find_bb(
+        &mut self,
+        prev_bb: &Option<Rc<RefCell<BasicBlock>>>,
+    ) -> Result<Rc<RefCell<BasicBlock>>> {
+        let pc = self.pc();
+        if let Some(prev_bb) = prev_bb {
+            let prev_bb = prev_bb.borrow();
+            if let Some(next) = prev_bb.next.upgrade() {
+                if next.borrow().begin == pc.0 {
+                    self.next_bb_hits += 1;
+                    return Ok(next);
+                }
+            }
+        }
+
+        self.next_bb_misses += 1;
+        self.find_bb()
+    }
+
+    fn exec_bb(&mut self, bb: &Rc<RefCell<BasicBlock>>) -> Result<()> {
+        let pc = self.pc();
+        let bb = bb.borrow();
         if bb.breakpoint {
             if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
                 self.last_bp = Some(pc);
@@ -836,8 +874,17 @@ impl VM {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        let mut prev_bb: Option<Rc<RefCell<BasicBlock>>> = None;
         loop {
-            self.exec_bb()?;
+            let bb = self.follow_or_find_bb(&prev_bb)?;
+
+            if let Some(prev_bb) = prev_bb {
+                let mut prev_bb = prev_bb.borrow_mut();
+                prev_bb.next = Rc::downgrade(&bb);
+            }
+
+            self.exec_bb(&bb)?;
+            prev_bb = Some(bb);
         }
     }
 

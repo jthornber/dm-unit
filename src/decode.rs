@@ -1,8 +1,10 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use log::*;
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Cursor;
+use std::rc::Weak;
 
 //-------------------------------
 
@@ -1435,6 +1437,10 @@ pub struct BasicBlock {
     pub breakpoint: bool,
 
     pub instrs: Vec<(Inst, u8)>,
+
+    // The bb that was executed after this one, might save
+    // a lookup in the bb cache.
+    pub next: Weak<RefCell<BasicBlock>>,
 }
 
 /// Decodes a basic block.  Returns an error if it can't decode at least one instruction.
@@ -1493,6 +1499,7 @@ pub fn decode_basic_block(
         end: pc,
         breakpoint: is_bp,
         instrs,
+        next: Weak::new(),
     })
 }
 
