@@ -304,7 +304,7 @@ struct BTreeTest<'a> {
     bm: Addr,
     tm: Addr,
     sm: Addr,
-    sb: Addr,
+    sb: Option<Addr>,
     info: BTreeInfo<Value64>,
     root: u64,
     baseline: Stats,
@@ -314,7 +314,6 @@ impl<'a> BTreeTest<'a> {
     fn new(fix: &'a mut Fixture) -> Result<Self> {
         let bm = dm_bm_create(fix, 1024)?;
         let (tm, sm) = dm_tm_create(fix, bm, 0)?;
-        let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
 
         // FIXME: we should increment the superblock within the sm
 
@@ -338,11 +337,20 @@ impl<'a> BTreeTest<'a> {
             bm,
             tm,
             sm,
-            sb,
+            sb: None,
             info,
             root,
             baseline,
         })
+    }
+
+    fn begin(&mut self) -> Result<()> {
+        if self.sb.is_some() {
+            return Err(anyhow!("transaction already begun"));
+        }
+
+        self.sb = Some(dm_bm_write_lock_zero(self.fix, self.bm, 0, Addr(0))?);
+        Ok(())
     }
 
     fn insert(&mut self, key: u64) -> Result<()> {
@@ -367,8 +375,8 @@ impl<'a> BTreeTest<'a> {
 
     fn commit(&mut self) -> Result<()> {
         dm_tm_pre_commit(self.fix, self.tm)?;
-        dm_tm_commit(self.fix, self.tm, self.sb)?;
-        self.sb = dm_bm_write_lock_zero(self.fix, self.bm, 0, Addr(0))?;
+        dm_tm_commit(self.fix, self.tm, self.sb.unwrap())?;
+        self.sb = None;
         Ok(())
     }
 
@@ -396,7 +404,9 @@ impl<'a> BTreeTest<'a> {
 
 impl<'a> Drop for BTreeTest<'a> {
     fn drop(&mut self) {
-        dm_bm_unlock(self.fix, self.sb).expect("unlock superblock");
+        if let Some(sb) = self.sb {
+            dm_bm_unlock(self.fix, sb).expect("unlock superblock");
+        }
         dm_tm_destroy(self.fix, self.tm).expect("destroy tm");
         dm_bm_destroy(self.fix, self.bm).expect("destroy bm");
     }
@@ -418,15 +428,18 @@ fn do_insert_test_(
     let mut commit_counter = commit_interval;
     for pass in 0..pass_count {
         bt.stats_start();
+        bt.begin()?;
         for k in keys {
             bt.insert(*k)?;
 
             if commit_counter == 0 {
                 bt.commit()?;
+                bt.begin()?;
                 commit_counter = commit_interval;
             }
             commit_counter -= 1;
         }
+        bt.commit()?;
 
         let residency = bt.residency()?;
         if residency < target_residency {
@@ -437,9 +450,8 @@ fn do_insert_test_(
         bt.stats_report(desc, keys.len() as u64)?;
     }
 
-    bt.commit()?;
-
     // Lookup
+    bt.begin()?;
     bt.stats_start();
     for k in keys {
         bt.lookup(*k)?;
@@ -612,7 +624,7 @@ fn test_cc_multiple_entries(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-fn mk_node(fix: & mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
+fn mk_node(fix: &mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
     let header = NodeHeader {
         block: 1,
         is_leaf: true,

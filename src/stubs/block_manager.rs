@@ -155,7 +155,7 @@ pub fn bm_block_data(fix: &mut Fixture) -> Result<()> {
 pub fn bm_flush(fix: &mut Fixture) -> Result<()> {
     let _bm_ptr = Addr(fix.vm.reg(A0));
     let bm = get_bm()?;
-    bm.flush();
+    bm.flush(fix)?;
 
     fix.vm.ret(0);
     Ok(())

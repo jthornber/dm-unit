@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::result;
 use thiserror::Error;
+use log::*;
 
 use crate::primitive::Primitive;
 
@@ -92,6 +93,16 @@ impl MMap {
         Ok(())
     }
 
+    /// Changes the permissions of a mapped region.
+    fn change_perms(&mut self, begin: u64, end: u64, mut perms: u8) -> Result<u8> {
+        if (begin != self.begin) || (end - begin != self.bytes.len() as u64) {
+            return Err(MemErr::OutOfBounds);
+        }
+
+        std::mem::swap(&mut perms, &mut self.perms);
+        Ok(perms)
+    }
+
     /// Reads data from the region.  Fails if all the data can't be read
     /// from this region, or if any of the perms are not present.
     fn read(&self, begin: u64, bytes: &mut [u8], perms: u8) -> Result<()> {
@@ -119,6 +130,19 @@ impl MMap {
         let slice = &mut self.bytes[((begin - self.begin) as usize)..((end - self.begin) as usize)];
         slice.copy_from_slice(bytes);
 
+        Ok(())
+    }
+
+    fn zero(&mut self, begin: u64, end: u64, perms: u8) -> Result<()> {
+        assert!(begin >= self.begin);
+        assert!(end <= self.end);
+
+        self.check_perms(begin, perms)?;
+
+        let slice = &mut self.bytes[((begin - self.begin) as usize)..((end - self.begin) as usize)];
+        unsafe {
+            std::ptr::write_bytes(slice.as_ptr() as *mut u8, 0, (end - begin) as usize);
+        }
         Ok(())
     }
 
@@ -183,7 +207,7 @@ impl Memory {
         }
     }
 
-/*
+    /*
     // Checks there are no mappings in a particular range
     fn no_mappings(&self, begin: u64, end: u64) -> bool {
         let mut cur = self.mmaps.upper_bound(Bound::Included(&begin));
@@ -279,9 +303,9 @@ impl Memory {
         Ok(mm)
     }
 
-    fn get_mut_mmap<F>(&mut self, begin: u64, end: u64, perms: u8, func: F) -> Result<()>
+    fn get_mut_mmap<F, V>(&mut self, begin: u64, end: u64, perms: u8, func: F) -> Result<V>
     where
-        F: FnOnce(RefMut<MMap>) -> Result<()>,
+        F: FnOnce(RefMut<MMap>) -> Result<V>,
     {
         let cursor = self.mmaps.upper_bound_mut(Bound::Included(&begin));
 
@@ -305,6 +329,15 @@ impl Memory {
         let mm = self.get_mmap(begin.0, end.0, perms)?;
         mm.check_perms(begin.0, perms)?;
         Ok(())
+    }
+
+    /// Changes the permissions of a single mapped region.
+    pub fn change_perms(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<u8> {
+        let begin = begin.0;
+        let end = end.0;
+        self.get_mut_mmap(begin, end, 0, |mut mm| {
+              mm.change_perms(begin, end, perms)
+        })
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
@@ -342,6 +375,17 @@ impl Memory {
         self.get_mut_mmap(begin, end, perms, |mut mm| {
             let len = end - begin;
             mm.write(begin, &bytes[0..(len as usize)], perms)?;
+            Ok(())
+        })
+    }
+
+    /// Zeroes a part of a single mmapped region.  Similar to write, but faster.
+    pub fn zero(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
+        let begin = begin.0;
+        let end = end.0;
+
+        self.get_mut_mmap(begin, end, perms, |mut mm| {
+            mm.zero(begin, end, perms)?;
             Ok(())
         })
     }
