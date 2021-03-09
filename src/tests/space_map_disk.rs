@@ -29,7 +29,7 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
 
     standard_globals(fix)?;
 
-    let nr_metadata_blocks = 100;
+    let nr_metadata_blocks = 1;
     let nr_data_blocks = nr_metadata_blocks * 16320;
     let bm = dm_bm_create(fix, nr_metadata_blocks + 1000)?;
     let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
