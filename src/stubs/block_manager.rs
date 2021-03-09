@@ -197,11 +197,13 @@ pub fn bm_checksum(fix: &mut Fixture) -> Result<()> {
     let len = fix.vm.reg(A1);
     let init_xor = fix.vm.reg(A2) as u32;
 
-    let mut buf = vec![0u8; len as usize];
-    fix.vm.mem.read(data, &mut buf, PERM_READ)?;
-    let mut csum = crc32c(&buf) ^ 0xffffffff;
-    csum ^= init_xor;
+    let calc_csum = |bytes: &[u8]| {
+        let mut csum = crc32c(&bytes[0..len as usize]) ^ 0xffffffff;
+        csum ^= init_xor;
+        csum
+    };
 
+    let csum = fix.vm.mem.read_some(data, PERM_READ, calc_csum)?;
     fix.vm.ret(csum as u64);
     Ok(())
 }
