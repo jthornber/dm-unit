@@ -661,7 +661,7 @@ impl VM {
                 let rs1 = self.reg(rs1);
                 let rs2 = self.reg(rs2);
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
-                self.set_reg(rd, v as u64);
+                self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
             Mulw { rd, rs1, rs2 } => {
