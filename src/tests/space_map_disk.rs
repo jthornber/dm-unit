@@ -80,30 +80,7 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    let mut prefix: Vec<&'static str> = Vec::new();
-
-    macro_rules! test_section {
-        ($path:expr, $($s:stmt)*) => {{
-            prefix.push($path);
-            $($s)*
-            prefix.pop().unwrap();
-        }}
-    }
-
-    macro_rules! test {
-        ($path:expr, $func:expr) => {{
-            prefix.push($path);
-            let p = prefix.concat();
-            prefix.pop().unwrap();
-            runner.register(&p, Box::new($func));
-        }};
-    }
-
-    test_section! {
-        "/pdata/sm-disk/",
-        test!("commit-cost", test_commit_cost)
-    };
-
+    runner.register("/pdata/sm-disk/commit-cost", Box::new(test_commit_cost));
     Ok(())
 }
 
