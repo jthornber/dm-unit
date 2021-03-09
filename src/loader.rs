@@ -192,8 +192,7 @@ impl<'a> Loader<'a> {
         // Build a vector of symbols for each section.
         let mut syms_by_section = BTreeMap::new();
         for (index, s) in syms.iter().enumerate() {
-            syms_by_section.entry(s.shndx).or_insert_with(Vec::new);
-            let v = syms_by_section.get_mut(&s.shndx).unwrap();
+            let v = syms_by_section.entry(s.shndx).or_insert_with(Vec::new);
             v.push(index);
         }
 
