@@ -120,11 +120,11 @@ pub fn sm_get_nr_free(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
-pub fn sm_commit(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
+pub fn sm_commit(fix: &mut Fixture, sm_ptr: Addr) -> Result<()> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
     fix.call_at_with_errno(sm.commit)?;
-    Ok(0)
+    Ok(())
 }
 
 //-------------------------------
