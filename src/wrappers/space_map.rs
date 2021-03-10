@@ -12,6 +12,10 @@ use Reg::*;
 
 //-------------------------------
 
+pub const ENTRIES_PER_BLOCK: u32 = 16320;
+
+//-------------------------------
+
 pub struct SpaceMap {
     destroy: Addr,
     extend: Addr,
