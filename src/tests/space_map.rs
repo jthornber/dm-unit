@@ -7,7 +7,7 @@ use crate::wrappers::block_manager::*;
 use crate::wrappers::space_map::*;
 use crate::wrappers::transaction_manager::*;
 
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use log::*;
 
 //-------------------------------
@@ -21,6 +21,31 @@ fn stats_report(fix: &Fixture, baseline: &Stats, desc: &str, count: u64) {
         delta.read_locks as f64 / count as f64,
         delta.write_locks as f64 / count as f64
     );
+}
+
+fn test_boundary_size(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let nr_meta_blocks = ENTRIES_PER_BLOCK as u64;
+    let bm = dm_bm_create(fix, nr_meta_blocks)?;
+    let (tm, sm_meta) = dm_tm_create(fix, bm, 0)?;
+    let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+
+    ensure!(nr_meta_blocks == sm_get_nr_blocks(fix, sm_meta)?);
+
+    let nr_free = sm_get_nr_free(fix, sm_meta)?;
+    for _ in 0..nr_free {
+        let _b = sm_new_block(fix, sm_meta)?;
+    }
+
+    dm_tm_pre_commit(fix, tm)?;
+    dm_tm_commit(fix, tm, sb)?;
+    dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+
+    ensure!(nr_meta_blocks == sm_get_nr_blocks(fix, sm_meta)?);
+    ensure!(0 == sm_get_nr_free(fix, sm_meta)?);
+
+    Ok(())
 }
 
 fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
@@ -80,6 +105,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
 
     test_section! {
         "/pdata/space-map/",
+        test!("boundary-size", test_boundary_size)
         test!("commit-cost", test_commit_cost)
     };
 
