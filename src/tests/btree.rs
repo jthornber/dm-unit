@@ -17,13 +17,14 @@ use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
 use std::io;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
+use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
 
@@ -92,11 +93,6 @@ impl<V: Unpack> NodeVisitor<V> for ResidencyVisitor {
     fn end_walk(&self) -> btree::Result<()> {
         Ok(())
     }
-}
-
-fn calc_max_entries<V: Unpack>() -> usize {
-    let elt_size = 8 + V::disk_size() as usize; // key + value size
-    ((BLOCK_SIZE - NodeHeader::disk_size() as usize) / elt_size) as usize
 }
 
 // Because this is a walk it implicitly checks the btree.  Returns
@@ -512,10 +508,7 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-//-------------------------------
-
-/*
-fn mk_node(fix: &mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
+fn mk_node(fix: &mut Fixture, key_begin: u64, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
     let header = NodeHeader {
         block: 1,
         is_leaf: true,
@@ -523,8 +516,8 @@ fn mk_node(fix: &mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
         max_entries: calc_max_entries::<Value64>() as u32,
         value_size: Value64::guest_len() as u32,
     };
-    let keys: Vec<u64> = (0..nr_entries as u64).collect();
-    let values: Vec<Value64> = (0..nr_entries as u64).map(Value64).collect();
+    let keys: Vec<u64> = (key_begin..key_begin + nr_entries as u64).collect();
+    let values: Vec<Value64> = (key_begin..key_begin + nr_entries as u64).map(Value64).collect();
     let node = Node::Leaf {
         header,
         keys,
@@ -542,6 +535,39 @@ fn mk_node(fix: &mut Fixture, nr_entries: usize) -> Result<(AutoGPtr, Addr)> {
     Ok((fix, block))
 }
 
+fn get_node<V: Unpack>(fix: &mut Fixture, block: Addr, ignore_non_fatal: bool) -> Result<Node<V>> {
+    let node = fix.vm.mem.read_some(block, PERM_READ, |bytes| {
+        unpack_node(&[0], bytes, ignore_non_fatal, false)
+    })??;
+
+    Ok(node)
+}
+
+fn check_node(node: &Node<Value64>, key_begin: u64, nr_entries: usize) -> Result<()> {
+    let header = node.get_header();
+    ensure!(nr_entries as u32 == header.nr_entries);
+    ensure!(header.is_leaf);
+
+    let mut i = key_begin;
+    for key in node.get_keys().iter() {
+        ensure!(*key == i);
+        i += 1;
+    }
+
+    if let Node::<Value64>::Leaf {values, ..} = node {
+        i = key_begin;
+        for value in values.iter() {
+            ensure!((*value).0 == i);
+            i += 1;
+        }
+    }
+
+    Ok(())
+}
+
+//-------------------------------
+
+/*
 #[derive(Debug, PartialEq, Eq)]
 struct Move {
     dest: Addr,
@@ -629,8 +655,9 @@ fn do_redistribute_2(fix: &mut Fixture, lhs_count: u32, rhs_count: u32) -> Resul
     info!("src: {:?}", src);
     do_redistribute_test(&mut *fix, dest, src)
 }
+*/
 
-fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
+/*fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
     do_redistribute_2(fix, 0, 100)?;
@@ -641,10 +668,52 @@ fn test_redistribute_entries(fix: &mut Fixture) -> Result<()> {
     info!("100, 0");
     do_redistribute_2(fix, 100, 0)?;
     Ok(())
+}*/
+
+//-------------------------------
+
+fn test_redistribute_2(fix: &mut Fixture, nr_left: usize, nr_right: usize) -> Result<()> {
+    standard_globals(fix)?;
+
+    let total = nr_left + nr_right;
+    let target_left = total / 2;
+    let target_right = total - target_left;
+
+    let (mut fix, left_ptr) = mk_node(fix, 0u64, nr_left)?;
+    let (mut fix, right_ptr) = mk_node(&mut *fix, nr_left as u64, nr_right)?;
+    redistribute2(&mut *fix, left_ptr, right_ptr)?;
+
+    let left = get_node::<Value64>(&mut *fix, left_ptr, true)?;
+    let right = get_node::<Value64>(&mut *fix, right_ptr, true)?;
+    check_node(&left, 0u64, target_left)?;
+    check_node(&right, target_left as u64, target_right)?;
+
+    Ok(())
+}
+
+fn test_redistribute2_balanced(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_2(fix, 50, 50)
+}
+
+fn test_redistribute2_right_only(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_2(fix, 0, 100)
+}
+
+fn test_redistribute2_left_below_target(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_2(fix, 25, 75)
+}
+
+fn test_redistribute2_left_only(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_2(fix, 100, 0)
+}
+
+fn test_redistribute2_right_below_target(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_2(fix, 75, 25)
 }
 
 //-------------------------------
 
+/*
 fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
@@ -684,6 +753,15 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("descending", test_insert_descending)
             test!("random", test_insert_random)
             test!("runs", test_insert_runs)
+        }
+
+        test_section! {
+            "redistribute-2/",
+            test!("balanced", test_redistribute2_balanced)
+            test!("left-below-target", test_redistribute2_left_below_target)
+            test!("left-only", test_redistribute2_left_only)
+            test!("right-below-target", test_redistribute2_right_below_target)
+            test!("right-only", test_redistribute2_right_only)
         }
     };
 

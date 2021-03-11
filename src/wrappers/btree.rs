@@ -424,3 +424,14 @@ pub fn split_one_into_two<V: Guest>(
 }
 
 //-------------------------------
+
+pub fn redistribute2(fix: &mut Fixture, left: Addr, right: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, left.0);
+    fix.vm.set_reg(A1, right.0);
+
+    fix.call("redistribute2")?;
+
+    Ok(())
+}
+
+//-------------------------------
