@@ -713,6 +713,51 @@ fn test_redistribute2_right_below_target(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+fn test_redistribute_3(fix: &mut Fixture, nr_left: usize, nr_center: usize, nr_right: usize) -> Result<()> {
+    standard_globals(fix)?;
+
+    let total = nr_left + nr_center + nr_right;
+    let target_left = total / 3;
+    let target_center = (total - target_left) / 2;
+    let target_right = total - target_left - target_center;
+
+    let (mut fix, left_ptr) = mk_node(fix, 0u64, nr_left)?;
+    let (mut fix, center_ptr) = mk_node(&mut *fix, nr_left as u64, nr_center)?;
+    let (mut fix, right_ptr) = mk_node(&mut *fix, (nr_left + nr_center) as u64, nr_right)?;
+    redistribute3(&mut *fix, left_ptr, center_ptr, right_ptr)?;
+
+    let left = get_node::<Value64>(&mut *fix, left_ptr, true)?;
+    let center = get_node::<Value64>(&mut *fix, center_ptr, true)?;
+    let right = get_node::<Value64>(&mut *fix, right_ptr, true)?;
+    check_node(&left, 0u64, target_left)?;
+    check_node(&center, target_left as u64, target_center)?;
+    check_node(&right, (target_left + target_center) as u64, target_right)?;
+
+    Ok(())
+}
+
+fn test_redistribute3_both_above_target(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_3(fix, 50, 0, 50)
+}
+
+fn test_redistribute3_left_below_target(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_3(fix, 25, 0, 75)
+}
+
+fn test_redistribute3_left_only(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_3(fix, 100, 0, 0)
+}
+
+fn test_redistribute3_right_below_target(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_3(fix, 75, 0, 25)
+}
+
+fn test_redistribute3_right_only(fix: &mut Fixture) -> Result<()> {
+    test_redistribute_3(fix, 0, 0, 100)
+}
+
+//-------------------------------
+
 /*
 fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
@@ -762,6 +807,16 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("left-only", test_redistribute2_left_only)
             test!("right-below-target", test_redistribute2_right_below_target)
             test!("right-only", test_redistribute2_right_only)
+        }
+
+        // the center node should be empty
+        test_section! {
+            "redistribute-3/",
+            test!("both-above-target", test_redistribute3_both_above_target)
+            test!("left-below-target", test_redistribute3_left_below_target)
+            test!("left-only", test_redistribute3_left_only)
+            test!("right-below-target", test_redistribute3_right_below_target)
+            test!("right-only", test_redistribute3_right_only)
         }
     };
 
