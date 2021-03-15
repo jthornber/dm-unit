@@ -91,6 +91,22 @@ impl Guest for SpaceMap {
     }
 }
 
+pub fn sm_inc_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.call_at_with_errno(sm.inc_block)?;
+    Ok(())
+}
+
+pub fn sm_dec_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.call_at_with_errno(sm.dec_block)?;
+    Ok(())
+}
+
 pub fn sm_new_block(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
 
