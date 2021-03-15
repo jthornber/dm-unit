@@ -6,7 +6,6 @@ use crate::memory::{Addr, PERM_EXEC};
 use crate::vm::*;
 
 use anyhow::{anyhow, Result};
-use elf::types::Symbol;
 use libc::{c_int, strerror_r};
 use log::{debug, warn};
 use std::collections::BTreeMap;
@@ -27,7 +26,7 @@ pub struct Fixture {
     pub vm: VM,
 
     // Entry points for symbols
-    symbols: BTreeMap<String, Symbol>,
+    symbols: BTreeMap<String, Addr>,
 
     // Associates breakpoint addresses with callback functions.
     breakpoints: BTreeMap<u64, FixCallback>,
@@ -45,6 +44,8 @@ impl Fixture {
             module.push(m);
             module
         };
+
+        // These need to be in link order with the lowest level first.
         let modules: Vec<PathBuf> = [
             "drivers/md/persistent-data/dm-persistent-data.ko",
             "drivers/md/dm-thin-pool.ko",
@@ -57,7 +58,7 @@ impl Fixture {
         let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
-        let symbols = load_module(&mut vm.mem, &modules[0])?;
+        let symbols = load_modules(&mut vm.mem, &modules[0..])?;
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;
@@ -72,7 +73,7 @@ impl Fixture {
 
     fn lookup_fn(&self, func: &str) -> Result<Addr> {
         if let Some(addr) = self.symbols.get(func) {
-            Ok(Addr(addr.value))
+            Ok(*addr)
         } else {
             Err(anyhow!("couldn't lookup symbol '{}'", func))
         }
@@ -80,7 +81,7 @@ impl Fixture {
 
     fn symbol_rmap(&self, loc: u64) -> Option<String> {
         for (name, sym) in &self.symbols {
-            if sym.value == loc {
+            if sym.0 == loc {
                 return Some(name.clone());
             }
         }
