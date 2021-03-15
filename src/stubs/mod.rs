@@ -5,6 +5,7 @@ use crate::decode::*;
 use anyhow::Result;
 use log::info;
 
+pub mod block_device;
 pub mod block_manager;
 
 use Reg::*;

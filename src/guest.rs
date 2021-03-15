@@ -1,7 +1,8 @@
 use crate::memory::*;
 use crate::memory::{Addr, PERM_READ};
 
-use anyhow::{Result};
+use anyhow::Result;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Cursor, Read, Write};
 
@@ -42,6 +43,20 @@ pub fn free_guest<G: Guest>(mem: &mut Memory, ptr: Addr) -> Result<G> {
     let v = read_guest(mem, ptr)?;
     mem.free(ptr)?;
     Ok(v)
+}
+
+impl Guest for u64 {
+    fn guest_len() -> usize {
+        8
+    }
+
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_u64::<LittleEndian>(*self)
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u64::<LittleEndian>()
+    }
 }
 
 //-------------------------------
