@@ -1,6 +1,7 @@
 use crate::decode::*;
 use crate::memory::*;
 use crate::fixture::*;
+use crate::stubs::block_device::*;
 
 use anyhow::{anyhow, Result};
 
@@ -9,17 +10,13 @@ use Reg::*;
 //-------------------------------
 
 pub fn dm_bm_create(fix: &mut Fixture, nr_blocks: u64) -> Result<Addr> {
-    // We'll just allocate a word to act as the bdev, we don't examine the contents.
-    let bdev = fix.vm.mem.alloc(8)?;
+    let block_size = 8;
+    let nr_sectors = nr_blocks * block_size;
+    let bdev_ptr = mk_block_device(&mut fix.vm.mem, 0, nr_sectors)?;
 
-    // We write the nr blocks into the guest memory
-    fix.vm
-        .mem
-        .write(bdev, &nr_blocks.to_le_bytes(), PERM_WRITE)?;
-
-    fix.vm.set_reg(A0, bdev.0);
-    fix.vm.set_reg(A1, 4096); // block size
-    fix.vm.set_reg(A2, 16); // max held per thread
+    fix.vm.set_reg(A0, bdev_ptr.0);
+    fix.vm.set_reg(A1, block_size * 512); 	// block size
+    fix.vm.set_reg(A2, 16); 			// max held per thread
     fix.call("dm_block_manager_create")?;
     Ok(Addr(fix.vm.reg(A0)))
 }

@@ -3,9 +3,11 @@ use crate::decode::Reg;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::memory::{Addr, PERM_READ, PERM_WRITE};
+use crate::stubs::block_device::*;
 
 use anyhow::{anyhow, Result};
 use crc32c::crc32c;
+use log::*;
 use std::sync::Arc;
 use thinp::io_engine::*;
 
@@ -39,11 +41,15 @@ pub fn clear_bm() {
 }
 
 pub fn bm_create(fix: &mut Fixture) -> Result<()> {
-    let bdev_ptr = fix.vm.reg(A0);
-    let _block_size = fix.vm.reg(A1);
+    let bdev_ptr = Addr(fix.vm.reg(A0));
+    let bdev = read_guest::<BlockDevice>(&fix.vm.mem, bdev_ptr)?;
+
+    debug!("inode address: {:?}", bdev.inode);
+    let inode = read_guest::<INode>(&fix.vm.mem, bdev.inode)?;
+    let block_size = fix.vm.reg(A1);
     let _max_held_per_thread = fix.vm.reg(A2);
 
-    let nr_blocks = fix.vm.mem.read_into::<u64>(Addr(bdev_ptr), PERM_READ)?;
+    let nr_blocks = inode.nr_sectors / (block_size / 512);
 
     let bm = Arc::new(BlockManager::new(nr_blocks));
     let guest_addr = fix.vm.mem.alloc(4)?;
