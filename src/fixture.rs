@@ -7,7 +7,7 @@ use crate::vm::*;
 
 use anyhow::{anyhow, Result};
 use libc::{c_int, strerror_r};
-use log::{debug, warn};
+use log::*;
 use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::ops::{Deref, DerefMut};

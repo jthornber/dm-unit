@@ -8,6 +8,9 @@ use std::io::{Cursor, Read, Write};
 
 //-------------------------------
 
+// FIXME: use read_some rather than copying all the time
+
+
 // Guest types must always consume the same amount of contiguous guest
 // memory.
 pub trait Guest {
@@ -36,6 +39,15 @@ pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
     let mut r = Cursor::new(&bytes);
     let v = G::unpack(&mut r)?;
     Ok(v)
+}
+
+/// Copies data from host to guest
+pub fn write_guest<G: Guest>(mem: &mut Memory, ptr: Addr, v: &G) -> Result<()> {
+    let mut bytes = vec![0; G::guest_len()];
+    let mut w = Cursor::new(&mut bytes);
+    v.pack(&mut w)?;
+    mem.write(ptr, &bytes, 0)?;
+    Ok(())
 }
 
 // Reads and frees a guest value.

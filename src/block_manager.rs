@@ -491,7 +491,8 @@ impl BMInner {
     }
 
     fn is_read_only(&self) -> bool {
-        todo!();
+        // FIXME: finish
+        false
     }
 
     //----------------------------------------------

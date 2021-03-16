@@ -3,7 +3,7 @@ use crate::fixture::*;
 use crate::guest::*;
 use crate::memory::*;
 
-use anyhow::{Result};
+use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
@@ -12,17 +12,19 @@ use Reg::*;
 
 //-------------------------------
 
-/*
-struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
-                           sector_t data_block_size,
-                           bool format_device);
-                           */
 pub fn dm_pool_metadata_open(
-    _fix: &mut Fixture,
-    _block_device: Addr,
-    _data_block_sectors: u64,
+    fix: &mut Fixture,
+    bdev_ptr: Addr,
+    data_block_size: u64,
+    format: bool,
 ) -> Result<Addr> {
-    todo!();
+    fix.vm.set_reg(A0, bdev_ptr.0);
+    fix.vm.set_reg(A1, data_block_size);
+    fix.vm.set_reg(A2, if format { 1 } else { 0 });
+    fix.call("dm_pool_metadata_open")?;
+
+    // FIXME: check for ERR_PTR
+    Ok(Addr(fix.vm.reg(A0)))
 }
 
 pub fn dm_pool_metadata_close(fix: &mut Fixture, pmd: Addr) -> Result<()> {
@@ -214,14 +216,19 @@ pub fn dm_thin_find_mapped_range(
 
 pub fn dm_pool_alloc_data_block(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
     let (mut fix, result_ptr) = auto_guest::<u64>(fix, &0, PERM_READ | PERM_WRITE)?;
-    
+
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_alloc_data_block")?;
     Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
-pub fn dm_thin_insert_block(fix: &mut Fixture, td: Addr, thin_block: u64, data_block: u64) -> Result<()> {
+pub fn dm_thin_insert_block(
+    fix: &mut Fixture,
+    td: Addr,
+    thin_block: u64,
+    data_block: u64,
+) -> Result<()> {
     fix.vm.set_reg(A0, td.0);
     fix.vm.set_reg(A1, thin_block);
     fix.vm.set_reg(A2, data_block);
@@ -379,7 +386,6 @@ int dm_pool_register_metadata_threshold(struct dm_pool_metadata *pmd,
 
 
                     */
-
 
 /*
 void dm_pool_register_pre_commit_callback(struct dm_pool_metadata *pmd,

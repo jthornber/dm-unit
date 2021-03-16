@@ -7,6 +7,7 @@ use log::info;
 
 pub mod block_device;
 pub mod block_manager;
+pub mod rw_semaphore;
 
 use Reg::*;
 
@@ -81,34 +82,37 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
 pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     use crate::stubs::block_manager::*;
 
-    fix.at_func("__kmalloc", Box::new(kmalloc))?;
-    fix.at_func("kmalloc_order", Box::new(kmalloc))?;
-    fix.at_func("memset", Box::new(memset))?;
-    fix.at_func("kfree", Box::new(kfree))?;
     fix.stub("__raw_spin_lock_init", 0)?;
     fix.stub("_raw_spin_lock", 0)?;
     fix.stub("_raw_spin_unlock", 0)?;
     fix.stub("__mutex_init", 0)?;
     fix.stub("___ratelimit", 0)?;
-    fix.at_func("memcpy", Box::new(memcpy))?;
-    fix.at_func("memmove", Box::new(memcpy))?;
-    fix.at_func("dm_block_location", Box::new(bm_block_location))?;
+
     fix.at_func("dm_block_data", Box::new(bm_block_data))?;
+    fix.at_func("dm_block_location", Box::new(bm_block_location))?;
     fix.at_func("dm_block_manager_create", Box::new(bm_create))?;
     fix.at_func("dm_block_manager_destroy", Box::new(bm_destroy))?;
     fix.at_func("dm_bm_block_size", Box::new(bm_block_size))?;
+    fix.at_func("dm_bm_checksum", Box::new(bm_checksum))?;
+    fix.at_func("dm_bm_flush", Box::new(bm_flush))?;
+    fix.at_func("dm_bm_is_read_only", Box::new(bm_is_read_only))?;
     fix.at_func("dm_bm_nr_blocks", Box::new(bm_nr_blocks))?;
+    fix.at_func("dm_bm_prefetch", Box::new(bm_prefetch))?;
     fix.at_func("dm_bm_read_lock", Box::new(bm_read_lock))?;
     fix.at_func("dm_bm_read_try_lock", Box::new(bm_read_lock))?;
-    fix.at_func("dm_bm_write_lock", Box::new(bm_write_lock))?;
-    fix.at_func("dm_bm_write_lock_zero", Box::new(bm_write_lock_zero))?;
-    fix.at_func("dm_bm_unlock", Box::new(bm_unlock))?;
-    fix.at_func("dm_bm_flush", Box::new(bm_flush))?;
-    fix.at_func("dm_bm_prefetch", Box::new(bm_prefetch))?;
-    fix.at_func("dm_bm_is_read_only", Box::new(bm_is_read_only))?;
     fix.at_func("dm_bm_set_read_only", Box::new(bm_set_read_only))?;
     fix.at_func("dm_bm_set_read_write", Box::new(bm_set_read_write))?;
-    fix.at_func("dm_bm_checksum", Box::new(bm_checksum))?;
+    fix.at_func("dm_bm_unlock", Box::new(bm_unlock))?;
+    fix.at_func("dm_bm_write_lock", Box::new(bm_write_lock))?;
+    fix.at_func("dm_bm_write_lock_zero", Box::new(bm_write_lock_zero))?;
+    fix.at_func("kfree", Box::new(kfree))?;
+    fix.at_func("__kmalloc", Box::new(kmalloc))?;
+    fix.at_func("kmalloc_order", Box::new(kmalloc))?;
+    fix.at_func("memcpy", Box::new(memcpy))?;
+    fix.at_func("memmove", Box::new(memcpy))?;
+    fix.at_func("memset", Box::new(memset))?;
     fix.at_func("printk", Box::new(printk))?;
+
+    rw_semaphore::rw_sem_stubs(fix)?;
     Ok(())
 }
