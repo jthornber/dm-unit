@@ -4,8 +4,8 @@ extern crate log;
 use dm_unit::test_runner::*;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
-use dm_unit::tests::space_map;
 use dm_unit::tests::space_map_disk;
+use dm_unit::tests::space_map_metadata;
 
 use anyhow::Result;
 use clap::{App, Arg};
@@ -17,8 +17,8 @@ use std::path::Path;
 fn register_tests(runner: &mut TestRunner) -> Result<()> {
     btree::register_tests(runner)?;
     block_manager::register_tests(runner)?;
-    space_map::register_tests(runner)?;
     space_map_disk::register_tests(runner)?;
+    space_map_metadata::register_tests(runner)?;
     Ok(())
 }
 

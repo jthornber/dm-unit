@@ -1,11 +1,7 @@
 use crate::fixture::*;
 use crate::memory::*;
 use crate::stats::*;
-use crate::stubs::*;
-use crate::test_runner::*;
-use crate::wrappers::block_manager::*;
 use crate::wrappers::space_map::*;
-use crate::wrappers::transaction_manager::*;
 
 use anyhow::{anyhow, ensure, Result};
 use log::*;
@@ -95,45 +91,41 @@ fn free_blocks(fix: &mut Fixture, sm: Addr, mut nr_blocks: u64,
 
 //-------------------------------
 
-fn test_boundary_size(fix: &mut Fixture) -> Result<()> {
-    standard_globals(fix)?;
+pub trait SpaceMap {
+    fn addr(&self) -> Addr;
+    fn create(&mut self, fix: &mut Fixture, nr_blocks: u64) -> Result<()>;
+    fn commit(&mut self, fix: &mut Fixture) -> Result<()>;
+}
 
-    let nr_meta_blocks = ENTRIES_PER_BLOCK as u64;
-    let bm = dm_bm_create(fix, nr_meta_blocks)?;
-    let (tm, sm_meta) = dm_tm_create(fix, bm, 0)?;
-    let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+//-------------------------------
 
-    ensure!(nr_meta_blocks == sm_get_nr_blocks(fix, sm_meta)?);
+pub fn test_boundary_size(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+    let nr_blocks = ENTRIES_PER_BLOCK as u64;
+    sm.create(fix, nr_blocks)?;
+    ensure!(nr_blocks == sm_get_nr_blocks(fix, sm.addr())?);
 
-    let nr_free = sm_get_nr_free(fix, sm_meta)?;
+    let nr_free = sm_get_nr_free(fix, sm.addr())?;
     for _ in 0..nr_free {
-        let _b = sm_new_block(fix, sm_meta)?;
+        let _b = sm_new_block(fix, sm.addr())?;
     }
 
-    dm_tm_pre_commit(fix, tm)?;
-    dm_tm_commit(fix, tm, sb)?;
-    dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
-
-    ensure!(nr_meta_blocks == sm_get_nr_blocks(fix, sm_meta)?);
-    ensure!(0 == sm_get_nr_free(fix, sm_meta)?);
+    sm.commit(fix)?;
+    ensure!(nr_blocks == sm_get_nr_blocks(fix, sm.addr())?);
+    ensure!(0 == sm_get_nr_free(fix, sm.addr())?);
 
     Ok(())
 }
 
-fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
-    standard_globals(fix)?;
-
-    let count = 10000;
-    let bm = dm_bm_create(fix, count + 1000)?;
-    let (tm, sm) = dm_tm_create(fix, bm, 0)?;
-    let mut sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+    let count = 20000;
+    sm.create(fix, count + 1000)?;
 
     let commit_interval = 1000;
 
     let mut baseline = Stats::collect_stats(fix);
     let mut commit_count = commit_interval;
     for _ in 0..count {
-        let _b = sm_new_block(fix, sm)?;
+        let _b = sm_new_block(fix, sm.addr())?;
         if commit_count == commit_interval {
             // This was the first new_block after the commmit
             stats_report(fix, &baseline, "new_block", 1);
@@ -142,9 +134,7 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
         commit_count -= 1;
 
         if commit_count == 0 {
-            dm_tm_pre_commit(fix, tm)?;
-            dm_tm_commit(fix, tm, sb)?;
-            sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+            sm.commit(fix)?;
             commit_count = commit_interval;
             baseline = Stats::collect_stats(fix);
         }
@@ -153,12 +143,8 @@ fn test_commit_cost(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
-fn test_wrapping_around(fix: &mut Fixture) -> Result<()> {
-    standard_globals(fix)?;
-
-    let bm = dm_bm_create(fix, (ENTRIES_PER_BLOCK * 2) as u64)?;
-    let (tm, sm) = dm_tm_create(fix, bm, 0)?;
-    let mut sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+pub fn test_wrapping_around(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+    sm.create(fix, (ENTRIES_PER_BLOCK * 2) as u64)?;
 
     let batch_size = 1000;
     let mut commit_begin = 0;
@@ -170,48 +156,14 @@ fn test_wrapping_around(fix: &mut Fixture) -> Result<()> {
     // won't be changed by any free operations.
     for _ in 0..20 {
         info!("alloc_begin={}", alloc_begin);
-        alloc_begin = alloc_blocks(fix, sm, batch_size, commit_begin, alloc_begin, &mut allocated)?;
-        free_blocks(fix, sm, batch_size, &mut allocated)?;
-        alloc_begin = alloc_blocks(fix, sm, batch_size, commit_begin, alloc_begin, &mut allocated)?;
-        free_blocks(fix, sm, batch_size, &mut allocated)?;
+        alloc_begin = alloc_blocks(fix, sm.addr(), batch_size, commit_begin, alloc_begin, &mut allocated)?;
+        free_blocks(fix, sm.addr(), batch_size, &mut allocated)?;
+        alloc_begin = alloc_blocks(fix, sm.addr(), batch_size, commit_begin, alloc_begin, &mut allocated)?;
+        free_blocks(fix, sm.addr(), batch_size, &mut allocated)?;
 
-        dm_tm_pre_commit(fix, tm)?;
-        dm_tm_commit(fix, tm, sb)?;
-        sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+        sm.commit(fix)?;
         commit_begin = alloc_begin;
     }
-
-    Ok(())
-}
-
-//-------------------------------
-
-pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    let mut prefix: Vec<&'static str> = Vec::new();
-
-    macro_rules! test_section {
-        ($path:expr, $($s:stmt)*) => {{
-            prefix.push($path);
-            $($s)*
-            prefix.pop().unwrap();
-        }}
-    }
-
-    macro_rules! test {
-        ($path:expr, $func:expr) => {{
-            prefix.push($path);
-            let p = prefix.concat();
-            prefix.pop().unwrap();
-            runner.register(&p, Box::new($func));
-        }};
-    }
-
-    test_section! {
-        "/pdata/space-map/",
-        test!("boundary-size", test_boundary_size)
-        test!("commit-cost", test_commit_cost)
-        test!("wrapping-around", test_wrapping_around)
-    };
 
     Ok(())
 }
