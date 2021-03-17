@@ -25,9 +25,15 @@ fn alloc_blocks(fix: &mut Fixture, sm: Addr, nr_blocks: u64,
                 allocated: &mut VecDeque<(u64, u64)>) -> Result<u64> {
     let sm_nr_blocks = sm_get_nr_blocks(fix, sm)?;
 
+    let mut end: u64 = 0;
+    if let Some(last) = allocated.back() {
+        end = last.1;
+    }
+
     for _ in 0..nr_blocks {
         let b = sm_new_block(fix, sm)?;
 
+        // verify the allocated position
         if alloc_begin >= commit_begin {
             // Wrapping around might happen if all the blocks behind the alloc_begin
             // were occupied by shadowing.
@@ -38,20 +44,32 @@ fn alloc_blocks(fix: &mut Fixture, sm: Addr, nr_blocks: u64,
             ensure!(b >= alloc_begin && b < commit_begin);
         }
 
-        if let Some(last) = allocated.back_mut() {
-            if b == last.1 {
-                last.1 += 1;
-            } else {
-                allocated.push_back((b, b + 1));
-            }
+        // keep track of allocated blocks
+        if b == end {
+            end += 1;
         } else {
+            if let Some(last) = allocated.back_mut() {
+                last.1 = end;
+            } else if end > 0 {
+                allocated.push_back((0, end));
+            }
+
             allocated.push_back((b, b + 1));
+            end = b + 1;
         }
 
         if b == sm_nr_blocks - 1 {
             alloc_begin = 0;
         } else {
             alloc_begin = b + 1;
+        }
+    }
+
+    if end > 0 {
+        if let Some(last) = allocated.back_mut() {
+            last.1 = end;
+        } else {
+            allocated.push_back((0, end));
         }
     }
 
