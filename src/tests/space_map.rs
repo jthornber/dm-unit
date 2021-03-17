@@ -9,15 +9,22 @@ use std::collections::VecDeque;
 
 //-------------------------------
 
-fn stats_report(fix: &Fixture, baseline: &Stats, desc: &str, count: u64) {
-    let delta = baseline.delta(fix);
+fn stats_report(stats: &Stats, desc: &str, count: u64) {
     info!(
         "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}",
         desc,
-        delta.instrs / count,
-        delta.read_locks as f64 / count as f64,
-        delta.write_locks as f64 / count as f64
+        stats.instrs / count,
+        stats.read_locks as f64 / count as f64,
+        stats.write_locks as f64 / count as f64
     );
+}
+
+fn stats_compare(stats1: &Stats, stats2: &Stats, error_rate: f64) -> Result<()> {
+    let max = u64::max(stats1.instrs, stats2.instrs);
+    let min = u64::min(stats1.instrs, stats2.instrs);
+    let e = (max - min) as f64 / max as f64;
+    ensure!(e < error_rate);
+    Ok(())
 }
 
 fn alloc_blocks(fix: &mut Fixture, sm: Addr, nr_blocks: u64,
@@ -137,16 +144,20 @@ pub fn test_boundary_size(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()
 pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
     let count = 20000;
     sm.create(fix, count + 1000)?;
+    sm.commit(fix)?;
 
     let commit_interval = 1000;
 
     let mut baseline = Stats::collect_stats(fix);
+    let mut stats = Vec::<Stats>::new();
     let mut commit_count = commit_interval;
     for _ in 0..count {
         let _b = sm_new_block(fix, sm.addr())?;
         if commit_count == commit_interval {
             // This was the first new_block after the commmit
-            stats_report(fix, &baseline, "new_block", 1);
+            let delta = baseline.delta(fix);
+            stats_report(&delta, "new_block", 1);
+            stats.push(delta);
         }
 
         commit_count -= 1;
@@ -157,6 +168,9 @@ pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> 
             baseline = Stats::collect_stats(fix);
         }
     }
+
+    // verify performance errors
+    stats_compare(stats.first().unwrap(), stats.last().unwrap(), 0.01)?;
 
     Ok(())
 }
