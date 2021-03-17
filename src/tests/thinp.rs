@@ -53,12 +53,13 @@ impl<'a> ThinPool<'a> {
     fn stats_report(&mut self, desc: &str, count: u64) -> Result<()> {
         let delta = self.baseline.delta(self.fix);
         info!(
-            "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}, metadata = {}",
+            "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}, metadata = {}/{}",
             desc,
             delta.instrs / count,
             delta.read_locks as f64 / count as f64,
             delta.write_locks as f64 / count as f64,
             self.nr_metadata_blocks - self.free_metadata_blocks()?,
+            self.nr_metadata_blocks,
         );
         Ok(())
     }
@@ -199,14 +200,15 @@ fn test_provision_single_thin_random(fix: &mut Fixture) -> Result<()> {
     do_provision_single_thin(fix, &thin_blocks)
 }
 
-fn test_provision_single_thin_runs(fix: &mut Fixture) -> Result<()> {
+fn generate_runs(nr_blocks: u64, average_run_length: u64) -> Vec<u64> {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
 
     let mut endpoints = BTreeSet::new();
-    for _ in 0..500 {
-        endpoints.insert(rng.gen_range(0..PROVISION_SINGLE_COUNT));
+    let nr_runs = nr_blocks / average_run_length;
+    for _ in 0..nr_runs {
+        endpoints.insert(rng.gen_range(0..nr_blocks));
     }
-    endpoints.insert(PROVISION_SINGLE_COUNT);
+    endpoints.insert(nr_blocks);
 
     let mut ranges = Vec::new();
     let mut last = 0;
@@ -225,7 +227,65 @@ fn test_provision_single_thin_runs(fix: &mut Fixture) -> Result<()> {
         }
     }
 
+    thin_blocks
+}
+
+fn test_provision_single_thin_runs(fix: &mut Fixture) -> Result<()> {
+    let thin_blocks = generate_runs(PROVISION_SINGLE_COUNT, 20);
     do_provision_single_thin(fix, &thin_blocks)
+}
+
+//-------------------------------
+
+// FIXME: no overwrites in this test
+fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()> {
+    let commit_interval = 1000;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
+    let mut thin_id = 0;
+    pool.create_thin(0)?;
+    let mut td = pool.open_thin(0)?;
+
+    let mut insert_count = 0;
+    pool.stats_start();
+    for thin_b in thin_blocks {
+        let data_b = pool.alloc_data_block()?;
+        pool.insert_block(&td, *thin_b, data_b)?;
+        insert_count += 1;
+
+        if insert_count == commit_interval {
+            pool.commit()?;
+            pool.stats_report("provision", commit_interval)?;
+
+            pool.close_thin(td)?;
+            pool.create_snap(thin_id + 1, thin_id)?;
+            thin_id += 1;
+            if thin_id > 10 {
+                pool.delete_thin(thin_id - 10)?;
+            }
+            pool.commit()?;
+            td = pool.open_thin(thin_id)?;
+
+            pool.stats_start();
+            insert_count = 0;
+        }
+    }
+
+    // A commit is needed, otherwise delete will not work (not sure why,
+    // or if this is a feature).
+    pool.commit()?;
+    pool.close_thin(td)?;
+
+    Ok(())
+}
+
+// This test blows up, with massive amounts of instrs, read/write locks per insert.
+// Probably the fault of the space maps.
+fn test_provision_rolling_snaps(fix: &mut Fixture) -> Result<()> {
+    let thin_blocks = generate_runs(20_000, 20);
+    do_provision_rolling_snap(fix, &thin_blocks)
 }
 
 //-------------------------------
@@ -258,6 +318,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("provision-single-thin/linear", test_provision_single_thin_linear)
         test!("provision-single-thin/random", test_provision_single_thin_random)
         test!("provision-single-thin/runs", test_provision_single_thin_runs)
+        test!("provision-rolling-snaps", test_provision_rolling_snaps)
     }
 
     Ok(())
