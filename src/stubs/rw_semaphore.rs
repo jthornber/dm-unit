@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::*;
 use std::io;
 use std::io::{Read, Write};
 

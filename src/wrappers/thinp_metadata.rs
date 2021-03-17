@@ -32,7 +32,7 @@ pub fn dm_pool_metadata_close(fix: &mut Fixture, pmd: Addr) -> Result<()> {
     fix.call_with_errno("dm_pool_metadata_close")
 }
 
-type ThinId = u32;
+pub type ThinId = u32;
 pub fn dm_pool_create_thin(fix: &mut Fixture, pmd: Addr, thin_id: ThinId) -> Result<()> {
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, thin_id as u64);

@@ -82,6 +82,9 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
 pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     use crate::stubs::block_manager::*;
 
+    fix.stub("__list_add_valid", 1)?;
+    fix.stub("__list_del_entry_valid", 1)?;
+
     fix.stub("__raw_spin_lock_init", 0)?;
     fix.stub("_raw_spin_lock", 0)?;
     fix.stub("_raw_spin_unlock", 0)?;

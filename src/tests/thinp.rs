@@ -1,43 +1,32 @@
-use anyhow::{anyhow, ensure, Result};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use anyhow::Result;
 use log::*;
-use nom::{number::complete::*, IResult};
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
-use std::io;
-use std::io::{Cursor, Read, Write};
-use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
-use thinp::io_engine::BLOCK_SIZE;
-use thinp::pdata::btree;
-use thinp::pdata::btree::*;
-use thinp::pdata::btree_builder::*;
-use thinp::pdata::btree_walker::*;
-use thinp::pdata::unpack::*;
 
 use crate::fixture::*;
-use crate::guest::*;
 use crate::memory::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
-use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
-use crate::wrappers::block_manager::*;
-use crate::wrappers::btree::*;
 use crate::wrappers::thinp_metadata::*;
-use crate::wrappers::transaction_manager::*;
 
 //-------------------------------
 
-struct ThinpTest<'a> {
+#[allow(dead_code)]
+struct ThinPool<'a> {
     fix: &'a mut Fixture,
+    nr_metadata_blocks: u64,
     pmd: Addr,
+    baseline: Stats,
 }
 
-impl<'a> ThinpTest<'a> {
+struct ThinDev {
+    td: Addr,
+}
+
+impl<'a> ThinPool<'a> {
     fn new(
         fix: &'a mut Fixture,
         nr_metadata_blocks: u64,
@@ -46,12 +35,73 @@ impl<'a> ThinpTest<'a> {
     ) -> Result<Self> {
         let bdev_ptr = mk_block_device(&mut fix.vm.mem, 0, 8 * nr_metadata_blocks)?;
         let pmd = dm_pool_metadata_open(fix, bdev_ptr, data_block_size, true)?;
+        dm_pool_resize_data_dev(fix, pmd, nr_data_blocks)?;
+        let baseline = Stats::collect_stats(fix);
 
-        Ok(ThinpTest { fix, pmd })
+        Ok(ThinPool {
+            fix,
+            nr_metadata_blocks,
+            pmd,
+            baseline,
+        })
+    }
+
+    fn stats_start(&mut self) {
+        self.baseline = Stats::collect_stats(self.fix);
+    }
+
+    fn stats_report(&mut self, desc: &str, count: u64) -> Result<()> {
+        let delta = self.baseline.delta(self.fix);
+        info!(
+            "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}, metadata = {}",
+            desc,
+            delta.instrs / count,
+            delta.read_locks as f64 / count as f64,
+            delta.write_locks as f64 / count as f64,
+            self.nr_metadata_blocks - self.free_metadata_blocks()?,
+        );
+        Ok(())
+    }
+
+    fn create_thin(&mut self, thin_id: ThinId) -> Result<()> {
+        dm_pool_create_thin(self.fix, self.pmd, thin_id)
+    }
+
+    fn create_snap(&mut self, origin_id: ThinId, snap_id: ThinId) -> Result<()> {
+        dm_pool_create_snap(self.fix, self.pmd, origin_id, snap_id)
+    }
+
+    fn delete_thin(&mut self, thin_id: ThinId) -> Result<()> {
+        dm_pool_delete_thin_device(self.fix, self.pmd, thin_id)
+    }
+
+    fn commit(&mut self) -> Result<()> {
+        dm_pool_commit_metadata(self.fix, self.pmd)
+    }
+
+    fn open_thin(&mut self, thin_id: ThinId) -> Result<ThinDev> {
+        let td = dm_pool_open_thin_device(self.fix, self.pmd, thin_id)?;
+        Ok(ThinDev { td })
+    }
+
+    fn close_thin(&mut self, td: ThinDev) -> Result<()> {
+        dm_pool_close_thin_device(self.fix, td.td)
+    }
+
+    fn alloc_data_block(&mut self) -> Result<u64> {
+        dm_pool_alloc_data_block(self.fix, self.pmd)
+    }
+
+    fn insert_block(&mut self, td: &ThinDev, thin_b: u64, data_b: u64) -> Result<()> {
+        dm_thin_insert_block(self.fix, td.td, thin_b, data_b)
+    }
+
+    fn free_metadata_blocks(&mut self) -> Result<u64> {
+        dm_pool_get_free_metadata_block_count(self.fix, self.pmd)
     }
 }
 
-impl<'a> Drop for ThinpTest<'a> {
+impl<'a> Drop for ThinPool<'a> {
     fn drop(&mut self) {
         dm_pool_metadata_close(self.fix, self.pmd).expect("dm_pool_metadata_close() failed");
     }
@@ -61,8 +111,121 @@ impl<'a> Drop for ThinpTest<'a> {
 
 fn test_create(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
-    let t = ThinpTest::new(fix, 1024, 64, 102400)?;
+    let _t = ThinPool::new(fix, 1024, 64, 102400)?;
     Ok(())
+}
+
+fn test_create_many_thins(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let mut t = ThinPool::new(fix, 1024, 64, 102400)?;
+    for tid in 0..1000 {
+        t.create_thin(tid)?;
+    }
+
+    for tid in 0..1000 {
+        t.delete_thin(tid)?;
+    }
+
+    Ok(())
+}
+
+fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let count = 1000;
+    let mut t = ThinPool::new(fix, 10240, 64, 102400)?;
+    t.create_thin(0)?;
+
+    for snap in 1..count {
+        t.create_snap(snap, snap - 1)?;
+    }
+
+    // A commit is needed, otherwise delete will not work (not sure why,
+    // or if this is a feature).
+    t.commit()?;
+
+    for tid in 0..count {
+        t.delete_thin(tid)?;
+    }
+
+    t.commit()?;
+
+    Ok(())
+}
+
+fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()> {
+    let commit_interval = 1000;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
+    pool.create_thin(0)?;
+    let td = pool.open_thin(0)?;
+
+    let mut insert_count = 0;
+    pool.stats_start();
+    for thin_b in thin_blocks {
+        let data_b = pool.alloc_data_block()?;
+        pool.insert_block(&td, *thin_b, data_b)?;
+        insert_count += 1;
+
+        if insert_count == commit_interval {
+            pool.commit()?;
+            pool.stats_report("provision", commit_interval)?;
+            pool.stats_start();
+            insert_count = 0;
+        }
+    }
+
+    // A commit is needed, otherwise delete will not work (not sure why,
+    // or if this is a feature).
+    pool.commit()?;
+    pool.close_thin(td)?;
+
+    Ok(())
+}
+
+const PROVISION_SINGLE_COUNT: u64 = 100000;
+
+fn test_provision_single_thin_linear(fix: &mut Fixture) -> Result<()> {
+    let thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).into_iter().collect();
+    do_provision_single_thin(fix, &thin_blocks)
+}
+
+fn test_provision_single_thin_random(fix: &mut Fixture) -> Result<()> {
+    let mut thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).into_iter().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    thin_blocks.shuffle(&mut rng);
+    do_provision_single_thin(fix, &thin_blocks)
+}
+
+fn test_provision_single_thin_runs(fix: &mut Fixture) -> Result<()> {
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..500 {
+        endpoints.insert(rng.gen_range(0..PROVISION_SINGLE_COUNT));
+    }
+    endpoints.insert(PROVISION_SINGLE_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+    ranges.shuffle(&mut rng);
+
+    let mut thin_blocks = Vec::new();
+    for r in ranges {
+        for k in r {
+            thin_blocks.push(k);
+        }
+    }
+
+    do_provision_single_thin(fix, &thin_blocks)
 }
 
 //-------------------------------
@@ -90,6 +253,11 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     test_section! {
         "/thinp/",
         test!("create", test_create)
+        test!("create-delete-many-thins", test_create_many_thins)
+        test!("create-rolling-snaps", test_create_rolling_snaps)
+        test!("provision-single-thin/linear", test_provision_single_thin_linear)
+        test!("provision-single-thin/random", test_provision_single_thin_random)
+        test!("provision-single-thin/runs", test_provision_single_thin_runs)
     }
 
     Ok(())
