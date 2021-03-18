@@ -238,7 +238,7 @@ fn test_provision_single_thin_runs(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 // FIXME: no overwrites in this test
-fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()> {
+fn do_provision_recursive_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()> {
     let commit_interval = 1000;
 
     standard_globals(fix)?;
@@ -262,7 +262,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
             pool.close_thin(td)?;
             pool.create_snap(thin_id + 1, thin_id)?;
             thin_id += 1;
-            if thin_id > 10 {
+            if thin_id >= 10 {
                 pool.delete_thin(thin_id - 10)?;
             }
             pool.commit()?;
@@ -273,9 +273,54 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
         }
     }
 
-    // A commit is needed, otherwise delete will not work (not sure why,
-    // or if this is a feature).
-    pool.commit()?;
+    pool.close_thin(td)?;
+
+    Ok(())
+}
+
+// This test blows up, with massive amounts of instrs, read/write locks per insert.
+// Probably the fault of the space maps.
+fn test_provision_recursive_snaps(fix: &mut Fixture) -> Result<()> {
+    let thin_blocks = generate_runs(20_000, 20);
+    do_provision_recursive_snap(fix, &thin_blocks)
+}
+
+//-------------------------------
+
+// FIXME: no overwrites in this test
+fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()> {
+    let commit_interval = 1000;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
+    let mut thin_id = 0;
+    pool.create_thin(0)?;
+    let td = pool.open_thin(0)?;
+
+    let mut insert_count = 0;
+    pool.stats_start();
+    for thin_b in thin_blocks {
+        let data_b = pool.alloc_data_block()?;
+        pool.insert_block(&td, *thin_b, data_b)?;
+        insert_count += 1;
+
+        if insert_count == commit_interval {
+            pool.commit()?;
+            pool.stats_report("provision", commit_interval)?;
+
+            pool.create_snap(thin_id + 1, 0)?;
+            thin_id += 1;
+            if thin_id > 10 {
+                pool.delete_thin(thin_id - 10)?;
+            }
+            pool.commit()?;
+
+            pool.stats_start();
+            insert_count = 0;
+        }
+    }
+
     pool.close_thin(td)?;
 
     Ok(())
@@ -318,7 +363,8 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("provision-single-thin/linear", test_provision_single_thin_linear)
         test!("provision-single-thin/random", test_provision_single_thin_random)
         test!("provision-single-thin/runs", test_provision_single_thin_runs)
-        test!("provision-rolling-snaps", test_provision_rolling_snaps)
+        test!("snaps/recursive", test_provision_recursive_snaps)
+        test!("snaps/rolling", test_provision_rolling_snaps)
     }
 
     Ok(())
