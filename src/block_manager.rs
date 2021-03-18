@@ -396,32 +396,30 @@ impl BMInner {
                         },
                     );
                     Ok(())
+                } else if dirty {
+                    // Remove read/write permissions
+                    fix.vm
+                        .mem
+                        .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)?;
+                    self.locks.insert(
+                        gb.loc,
+                        Lock::Dirty {
+                            validator,
+                            guest_ptr,
+                        },
+                    );
+                    Ok(())
                 } else {
-                    if dirty {
-                        // Remove read/write permissions
-                        fix.vm
-                            .mem
-                            .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)?;
-                        self.locks.insert(
-                            gb.loc,
-                            Lock::Dirty {
-                                validator,
-                                guest_ptr,
-                            },
-                        );
-                        Ok(())
-                    } else {
-                        let data = fix.vm.mem.free(gb.data)?;
-                        fix.vm.mem.free(gb_ptr)?;
-                        self.locks.insert(
-                            gb.loc,
-                            Lock::Clean {
-                                validator: Some(validator),
-                                data,
-                            },
-                        );
-                        Ok(())
-                    }
+                    let data = fix.vm.mem.free(gb.data)?;
+                    fix.vm.mem.free(gb_ptr)?;
+                    self.locks.insert(
+                        gb.loc,
+                        Lock::Clean {
+                            validator: Some(validator),
+                            data,
+                        },
+                    );
+                    Ok(())
                 }
             }
             Some(Lock::Write {

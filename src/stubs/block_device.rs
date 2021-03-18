@@ -28,11 +28,7 @@ impl Guest for INode {
 
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
         let nr_sectors = r.read_u64::<LittleEndian>()?;
-        let ro = if r.read_u64::<LittleEndian>()? == 0 {
-            false
-        } else {
-            true
-        };
+        let ro = !r.read_u64::<LittleEndian>()? == 0;
         Ok(INode { nr_sectors, ro })
     }
 }

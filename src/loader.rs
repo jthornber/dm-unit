@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use elf;
 use elf::types::*;
 use log::*;
 use nom::{number::complete::*, IResult};
@@ -420,13 +419,7 @@ fn xlate_syms(syms: Vec<Symbol>, sections: &[Rc<RefCell<elf::Section>>]) -> Vec<
 }
 
 /// Returns (refs, defs, internal)
-fn filter_syms(
-    syms: &[Rc<RefCell<Sym>>],
-) -> (
-    Vec<Rc<RefCell<Sym>>>,
-    Vec<Rc<RefCell<Sym>>>,
-    Vec<Rc<RefCell<Sym>>>,
-) {
+fn filter_syms(syms: &[Rc<RefCell<Sym>>]) -> (Syms, Syms, Syms) {
     let mut defs = Vec::new();
     let mut refs = Vec::new();
     let mut internal = Vec::new();
@@ -435,12 +428,10 @@ fn filter_syms(
         let s_ = s.borrow();
         if s_.section.is_none() {
             refs.push(s.clone());
+        } else if s_.bind == STB_GLOBAL {
+            defs.push(s.clone());
         } else {
-            if s_.bind == STB_GLOBAL {
-                defs.push(s.clone());
-            } else {
-                internal.push(s.clone());
-            }
+            internal.push(s.clone());
         }
     }
 
@@ -557,10 +548,10 @@ fn adjust_relocation(
                 (STB_GLOBAL, Some(sym)) => {
                     let mut rel = rel.clone();
                     rel.sym = sym.clone();
-                    return Simple(rel);
+                    Simple(rel)
                 }
                 _ => {
-                    return crel.clone();
+                    crel.clone()
                 }
             }
         }
@@ -572,10 +563,10 @@ fn adjust_relocation(
                     rel1.sym = sym.clone();
                     let mut rel2 = rel2.clone();
                     rel2.sym = sym.clone();
-                    return Pair(rel1, rel2);
+                    Pair(rel1, rel2)
                 }
                 _ => {
-                    return crel.clone();
+                    crel.clone()
                 }
             }
         }
@@ -586,7 +577,7 @@ fn check_sym(sym: &Rc<RefCell<Sym>>) {
     let sym = sym.borrow();
     if sym.section.is_none() {
         warn!("'{}' has no section", sym.name);
-        assert!(false);
+        panic!();
     }
 }
 
@@ -639,7 +630,7 @@ fn merge_modules(modules: Vec<Module>) -> Module {
         for rc in m.refs {
             let r = rc.borrow();
 
-            if r.name.len() == 0 {
+            if r.name.is_empty() {
                 continue;
             }
 
@@ -734,7 +725,7 @@ fn load_module(mem: &mut Memory, module: &mut Module) -> Result<BTreeMap<String,
     // Each of these segments is page aligned (vm doesn't need this since
     // we have per byte permissions).  'bases' is a map from section name to
     // base address.  This get's filled in as individual sections are mapped.
-    let space = 1 * 1024 * 1024;
+    let space = 1024 * 1024;
     let text_base = Addr(space);
     debug!("loading text sections starting at {:?}", text_base);
     load_sections(mem, text_base, &mut module.text_sections, PERM_EXEC)?;
@@ -789,12 +780,10 @@ fn load_module(mem: &mut Memory, module: &mut Module) -> Result<BTreeMap<String,
         }));
 
         // FIXME: use enumerate
-        let mut i = 0;
-        for sym in &module.refs {
+        for (i, sym) in module.refs.iter().enumerate() {
             let mut sym = sym.borrow_mut();
             sym.section = Some(undefined_section.clone());
             sym.value = (i * 4) as u64;
-            i += 1;
         }
     }
 

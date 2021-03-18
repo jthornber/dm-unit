@@ -43,7 +43,7 @@ impl Guest for RWSem {
 
     fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.count)?;
-        w.write_all(&vec![0u8; 72 - 8])?;
+        w.write_all(&[0u8; 72 - 8])?;
         Ok(())
     }
 
@@ -77,9 +77,9 @@ fn down_read(fix: &mut Fixture) -> Result<()> {
         if count == 1 {
             return Err(anyhow!("down_read called when write locked"));
         } else {
-            count = count >> 8;
+            count >>= 8;
             count += 1;
-            count = count << 8;
+            count <<= 8;
         }
         Ok(count)
     })?;
@@ -94,13 +94,13 @@ fn up_read(fix: &mut Fixture) -> Result<()> {
         if count == 1 {
             return Err(anyhow!("up_read called when write locked"));
         } else {
-            count = count >> 8;
+            count >>= 8;
             if count == 0 {
                 return Err(anyhow!("up_read called when not locked"));
             }
 
             count -= 1;
-            count = count << 8;
+            count <<= 8;
         }
         Ok(count)
     })?;

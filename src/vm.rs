@@ -10,6 +10,7 @@ use thiserror::Error;
 
 //-----------------------------
 
+#[derive(Default)]
 pub struct InstCache {
     basic_blocks: BTreeMap<u64, Rc<RefCell<BasicBlock>>>,
 }
@@ -30,7 +31,7 @@ impl InstCache {
     }
 
     pub fn get(&self, loc: u64) -> Option<Rc<RefCell<BasicBlock>>> {
-        self.basic_blocks.get(&loc).map(|rc| rc.clone())
+        self.basic_blocks.get(&loc).cloned()
     }
 
     /// Removes any blocks that contain loc (there can be only one).

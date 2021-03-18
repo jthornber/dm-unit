@@ -373,7 +373,7 @@ impl Guest for ShadowSpine {
                 w.write_u64::<LittleEndian>(self.nodes[1].0)?;
             }
             _ => {
-                assert!(false);
+                panic!();
             }
         }
         w.write_u64::<LittleEndian>(self.root)?;
