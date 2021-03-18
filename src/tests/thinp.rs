@@ -118,10 +118,12 @@ fn test_create(fix: &mut Fixture) -> Result<()> {
 
 fn test_create_many_thins(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
-    let mut t = ThinPool::new(fix, 1024, 64, 102400)?;
+    let mut t = ThinPool::new(fix, 10240, 64, 102400)?;
     for tid in 0..1000 {
         t.create_thin(tid)?;
     }
+
+    t.commit()?;
 
     for tid in 0..1000 {
         t.delete_thin(tid)?;
