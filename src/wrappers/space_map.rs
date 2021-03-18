@@ -3,7 +3,7 @@ use crate::fixture::*;
 use crate::guest::*;
 use crate::memory::*;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
@@ -91,31 +91,17 @@ impl Guest for SpaceMap {
     }
 }
 
-pub fn sm_inc_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+pub fn sm_destroy(fix: &mut Fixture, sm_ptr: Addr) -> Result<()> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
-    fix.vm.set_reg(A1, block);
-    fix.call_at_with_errno(sm.inc_block)?;
-    Ok(())
+    fix.call_at_with_errno(sm.destroy)
 }
 
-pub fn sm_dec_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+pub fn sm_extend(fix: &mut Fixture, sm_ptr: Addr, extra_blocks: u64) -> Result<()> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
-    fix.vm.set_reg(A1, block);
-    fix.call_at_with_errno(sm.dec_block)?;
-    Ok(())
-}
-
-pub fn sm_new_block(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
-    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
-
-    fix.vm.set_reg(A0, sm_ptr.0);
-    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
-    fix.vm.set_reg(A1, result_ptr.0);
-
-    fix.call_at_with_errno(sm.new_block)?;
-    Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
+    fix.vm.set_reg(A1, extra_blocks);
+    fix.call_at_with_errno(sm.extend)
 }
 
 pub fn sm_get_nr_blocks(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
@@ -140,11 +126,113 @@ pub fn sm_get_nr_free(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
+pub fn sm_get_count(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<u32> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 4)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.vm.set_reg(A2, result_ptr.0);
+    fix.call_at_with_errno(sm.get_count)?;
+
+    Ok(fix.vm.mem.read_into::<u32>(result_ptr, PERM_READ)?)
+}
+
+pub fn sm_count_is_more_than_one(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<bool> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 4)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.vm.set_reg(A2, result_ptr.0);
+    fix.call_at_with_errno(sm.count_is_more_than_one)?;
+
+    Ok(fix.vm.mem.read_into::<u32>(result_ptr, PERM_READ)? != 0)
+}
+
+pub fn sm_set_count(fix: &mut Fixture, sm_ptr: Addr, block: u64, count: u32) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.vm.set_reg(A2, count as u64);
+    fix.call_at_with_errno(sm.set_count)
+}
+
 pub fn sm_commit(fix: &mut Fixture, sm_ptr: Addr) -> Result<()> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
-    fix.call_at_with_errno(sm.commit)?;
+    fix.call_at_with_errno(sm.commit)
+}
+
+pub fn sm_inc_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.call_at_with_errno(sm.inc_block)
+}
+
+pub fn sm_dec_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, block);
+    fix.call_at_with_errno(sm.dec_block)
+}
+
+pub fn sm_new_block(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    fix.vm.set_reg(A1, result_ptr.0);
+
+    fix.call_at_with_errno(sm.new_block)?;
+    Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
+}
+
+pub fn sm_get_root_size(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, result_ptr.0);
+    fix.call_at_with_errno(sm.root_size)?;
+
+    Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
+}
+
+pub fn sm_copy_root(fix: &mut Fixture, sm_ptr: Addr, bytes: &mut [u8]) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, bytes.len())?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, result_ptr.0);
+    fix.vm.set_reg(A2, bytes.len() as u64);
+    fix.call_at_with_errno(sm.copy_root)?;
+
+    fix.vm
+        .mem
+        .read_some(result_ptr, PERM_READ, |src| {
+            bytes.copy_from_slice(src);
+        })
+        .map_err(|_| anyhow!("couldn't copy root"))?;
+
     Ok(())
+}
+
+pub fn sm_register_threshold_callback(
+    fix: &mut Fixture,
+    sm_ptr: Addr,
+    threshold: u64,
+    func: Addr,
+    context: Addr,
+) -> Result<()> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, threshold);
+    fix.vm.set_reg(A2, func.0);
+    fix.vm.set_reg(A3, context.0);
+    fix.call_at_with_errno(sm.register_threshold_callback)
 }
 
 //-------------------------------
