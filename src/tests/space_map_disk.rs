@@ -69,6 +69,12 @@ fn test_commit_cost_(fix: &mut Fixture) -> Result<()> {
     test_commit_cost(fix, &mut sm)
 }
 
+fn test_inc_cost_(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let mut sm = DiskSpaceMap::new();
+    test_inc_cost(fix, &mut sm)
+}
+
 fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
@@ -76,12 +82,14 @@ fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     test_wrapping_around(fix, &mut sm)
 }
 
+
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    runner.register("/pdata/sm-disk/boundary-size", Box::new(test_boundary_size_));
-    runner.register("/pdata/sm-disk/commit-cost", Box::new(test_commit_cost_));
-    runner.register("/pdata/sm-disk/wrapping-around", Box::new(test_wrapping_around_));
+    runner.register("/pdata/space-map/disk/boundary-size", Box::new(test_boundary_size_));
+    runner.register("/pdata/space-map/disk/commit-cost", Box::new(test_commit_cost_));
+    runner.register("/pdata/space-map/disk/inc-cost", Box::new(test_inc_cost_));
+    runner.register("/pdata/space-map/disk/wrapping-around", Box::new(test_wrapping_around_));
     Ok(())
 }
 

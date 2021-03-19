@@ -7,6 +7,7 @@ use anyhow::{anyhow, ensure, Result};
 use log::*;
 use std::collections::VecDeque;
 
+
 //-------------------------------
 
 fn stats_report(stats: &Stats, desc: &str, count: u64) {
@@ -27,9 +28,14 @@ fn stats_compare(stats1: &Stats, stats2: &Stats, error_rate: f64) -> Result<()> 
     Ok(())
 }
 
-fn alloc_blocks(fix: &mut Fixture, sm: Addr, nr_blocks: u64,
-                commit_begin: u64, mut alloc_begin: u64,
-                allocated: &mut VecDeque<(u64, u64)>) -> Result<u64> {
+fn alloc_blocks(
+    fix: &mut Fixture,
+    sm: Addr,
+    nr_blocks: u64,
+    commit_begin: u64,
+    mut alloc_begin: u64,
+    allocated: &mut VecDeque<(u64, u64)>,
+) -> Result<u64> {
     let sm_nr_blocks = sm_get_nr_blocks(fix, sm)?;
 
     let mut end: u64 = 0;
@@ -83,8 +89,12 @@ fn alloc_blocks(fix: &mut Fixture, sm: Addr, nr_blocks: u64,
     Ok(alloc_begin)
 }
 
-fn free_blocks(fix: &mut Fixture, sm: Addr, mut nr_blocks: u64,
-               allocated: &mut VecDeque<(u64, u64)>) -> Result<()> {
+fn free_blocks(
+    fix: &mut Fixture,
+    sm: Addr,
+    mut nr_blocks: u64,
+    allocated: &mut VecDeque<(u64, u64)>,
+) -> Result<()> {
     while nr_blocks > 0 {
         if let Some(range) = allocated.front() {
             let end = u64::min(range.1, range.0 + nr_blocks);
@@ -108,7 +118,10 @@ fn free_blocks(fix: &mut Fixture, sm: Addr, mut nr_blocks: u64,
     }
 
     if nr_blocks > 0 {
-        return Err(anyhow!("insufficient number of blocks: {} more required", nr_blocks))
+        return Err(anyhow!(
+            "insufficient number of blocks: {} more required",
+            nr_blocks
+        ));
     }
 
     Ok(())
@@ -148,11 +161,14 @@ pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> 
 
     let commit_interval = 1000;
 
+    let mut tracker = CostTracker::new("new-block.csv")?;
     let mut baseline = Stats::collect_stats(fix);
     let mut stats = Vec::<Stats>::new();
     let mut commit_count = commit_interval;
     for _ in 0..count {
+        tracker.begin(fix);
         let _b = sm_new_block(fix, sm.addr())?;
+        tracker.end(fix)?;
         if commit_count == commit_interval {
             // This was the first new_block after the commmit
             let delta = baseline.delta(fix);
@@ -175,6 +191,24 @@ pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> 
     Ok(())
 }
 
+pub fn test_inc_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+    let count = 100;
+    sm.create(fix, 1024)?;
+    sm.commit(fix)?;
+
+    let mut tracker = CostTracker::new("inc.csv")?;
+    for _ in 0..10 {
+        for b in 0..count {
+            tracker.begin(fix);
+            sm_inc_block(fix, sm.addr(), b)?;
+            tracker.end(fix)?;
+        }
+        sm.commit(fix)?;
+    }
+
+    Ok(())
+}
+
 pub fn test_wrapping_around(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
     sm.create(fix, (ENTRIES_PER_BLOCK * 2) as u64)?;
 
@@ -188,9 +222,23 @@ pub fn test_wrapping_around(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<
     // won't be changed by any free operations.
     for _ in 0..20 {
         info!("alloc_begin={}", alloc_begin);
-        alloc_begin = alloc_blocks(fix, sm.addr(), batch_size, commit_begin, alloc_begin, &mut allocated)?;
+        alloc_begin = alloc_blocks(
+            fix,
+            sm.addr(),
+            batch_size,
+            commit_begin,
+            alloc_begin,
+            &mut allocated,
+        )?;
         free_blocks(fix, sm.addr(), batch_size, &mut allocated)?;
-        alloc_begin = alloc_blocks(fix, sm.addr(), batch_size, commit_begin, alloc_begin, &mut allocated)?;
+        alloc_begin = alloc_blocks(
+            fix,
+            sm.addr(),
+            batch_size,
+            commit_begin,
+            alloc_begin,
+            &mut allocated,
+        )?;
         free_blocks(fix, sm.addr(), batch_size, &mut allocated)?;
 
         sm.commit(fix)?;

@@ -93,7 +93,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     }
 
     test_section! {
-        "/pdata/sm-metadata/",
+        "/pdata/space-map/metadata/",
         test!("boundary-size", test_boundary_size_)
         test!("commit-cost", test_commit_cost_)
         test!("wrapping-around", test_wrapping_around_)
