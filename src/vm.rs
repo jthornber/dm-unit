@@ -3,6 +3,7 @@ use crate::memory::*;
 
 use log::*;
 use std::cell::RefCell;
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
@@ -36,6 +37,14 @@ impl InstCache {
 
     /// Removes any blocks that contain loc (there can be only one).
     pub fn invalidate(&mut self, _loc: u64) {}
+}
+
+//-----------------------------
+
+pub struct BBStats {
+    pub begin: Addr,
+    pub end: Addr,
+    pub hits: u64,
 }
 
 //-----------------------------
@@ -857,7 +866,7 @@ impl VM {
 
     fn exec_bb(&mut self, bb: &Rc<RefCell<BasicBlock>>) -> Result<()> {
         let pc = self.pc();
-        let bb = bb.borrow();
+        let mut bb = bb.borrow_mut();
         if bb.breakpoint {
             if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
                 self.last_bp = Some(pc);
@@ -867,6 +876,7 @@ impl VM {
             self.last_bp = None;
         }
 
+        bb.hits += 1;
         for (inst, width) in &bb.instrs {
             // debug!("{:08x}: {}", addr, inst);
             self.step(*inst, *width as u64)?;
@@ -897,6 +907,22 @@ impl VM {
     pub fn rm_breakpoint(&mut self, loc: Addr) -> bool {
         self.inst_cache.invalidate(loc.0);
         self.breakpoints.remove(&loc.0)
+    }
+
+    pub fn get_hot_basic_blocks(&self) -> Vec<BBStats> {
+        let mut stats = Vec::with_capacity(self.inst_cache.basic_blocks.len());
+
+        for (_, bb) in &self.inst_cache.basic_blocks {
+            let bb = bb.borrow();
+            stats.push(BBStats {
+                begin: Addr(bb.begin),
+                end: Addr(bb.end),
+                hits: bb.hits,
+            });
+        }
+
+        stats.sort_by_key(|bbs| Reverse(bbs.hits));
+        stats
     }
 }
 

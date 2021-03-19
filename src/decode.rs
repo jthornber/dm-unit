@@ -1428,7 +1428,11 @@ fn is_branch(inst: Inst) -> bool {
 //----------------------------------
 
 #[allow(dead_code)]
+#[derive(Clone, Debug)]
 pub struct BasicBlock {
+    // How many times has this been executed.
+    pub hits: u64,
+
     // The addresses this basic block covers
     pub begin: u64,
     pub end: u64,
@@ -1495,6 +1499,7 @@ pub fn decode_basic_block(
     }
 
     Ok(BasicBlock {
+        hits: 0,
         begin: base,
         end: pc,
         breakpoint: is_bp,

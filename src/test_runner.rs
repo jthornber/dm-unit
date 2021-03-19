@@ -213,6 +213,7 @@ impl<'a> TestRunner<'a> {
                 debug!("{}", fix.vm);
                 drop(fix);
             } else {
+                fix.log_top_funcs(20);
                 drop(fix);
                 pass += 1;
                 println!(" PASS");

@@ -299,6 +299,28 @@ impl Fixture {
 
         Ok(())
     }
+
+    pub fn log_top_funcs(&mut self, mut count: usize) {
+        // Build an rmap so we can go efficiently from address to function name
+        let mut rmap = BTreeMap::new();
+        for (name, ptr) in &self.symbols {
+            rmap.insert(ptr.0, name.clone());
+        }
+
+        // See which basic blocks start at a func entry point
+        let bbs = self.vm.get_hot_basic_blocks();
+        debug!("Top basic blocks:");
+        for bb in &bbs {
+            if count == 0 {
+                break;
+            }
+
+            if rmap.contains_key(&bb.begin.0) {
+                debug!("    {}:\t{}", rmap.get(&bb.begin.0).unwrap(), bb.hits);
+                count -= 1;
+            }
+        }
+    }
 }
 
 //-------------------------------
