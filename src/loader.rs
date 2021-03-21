@@ -718,7 +718,11 @@ fn load_sections(mem: &mut Memory, base: Addr, ss: &mut Sections, perms: u8) -> 
     Ok(Addr(base.0 + len))
 }
 
-fn load_module(mem: &mut Memory, mut module: Module) -> Result<BTreeMap<String, Addr>> {
+pub struct LoaderInfo {
+    pub symbols: BTreeMap<String, Addr>,
+}
+
+fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     // Layout of module in memory:
     //    [text] [ro-data] [w-data]
     //
@@ -824,13 +828,13 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<BTreeMap<String, 
         }
     }
 
-    Ok(symtable)
+    Ok(LoaderInfo {symbols: symtable})
 }
 
 pub fn load_modules<P: AsRef<Path>>(
     mem: &mut Memory,
     paths: &[P],
-) -> Result<BTreeMap<String, Addr>> {
+) -> Result<LoaderInfo> {
     let mut modules = Vec::new();
 
     for p in paths {

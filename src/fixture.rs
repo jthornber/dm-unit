@@ -58,7 +58,7 @@ impl Fixture {
         let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
-        let symbols = load_modules(&mut vm.mem, &modules[0..])?;
+        let symbols = load_modules(&mut vm.mem, &modules[0..])?.symbols;
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;
