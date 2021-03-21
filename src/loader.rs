@@ -718,7 +718,7 @@ fn load_sections(mem: &mut Memory, base: Addr, ss: &mut Sections, perms: u8) -> 
     Ok(Addr(base.0 + len))
 }
 
-fn load_module(mem: &mut Memory, module: &mut Module) -> Result<BTreeMap<String, Addr>> {
+fn load_module(mem: &mut Memory, mut module: Module) -> Result<BTreeMap<String, Addr>> {
     // Layout of module in memory:
     //    [text] [ro-data] [w-data]
     //
@@ -779,7 +779,6 @@ fn load_module(mem: &mut Memory, module: &mut Module) -> Result<BTreeMap<String,
             data: vec![0u8; 0],
         }));
 
-        // FIXME: use enumerate
         for (i, sym) in module.refs.iter().enumerate() {
             let mut sym = sym.borrow_mut();
             sym.section = Some(undefined_section.clone());
@@ -839,51 +838,9 @@ pub fn load_modules<P: AsRef<Path>>(
     }
 
     // combine the modules
-    let mut module = merge_modules(modules);
+    let module = merge_modules(modules);
 
-    // FIXME: why &mut, either pass ownership, or just plain &
-    load_module(mem, &mut module)
+    load_module(mem, module)
 }
-
-//--------------------------
-
-/*
-impl<'a> Loader<'a> {
-    /// Loads an elf format file into memory.  Returns a symbol table.
-    fn load<P: AsRef<Path>>(&mut self, path: P) -> Result<BTreeMap<String, Symbol>> {
-        // Now we can adjust all the symbol addresses to reflect where
-        // we put the sections.
-        let mut globals: Vec<usize> = Vec::new();
-        for (i, sym) in syms.iter_mut().enumerate() {
-            // adjust the offset for defined symbols
-            if sym.shndx == 0 {
-                globals.push(i);
-            } else if let Some(section_name) = indexes.get(&sym.shndx) {
-                if let Some(base) = bases.get(section_name) {
-                    // info!("adjusting {}: {} += {}, section '{}'", sym.name, sym.value, base.0, section_name);
-                    sym.value += base.0;
-                }
-            }
-        }
-
-        // Each global becomes a single 'ret' instruction.
-
-
-        // Execute all the relocation instructions to adjust the code.
-        // self.exec_relocations(rela_sections, &indexes, &bases, &syms)?;
-
-        // Now we pull all the symbol info together to create a map from
-        // symbol -> elf::Symbol, where the addr reflects where we've actually
-        // loaded the sections.
-        let mut symbols = BTreeMap::new();
-        for sym in syms {
-            symbols.insert(sym.name.clone(), sym.clone());
-        }
-        Ok(symbols)
-    }
-
-
-}
-*/
 
 //--------------------------
