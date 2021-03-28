@@ -550,9 +550,7 @@ fn adjust_relocation(
                     rel.sym = sym.clone();
                     Simple(rel)
                 }
-                _ => {
-                    crel.clone()
-                }
+                _ => crel.clone(),
             }
         }
         Pair(rel1, rel2) => {
@@ -565,9 +563,7 @@ fn adjust_relocation(
                     rel2.sym = sym.clone();
                     Pair(rel1, rel2)
                 }
-                _ => {
-                    crel.clone()
-                }
+                _ => crel.clone(),
             }
         }
     }
@@ -719,7 +715,27 @@ fn load_sections(mem: &mut Memory, base: Addr, ss: &mut Sections, perms: u8) -> 
 }
 
 pub struct LoaderInfo {
-    pub symbols: BTreeMap<String, Addr>,
+    symbols: BTreeMap<String, Addr>,
+    sym_rmap: BTreeMap<Addr, String>,
+}
+
+impl LoaderInfo {
+    fn new(symbols: BTreeMap<String, Addr>) -> Self {
+        let mut sym_rmap = BTreeMap::new();
+        for (k, v) in &symbols {
+            sym_rmap.insert(*v, k.clone());
+        }
+
+        LoaderInfo { symbols, sym_rmap }
+    }
+
+    pub fn get_sym(&self, name: &str) -> Option<Addr> {
+        self.symbols.get(name).map(|a| a.clone())
+    }
+
+    pub fn get_rmap(&self, loc: Addr) -> Option<String> {
+        self.sym_rmap.get(&loc).map(|s| s.clone())
+    }
 }
 
 fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
@@ -828,13 +844,10 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
-    Ok(LoaderInfo {symbols: symtable})
+    Ok(LoaderInfo::new(symtable))
 }
 
-pub fn load_modules<P: AsRef<Path>>(
-    mem: &mut Memory,
-    paths: &[P],
-) -> Result<LoaderInfo> {
+pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
     let mut modules = Vec::new();
 
     for p in paths {

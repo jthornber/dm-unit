@@ -25,8 +25,7 @@ type FixCallback = Box<dyn Fn(&mut Fixture) -> Result<()>>;
 pub struct Fixture {
     pub vm: VM,
 
-    // Entry points for symbols
-    symbols: BTreeMap<String, Addr>,
+    loader_info: LoaderInfo,
 
     // Associates breakpoint addresses with callback functions.
     breakpoints: BTreeMap<u64, FixCallback>,
@@ -58,35 +57,25 @@ impl Fixture {
         let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
-        let symbols = load_modules(&mut vm.mem, &modules[0..])?.symbols;
+        let loader_info = load_modules(&mut vm.mem, &modules[0..])?;
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;
 
         Ok(Fixture {
             vm,
-            symbols,
+            loader_info,
             breakpoints: BTreeMap::new(),
             trace_indent: 0,
         })
     }
 
     fn lookup_fn(&self, func: &str) -> Result<Addr> {
-        if let Some(addr) = self.symbols.get(func) {
-            Ok(*addr)
+        if let Some(addr) = self.loader_info.get_sym(func) {
+            Ok(addr)
         } else {
             Err(anyhow!("couldn't lookup symbol '{}'", func))
         }
-    }
-
-    fn symbol_rmap(&self, loc: u64) -> Option<String> {
-        for (name, sym) in &self.symbols {
-            if sym.0 == loc {
-                return Some(name.clone());
-            }
-        }
-
-        None
     }
 
     // Runs the vm, handling any breakpoints.
@@ -113,7 +102,7 @@ impl Fixture {
                     }
                 }
                 Err(VmErr::EBreak) => {
-                    if let Some(global) = self.symbol_rmap(self.vm.reg(Reg::PC)) {
+                    if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
                         warn!("unstubbed global called: {}", global);
                         return Err(anyhow!("unstubbed global access '{}'", global));
                     } else {
@@ -301,12 +290,6 @@ impl Fixture {
     }
 
     pub fn log_top_funcs(&mut self, mut count: usize) {
-        // Build an rmap so we can go efficiently from address to function name
-        let mut rmap = BTreeMap::new();
-        for (name, ptr) in &self.symbols {
-            rmap.insert(ptr.0, name.clone());
-        }
-
         // See which basic blocks start at a func entry point
         let bbs = self.vm.get_hot_basic_blocks();
         debug!("Top basic blocks:");
@@ -315,8 +298,8 @@ impl Fixture {
                 break;
             }
 
-            if rmap.contains_key(&bb.begin.0) {
-                debug!("    {}:\t{}", rmap.get(&bb.begin.0).unwrap(), bb.hits);
+            if let Some(name) = self.loader_info.get_rmap(bb.begin) {
+                debug!("    {}:\t{}", name, bb.hits);
                 count -= 1;
             }
         }
