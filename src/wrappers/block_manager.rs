@@ -44,7 +44,7 @@ fn lock_(fix: &mut Fixture, lock_fn: &str, bm: Addr, b: u64, validator: Addr) ->
     fix.vm.set_reg(A1, b);
     fix.vm.set_reg(A2, validator.0);
 
-    let result = fix.vm.mem.alloc(8)?;
+    let result = fix.vm.mem.alloc_bytes(vec![0u8; 8], PERM_READ | PERM_WRITE)?;
     fix.vm.set_reg(A3, result.0);
 
     fix.call(lock_fn)?;

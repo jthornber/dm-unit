@@ -26,8 +26,7 @@ pub fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr>
     let mut bytes = vec![0; G::guest_len()];
     let mut w = Cursor::new(&mut bytes);
     v.pack(&mut w)?;
-    let ptr = mem.alloc_perms(bytes.len(), perms)?;
-    mem.write(ptr, &bytes, 0)?;
+    let ptr = mem.alloc_bytes(bytes, perms)?;
     Ok(ptr)
 }
 

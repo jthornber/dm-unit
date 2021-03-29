@@ -52,7 +52,7 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
     let nr_blocks = inode.nr_sectors / (block_size / 512);
 
     let bm = Arc::new(BlockManager::new(nr_blocks));
-    let guest_addr = fix.vm.mem.alloc(4)?;
+    let guest_addr = fix.vm.mem.alloc_bytes(vec![0u8; 4], PERM_READ | PERM_WRITE)?;
     set_bm(guest_addr, bm)?;
 
     fix.vm.ret(guest_addr.0);

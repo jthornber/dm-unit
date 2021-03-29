@@ -433,23 +433,6 @@ impl Memory {
         Ok(())
     }
 
-    // FIXME: always use alloc_bytes?  Forces client to decide
-    // how memory is initialised.
-    // Allocates a block on the heap with specific permissions.
-    pub fn alloc_perms(&mut self, len: usize, perms: u8) -> Result<Addr> {
-        // We allocate an extra word before and after the block to
-        // detect overwrites.
-        let extra_len = len + 8;
-        let ptr = self.heap.alloc(extra_len)?;
-        assert!(!self.allocations.contains_key(&ptr.0));
-        self.allocations.insert(ptr.0, extra_len);
-
-        // mmap just the central part that may be used.
-        let ptr = Addr(ptr.0 + 4);
-        self.mmap(ptr, Addr(ptr.0 + len as u64), perms)?;
-        Ok(ptr)
-    }
-
     pub fn alloc_bytes(&mut self, bytes: Vec<u8>, perms: u8) -> Result<Addr> {
         // We allocate an extra word before and after the block to
         // detect overwrites.
@@ -462,12 +445,6 @@ impl Memory {
         let ptr = Addr(ptr.0 + 4);
         self.mmap_bytes(ptr, bytes, perms)?;
         Ok(ptr)
-    }
-
-    // Allocates a block on the heap with read/write permissions.  The
-    // common case.
-    pub fn alloc(&mut self, len: usize) -> Result<Addr> {
-        self.alloc_perms(len, PERM_READ | PERM_WRITE)
     }
 
     // Free returns the bytes that made up the allocation.  Useful for

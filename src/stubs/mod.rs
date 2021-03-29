@@ -50,7 +50,7 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
 
 pub fn kmalloc(fix: &mut Fixture) -> Result<()> {
     let len = fix.vm.reg(Reg::A0);
-    let ptr = fix.vm.mem.alloc(len as usize)?;
+    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; len as usize], PERM_READ | PERM_WRITE)?;
     fix.vm.ret(ptr.0);
     Ok(())
 }

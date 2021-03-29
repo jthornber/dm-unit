@@ -129,7 +129,7 @@ impl Fixture {
     // we allocate a word on the heap and fill it out with an ebreak.
     fn alloc_ebreak(&mut self) -> Result<Addr> {
         // We need a unique address return control to us.
-        let ptr = self.vm.mem.alloc_perms(4, PERM_EXEC)?;
+        let ptr = self.vm.mem.alloc_bytes(vec![0u8; 4], PERM_EXEC)?;
 
         // Fill out a c.ebreak at this address because basic blocks are decoded
         // before breakpoints are checked.
@@ -381,7 +381,7 @@ impl<'a> DerefMut for AutoGPtr<'a> {
 }
 
 pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
-    let ptr = fix.vm.mem.alloc(len)?;
+    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 
