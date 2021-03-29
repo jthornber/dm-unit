@@ -1,14 +1,8 @@
 use crate::fixture::*;
 use anyhow::Result;
-use gdbstub::arch::riscv::Riscv64;
-use gdbstub::arch::Arch;
-use gdbstub::target::ext::base::singlethread::{SingleThreadOps, StopReason};
-use gdbstub::target::ext::base::{self, ResumeAction};
-use gdbstub::target::{Target, TargetResult};
 use log::{debug, info};
 use regex::Regex;
 use std::collections::BTreeMap;
-use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 
 //-------------------------------
@@ -74,77 +68,6 @@ impl PathFormatter {
         // Inefficient, but I don't think it will be significant.
         self.last_path = last_path;
     }
-}
-
-//-------------------------------
-// GDB support
-
-#[allow(dead_code)]
-struct TestTarget<'a> {
-    fix: Fixture,
-    test_fn: &'a mut Box<dyn Fn(&mut Fixture) -> Result<()>>,
-}
-
-impl<'a> SingleThreadOps for TestTarget<'a> {
-    fn resume(
-        &mut self,
-        _action: ResumeAction,
-        _check_gdb_interrupt: &mut dyn FnMut() -> bool,
-    ) -> Result<StopReason<<Self::Arch as Arch>::Usize>, Self::Error> {
-        todo!();
-    }
-
-    fn read_registers(
-        &mut self,
-        _regs: &mut <Self::Arch as Arch>::Registers,
-    ) -> TargetResult<(), Self> {
-        todo!();
-    }
-
-    fn write_registers(
-        &mut self,
-        _regs: &<Self::Arch as Arch>::Registers,
-    ) -> TargetResult<(), Self> {
-        todo!();
-    }
-
-    fn read_addrs(
-        &mut self,
-        _start_addr: <Self::Arch as Arch>::Usize,
-        _data: &mut [u8],
-    ) -> TargetResult<(), Self> {
-        todo!();
-    }
-
-    fn write_addrs(
-        &mut self,
-        _start_addr: <Self::Arch as Arch>::Usize,
-        _data: &[u8],
-    ) -> TargetResult<(), Self> {
-        todo!();
-    }
-}
-
-impl<'a> Target for TestTarget<'a> {
-    type Arch = Riscv64;
-    type Error = anyhow::Error;
-
-    fn base_ops(&mut self) -> base::BaseOps<Self::Arch, Self::Error> {
-        base::BaseOps::SingleThread(self)
-    }
-}
-
-#[allow(dead_code)]
-fn wait_for_gdb_connection(port: u16) -> std::io::Result<TcpStream> {
-    let sockaddr = format!("localhost:{}", port);
-    eprintln!("Waiting for a GDB connection on {:?}...", sockaddr);
-    let sock = TcpListener::bind(sockaddr)?;
-
-    // Blocks ...
-    let (stream, addr) = sock.accept()?;
-
-    eprintln!("Debugger connected from {}", addr);
-    Ok(stream)
 }
 
 //-------------------------------
