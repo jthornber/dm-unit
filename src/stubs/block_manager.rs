@@ -211,6 +211,8 @@ pub fn bm_checksum(fix: &mut Fixture) -> Result<()> {
 
     let csum = fix.vm.mem.read_some(data, PERM_READ, calc_csum)?;
     fix.vm.ret(csum as u64);
+
+    fix.vm.stats.instrs += (len * 3) / 8;
     Ok(())
 }
 
