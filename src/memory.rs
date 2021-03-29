@@ -435,11 +435,11 @@ impl Memory {
         // We allocate an extra double word before and after the block to
         // detect overwrites.
         let len = bytes.len();
-        let heap_len = len + 16;
+        let heap_len = len + 8;
         let heap_ptr = self.heap.alloc(heap_len)?;
 
         // mmap just the central part that may be used.
-        let ptr = Addr(heap_ptr.0 + 8);
+        let ptr = Addr(heap_ptr.0 + 4);
         self.mmap_bytes(ptr, bytes, perms)?;
         self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
         Ok(ptr)
