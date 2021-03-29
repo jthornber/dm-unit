@@ -1,11 +1,11 @@
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
+use log::*;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::result;
 use thiserror::Error;
-use log::*;
 
 use crate::primitive::Primitive;
 
@@ -192,8 +192,8 @@ pub struct Memory {
     // We always want a heap, so I'm embedding it in the mmu.
     heap: Heap,
 
-    // Maps allocation block to len.  FIXME: this is ugly.
-    allocations: BTreeMap<u64, usize>,
+    // Maps the ptr returned by alloc_bytes() back to the heap ptr and len.
+    allocations: BTreeMap<u64, (u64, usize)>,
 }
 
 // FIXME: implement snapshotting.
@@ -335,9 +335,7 @@ impl Memory {
     pub fn change_perms(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<u8> {
         let begin = begin.0;
         let end = end.0;
-        self.get_mut_mmap(begin, end, 0, |mut mm| {
-              mm.change_perms(begin, end, perms)
-        })
+        self.get_mut_mmap(begin, end, 0, |mut mm| mm.change_perms(begin, end, perms))
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
@@ -434,26 +432,40 @@ impl Memory {
     }
 
     pub fn alloc_bytes(&mut self, bytes: Vec<u8>, perms: u8) -> Result<Addr> {
-        // We allocate an extra word before and after the block to
+        // We allocate an extra double word before and after the block to
         // detect overwrites.
         let len = bytes.len();
-        let extra_len = len + 8;
-        let ptr = self.heap.alloc(extra_len)?;
-        self.allocations.insert(ptr.0, extra_len);
+        let heap_len = len + 16;
+        let heap_ptr = self.heap.alloc(heap_len)?;
 
         // mmap just the central part that may be used.
-        let ptr = Addr(ptr.0 + 4);
+        let ptr = Addr(heap_ptr.0 + 8);
         self.mmap_bytes(ptr, bytes, perms)?;
+        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
+        Ok(ptr)
+    }
+
+    pub fn alloc_aligned(&mut self, bytes: Vec<u8>, perms: u8, align: usize) -> Result<Addr> {
+        // We allocate an extra double word before and after the block to
+        // detect overwrites.
+        let len = bytes.len();
+        let heap_len = len + align + 16;
+        let heap_ptr = self.heap.alloc(heap_len)?;
+
+        // mmap just the central part that may be used.
+        let align = align as u64;
+        let next = ((heap_ptr.0 + 8 + align - 1) / align) * align;
+        let ptr = Addr(next);
+        self.mmap_bytes(ptr, bytes, perms)?;
+        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
         Ok(ptr)
     }
 
     // Free returns the bytes that made up the allocation.  Useful for
     // bouncing block manager buffers between host and guest.
     pub fn free(&mut self, ptr: Addr) -> Result<Vec<u8>> {
-        let heap_ptr = Addr(ptr.0 - 4);
-
-        if let Some(_extra_len) = self.allocations.remove(&heap_ptr.0) {
-            self.heap.free(heap_ptr)?;
+        if let Some((heap_ptr, _extra_len)) = self.allocations.remove(&ptr.0) {
+            self.heap.free(Addr(heap_ptr))?;
             self.unmap(ptr)
         } else {
             Err(MemErr::BadFree(ptr))

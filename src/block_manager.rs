@@ -231,7 +231,7 @@ impl BMInner {
                 validator: _maybe_validator,
                 data,
             }) => {
-                let data = mem.alloc_bytes(data, PERM_READ)?;
+                let data = mem.alloc_aligned(data, PERM_READ, 4096)?;
 
                 // FIXME: run validator->check()
 
@@ -255,7 +255,7 @@ impl BMInner {
             None => {
                 // This block has never been touched, so we'll initialise
                 // with zeroes.
-                let data = mem.alloc_bytes(vec![0; BLOCK_SIZE], PERM_READ)?;
+                let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)?;
 
                 // Create guest ptr.
                 let gb = GBlock { loc, data };
@@ -328,7 +328,7 @@ impl BMInner {
                 }
 
                 // Create guest ptr.
-                let data = mem.alloc_bytes(data, PERM_READ | PERM_WRITE)?;
+                let data = mem.alloc_aligned(data, PERM_READ | PERM_WRITE, 4096)?;
                 let gb = GBlock { loc, data };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
@@ -347,7 +347,7 @@ impl BMInner {
             None => {
                 // This block has never been touched, so we'll initialise
                 // with zeroes.
-                let data = mem.alloc_bytes(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE)?;
+                let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)?;
 
                 // Create guest ptr.
                 let gb = GBlock { loc, data };
