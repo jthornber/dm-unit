@@ -475,7 +475,7 @@ impl VM {
             }
             Addiw { rd, rs, imm } => {
                 let rs = self.reg(rs) as u32;
-                self.set_reg(rd, rs.wrapping_add(imm as u32) as i32 as u32 as u64);
+                self.set_reg(rd, rs.wrapping_add(imm as u32) as i32 as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             Slti { rd, rs, imm } => {
