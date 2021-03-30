@@ -46,6 +46,8 @@ impl Fixture {
 
         // These need to be in link order with the lowest level first.
         let modules: Vec<PathBuf> = [
+            "lib/rbtree.ko",
+            "drivers/md/dm-bufio.ko",
             "drivers/md/persistent-data/dm-persistent-data.ko",
             "drivers/md/dm-thin-pool.ko",
         ]

@@ -170,7 +170,7 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
             i += 1;
             if i < rlocs.len() {
                 let rloc2 = &rlocs[i];
-                if rloc2.rtype == Rpcrel_lo12_i {
+                if rloc2.rtype == Rpcrel_lo12_i || rloc2.rtype == Rpcrel_lo12_s {
                     compound.push(CompoundRel::Pair(rloc.clone(), rloc2.clone()));
                     i += 1;
                 } else {
@@ -267,6 +267,11 @@ fn relocate(
         Rpcrel_lo12_i => {
             mutate_u32(mem, location, |old| {
                 (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
+            })?;
+        }
+        Rpcrel_lo12_s => {
+            mutate_u32(mem, location, |old| {
+                      (old & 0xfffff) | (((sym.0 as u32) & 0x1f) << 7) | (((sym.0 as u32) & 0xfe) << 24)
             })?;
         }
         Radd32 => {
