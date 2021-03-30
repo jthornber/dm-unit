@@ -191,6 +191,18 @@ impl Fixture {
         Ok(())
     }
 
+    // Use this to call functions that return a ptr or errno (IS_ERR() etc).
+    pub fn call_with_err_ptr(&mut self, tm_func: &str) -> Result<Addr> {
+        self.call(tm_func)?;
+
+        let r = self.vm.reg(A0) as i64 as i32;
+        if r < 0 && r > -4095 {
+            Err(anyhow!("{} failed: {}", tm_func, error_string(-r)))
+        } else {
+            Ok(Addr(self.vm.reg(A0)))
+        }
+    }
+
     pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
         self.call_at(loc)?;
         let r = self.vm.reg(A0) as i64 as i32;
@@ -366,7 +378,10 @@ impl<'a> DerefMut for AutoGPtr<'a> {
 }
 
 pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
-    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
+    let ptr = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 
