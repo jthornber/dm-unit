@@ -165,17 +165,19 @@ pub fn sm_commit(fix: &mut Fixture, sm_ptr: Addr) -> Result<()> {
     fix.call_at_with_errno(sm.commit)
 }
 
-pub fn sm_inc_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+pub fn sm_inc_block(fix: &mut Fixture, sm_ptr: Addr, b: u64, e: u64) -> Result<()> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
-    fix.vm.set_reg(A1, block);
+    fix.vm.set_reg(A1, b);
+    fix.vm.set_reg(A2, e);
     fix.call_at_with_errno(sm.inc_block)
 }
 
-pub fn sm_dec_block(fix: &mut Fixture, sm_ptr: Addr, block: u64) -> Result<()> {
+pub fn sm_dec_block(fix: &mut Fixture, sm_ptr: Addr, b: u64, e: u64) -> Result<()> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
     fix.vm.set_reg(A0, sm_ptr.0);
-    fix.vm.set_reg(A1, block);
+    fix.vm.set_reg(A1, b);
+    fix.vm.set_reg(A1, e);
     fix.call_at_with_errno(sm.dec_block)
 }
 

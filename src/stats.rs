@@ -1,7 +1,7 @@
 use anyhow::Result;
+use log::*;
 use std::fs::File;
 use std::io::prelude::*;
-use log::*;
 
 use crate::fixture::*;
 use crate::stubs::block_manager::*;
@@ -76,7 +76,11 @@ impl CostTracker {
             info!("iteration {} has gone crazy", self.iteration);
         }
 
-        write!(self.csv_out, "{}, {}, {}, {}\n", self.iteration, delta.instrs, delta.read_locks, delta.write_locks)?;
+        write!(
+            self.csv_out,
+            "{}, {}, {}, {}\n",
+            self.iteration, delta.instrs, delta.read_locks, delta.write_locks
+        )?;
         Ok(())
     }
 }

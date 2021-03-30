@@ -331,13 +331,15 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
 
     pool.close_thin(fix, td)?;
 
+    // FIXME: run thin_check
+
     Ok(())
 }
 
 // This test blows up, with massive amounts of instrs, read/write locks per insert.
 // Probably the fault of the space maps.
 fn test_provision_rolling_snaps(fix: &mut Fixture) -> Result<()> {
-    let thin_blocks = generate_runs(4_000, 20);
+    let thin_blocks = generate_runs(20_000, 20);
     do_provision_rolling_snap(fix, &thin_blocks)
 }
 

@@ -98,10 +98,7 @@ fn free_blocks(
     while nr_blocks > 0 {
         if let Some(range) = allocated.front() {
             let end = u64::min(range.1, range.0 + nr_blocks);
-
-            for b in range.0..end {
-                sm_dec_block(fix, sm, b)?;
-            }
+            sm_dec_block(fix, sm, range.0, end)?;
 
             let nr_freed = end - range.0;
 
@@ -198,11 +195,9 @@ pub fn test_inc_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
 
     let mut tracker = CostTracker::new("inc.csv")?;
     for _ in 0..10 {
-        for b in 0..count {
-            tracker.begin(fix);
-            sm_inc_block(fix, sm.addr(), b)?;
-            tracker.end(fix)?;
-        }
+        tracker.begin(fix);
+        sm_inc_block(fix, sm.addr(), 0, count)?;
+        tracker.end(fix)?;
         sm.commit(fix)?;
     }
 
