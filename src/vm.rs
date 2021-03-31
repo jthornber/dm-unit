@@ -1,6 +1,3 @@
-use crate::decode::*;
-use crate::memory::*;
-
 use log::*;
 use std::cell::RefCell;
 use std::cmp::Reverse;
@@ -8,6 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
+
+use crate::decode::*;
+use crate::memory::*;
 
 //-----------------------------
 
@@ -923,6 +923,17 @@ impl VM {
 
         stats.sort_by_key(|bbs| Reverse(bbs.hits));
         stats
+    }
+
+    pub fn get_bb_stats(&self, ptr: Addr) -> Option<BBStats> {
+        self.inst_cache.basic_blocks.get(&ptr.0).map(|bb| {
+            let bb = bb.borrow();
+            BBStats {
+                begin: Addr(bb.begin),
+                end: Addr(bb.end),
+                hits: bb.hits,
+            }
+        })
     }
 }
 

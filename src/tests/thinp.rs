@@ -300,6 +300,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
 
     let mut alloc_tracker = CostTracker::new("alloc-block.csv")?;
     let mut insert_tracker = CostTracker::new("insert-block.csv")?;
+    let mut delete_tracker = CostTracker::new("delete-thin.csv")?;
     let mut insert_count = 0;
     pool.stats_start(fix);
     for thin_b in thin_blocks {
@@ -320,7 +321,9 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
             pool.create_snap(fix, thin_id + 1, 0)?;
             thin_id += 1;
             if thin_id > 10 {
+                delete_tracker.begin(fix);
                 pool.delete_thin(fix, thin_id - 10)?;
+                delete_tracker.end(fix)?;
             }
             pool.commit(fix)?;
 
@@ -330,6 +333,8 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     }
 
     pool.close_thin(fix, td)?;
+    fix.log_func_calls("disk_ll_save_ie")?;
+    fix.log_func_calls("sm_ll_inc")?;
 
     // FIXME: run thin_check
 

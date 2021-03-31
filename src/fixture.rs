@@ -289,6 +289,17 @@ impl Fixture {
         Ok(())
     }
 
+    pub fn log_func_calls(&self, func: &str) -> Result<()> {
+	let ptr = self.lookup_fn(func)?;
+	if let Some(stats) = self.vm.get_bb_stats(ptr) {
+    		debug!("{}: {} calls", func, stats.hits);
+	} else {
+    		debug!("{}: never called", func);
+	}
+
+	Ok(())
+    }
+
     pub fn log_top_funcs(&mut self, mut count: usize) {
         // See which basic blocks start at a func entry point
         let bbs = self.vm.get_hot_basic_blocks();
