@@ -13,7 +13,7 @@ use anyhow::Result;
 //-------------------------------
 
 #[allow(dead_code)]
-pub struct DiskSpaceMap {
+struct DiskSpaceMap {
     bm: Addr,
     tm: Addr,
     sm_meta: Addr,
@@ -21,26 +21,22 @@ pub struct DiskSpaceMap {
     sb: Addr,
 }
 
-impl DiskSpaceMap {
-    fn new() -> DiskSpaceMap {
-        DiskSpaceMap {bm: Addr(0), tm: Addr(0), sm_meta: Addr(0), sm_disk: Addr(0), sb: Addr(0)}
+struct DiskSMBuilder;
+
+impl SpaceMapBuilder for DiskSMBuilder {
+    fn create(&self, fix: &mut Fixture, nr_blocks: u64) -> Result<Box<dyn space_map::SpaceMap>> {
+        let bm = dm_bm_create(fix, u64::max(nr_blocks / ENTRIES_PER_BLOCK as u64, 1000))?;
+        let (tm, sm_meta) = dm_tm_create(fix, bm, 0)?;
+        let sm_disk = dm_sm_disk_create(fix, tm, nr_blocks)?;
+        let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+
+        Ok(Box::new(DiskSpaceMap {bm, tm, sm_meta, sm_disk, sb}))
     }
 }
 
 impl space_map::SpaceMap for DiskSpaceMap {
     fn addr(&self) -> Addr {
         self.sm_disk
-    }
-
-    fn create(&mut self, fix: &mut Fixture, nr_blocks: u64) -> Result<()> {
-        self.bm = dm_bm_create(fix, u64::max(nr_blocks / ENTRIES_PER_BLOCK as u64, 1000))?;
-        let (tm, sm) = dm_tm_create(fix, self.bm, 0)?;
-        self.tm = tm;
-        self.sm_meta = sm;
-        self.sm_disk = dm_sm_disk_create(fix, self.tm, nr_blocks)?;
-        self.sb = dm_bm_write_lock_zero(fix, self.bm, 0, Addr(0))?;
-
-        Ok(())
     }
 
     fn commit(&mut self, fix: &mut Fixture) -> Result<()> {
@@ -58,28 +54,29 @@ impl space_map::SpaceMap for DiskSpaceMap {
 fn test_boundary_size_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut sm = DiskSpaceMap::new();
-    test_boundary_size(fix, &mut sm)
+    let mut builder = DiskSMBuilder;
+    test_boundary_size(fix, &mut builder)
 }
 
 fn test_commit_cost_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut sm = DiskSpaceMap::new();
-    test_commit_cost(fix, &mut sm)
+    let mut builder = DiskSMBuilder;
+    test_commit_cost(fix, &mut builder)
 }
 
 fn test_inc_cost_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
-    let mut sm = DiskSpaceMap::new();
-    test_inc_cost(fix, &mut sm)
+
+    let mut builder = DiskSMBuilder;
+    test_inc_cost(fix, &mut builder)
 }
 
 fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut sm = DiskSpaceMap::new();
-    test_wrapping_around(fix, &mut sm)
+    let mut builder = DiskSMBuilder;
+    test_wrapping_around(fix, &mut builder)
 }
 
 
