@@ -1,6 +1,6 @@
+use crate::decode::*;
 use crate::fixture::*;
 use crate::memory::*;
-use crate::decode::*;
 
 use anyhow::Result;
 use log::info;
@@ -50,7 +50,10 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
 
 pub fn kmalloc(fix: &mut Fixture) -> Result<()> {
     let len = fix.vm.reg(Reg::A0);
-    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; len as usize], PERM_READ | PERM_WRITE)?;
+    let ptr = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; len as usize], PERM_READ | PERM_WRITE)?;
     fix.vm.ret(ptr.0);
     Ok(())
 }
@@ -101,6 +104,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     fix.at_func("dm_bm_is_read_only", Box::new(bm_is_read_only))?;
     fix.at_func("dm_bm_nr_blocks", Box::new(bm_nr_blocks))?;
     fix.at_func("dm_bm_prefetch", Box::new(bm_prefetch))?;
+    //fix.at_func("dm_bm_forget", Box::new(bm_forget))?;
     fix.at_func("dm_bm_read_lock", Box::new(bm_read_lock))?;
     fix.at_func("dm_bm_read_try_lock", Box::new(bm_read_lock))?;
     fix.at_func("dm_bm_set_read_only", Box::new(bm_set_read_only))?;

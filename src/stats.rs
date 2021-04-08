@@ -1,5 +1,4 @@
 use anyhow::Result;
-use log::*;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -72,10 +71,6 @@ impl CostTracker {
 
     pub fn end(&mut self, fix: &mut Fixture) -> Result<()> {
         let delta = Stats::delta(&self.baseline, fix);
-        if delta.write_locks > 200 {
-            info!("iteration {} has gone crazy", self.iteration);
-        }
-
         write!(
             self.csv_out,
             "{}, {}, {}, {}\n",

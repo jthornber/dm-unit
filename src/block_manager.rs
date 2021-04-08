@@ -7,8 +7,11 @@ use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
 use std::collections::BTreeMap;
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Seek;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::Mutex;
 use thinp::io_engine;
 use thinp::io_engine::{IoEngine, BLOCK_SIZE};
@@ -253,8 +256,13 @@ impl BMInner {
                 Ok(guest_ptr)
             }
             None => {
-                // This block has never been touched, so we'll initialise
-                // with zeroes.
+                // This block has never been touched, this should only
+                // happen with the superblock, where we take all zeroes
+                // to mean we want to format it.
+                if loc != 0 {
+                    return Err(anyhow!("request to read an uninitialised block: {}", loc));
+                }
+
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)?;
 
                 // Create guest ptr.
@@ -345,6 +353,14 @@ impl BMInner {
                 Ok(guest_ptr)
             }
             None => {
+                // This block has never been touched, so the zero flag must be set.
+                if !zero {
+                    return Err(anyhow!(
+                        "request to write an uninitialised block without zero flag: {}",
+                        loc
+                    ));
+                }
+
                 // This block has never been touched, so we'll initialise
                 // with zeroes.
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)?;
@@ -484,6 +500,42 @@ impl BMInner {
         Ok(())
     }
 
+    fn write_to_disk(&self, path: &Path) -> Result<()> {
+        let mut file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+        let zeroes = [0u8; 4096];
+
+        for b in 0..self.nr_blocks {
+            file.seek(io::SeekFrom::Start(b * BLOCK_SIZE as u64))?;
+            match self.locks.get(&b) {
+                Some(Lock::Clean { data, .. }) => {
+                    file.write_all(&data)?;
+                }
+                Some(_) => {
+                    return Err(anyhow!(
+                        "cannot write bm to disk since there's unflushed/locked data"
+                    ));
+                }
+                None => {
+                    file.write_all(&zeroes)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// At times we know which blocks are live data (eg, after a thin check),
+    /// this method let's us throw away unused data.
+    fn forget(&mut self, b: u64) -> Result<()> {
+        self.check_bounds(b)?;
+        match self.locks.remove(&b) {
+            Some(Lock::Clean { .. }) => Ok(()),
+            Some(_) => Err(anyhow!(
+                "cannot forget a block that isn't clean and unlocked"
+            )),
+            None => Ok(()),
+        }
+    }
+
     fn set_read_only(&mut self, _ro: bool) {
         todo!();
     }
@@ -520,7 +572,8 @@ impl BMInner {
                 Ok(r)
             }
             None => {
-                // Block isn't present, so we'll just return zeroes.
+                // Block isn't present, this should really only happen when reading the superblocks, where
+                // we take all zeroes to mean 'format this device'.
                 Ok(io_engine::Block::zeroed(b))
             }
         }
@@ -640,6 +693,16 @@ impl BlockManager {
     pub fn is_read_only(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.is_read_only()
+    }
+
+    pub fn forget(&self, b: u64) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.forget(b)
+    }
+    
+    pub fn write_to_disk(&self, path: &Path) -> Result<()> {
+        let inner = self.inner.lock().unwrap();
+        inner.write_to_disk(path)
     }
 }
 

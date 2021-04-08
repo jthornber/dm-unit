@@ -54,7 +54,7 @@ impl Fixture {
         .collect();
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
-        let heap_end = Addr(heap_begin.0 + (16 * 1024 * 1024));
+        let heap_end = Addr(heap_begin.0 + (32 * 1024 * 1024));
         let mem = Memory::new(heap_begin, heap_end);
         let mut vm = VM::new(mem);
         let loader_info = load_modules(&mut vm.mem, &modules[0..])?;

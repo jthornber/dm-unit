@@ -3,13 +3,24 @@ use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
+use std::path::Path;
+use std::sync::Arc;
+use thinp::io_engine::*;
+use thinp::pdata::btree_walker::*;
+use thinp::pdata::space_map::*;
+use thinp::pdata::unpack::*;
+use thinp::report::*;
+use thinp::thin::check::*;
+use thinp::thin::superblock::*;
 
 use crate::fixture::*;
 use crate::memory::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
+use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
+use crate::tests::btree::*;
 use crate::wrappers::thinp_metadata::*;
 
 //-------------------------------
@@ -23,6 +34,26 @@ struct ThinPool {
 
 struct ThinDev {
     td: Addr,
+}
+
+struct DebugReportInner {}
+
+impl ReportInner for DebugReportInner {
+    fn set_title(&mut self, txt: &str) {
+        debug!("report title: {}", txt);
+    }
+
+    fn set_sub_title(&mut self, txt: &str) {
+        debug!("report sub title: {}", txt);
+    }
+
+    fn progress(&mut self, _percent: u8) {}
+
+    fn log(&mut self, txt: &str) {
+        debug!("report: {}", txt);
+    }
+
+    fn complete(&mut self) {}
 }
 
 impl ThinPool {
@@ -102,7 +133,73 @@ impl ThinPool {
     }
 
     fn free_metadata_blocks(&mut self, fix: &mut Fixture) -> Result<u64> {
-        dm_pool_get_free_metadata_block_count(fix, self.pmd)
+        // thinp subtracts wiggle room of 0x400 from the free count as
+        // transaction overhead.  I add it back in here because I want
+        // this number to agree with that from thin_check.
+        dm_pool_get_free_metadata_block_count(fix, self.pmd).map(|n| n + 0x400)
+    }
+
+    fn check(&mut self) -> Result<()> {
+        // let report = std::sync::Arc::new(Report::new(Box::new(DebugReportInner {})));
+        let report = std::sync::Arc::new(mk_quiet_report());
+        let engine = get_bm()?.clone();
+        let space_maps = check_with_maps(engine, report)?;
+        let metadata_sm = space_maps.metadata_sm.lock().unwrap();
+        debug!(
+            "metadata: {}/{} allocated",
+            metadata_sm.get_nr_allocated()?,
+            metadata_sm.get_nr_blocks()?
+        );
+
+        // We discard unused blocks to save memory.
+        // FIXME: only discard blocks that were allocated last transaction.
+        let bm = get_bm()?.clone();
+        for b in 0..metadata_sm.get_nr_blocks()? {
+            if metadata_sm.get(b)? == 0 {
+                bm.forget(b)?;
+            }
+        }
+
+        let data_sm = space_maps.data_sm.lock().unwrap();
+        debug!(
+            "data: {}/{} allocated",
+            data_sm.get_nr_allocated()?,
+            data_sm.get_nr_blocks()?
+        );
+
+        Ok(())
+    }
+
+    fn show_mapping_residency(&self) -> Result<()> {
+        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm()?.clone();
+        let sb = read_superblock(engine.as_ref(), 0)?;
+
+        let mut path = Vec::new();
+        let roots = btree_to_map(&mut path, engine.clone(), false, sb.mapping_root)?;
+        for (thin_id, root) in roots {
+            debug!(
+                "residency of thin {} = {}",
+                thin_id,
+                calc_residency::<Value64>(root)?
+            );
+        }
+
+        let root = unpack::<SMRoot>(&sb.data_sm_root[0..])?;
+        debug!(
+            "residency of data sm index entries: {}",
+            calc_residency::<IndexEntry>(root.bitmap_root)?
+        );
+        debug!(
+            "residency of data sm overflow: {}",
+            calc_residency::<Value32>(root.ref_count_root)?
+        );
+
+        let root = unpack::<SMRoot>(&sb.metadata_sm_root[0..])?;
+        debug!(
+            "residency of metadata sm overflow: {}",
+            calc_residency::<Value32>(root.ref_count_root)?
+        );
+        Ok(())
     }
 }
 
@@ -326,6 +423,8 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
                 delete_tracker.end(fix)?;
             }
             pool.commit(fix)?;
+            //pool.stats_report(fix, "provision", commit_interval)?;
+            pool.check()?;
 
             pool.stats_start(fix);
             insert_count = 0;
@@ -333,10 +432,8 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     }
 
     pool.close_thin(fix, td)?;
-    fix.log_func_calls("disk_ll_save_ie")?;
-    fix.log_func_calls("sm_ll_inc")?;
-
-    // FIXME: run thin_check
+    pool.show_mapping_residency()?;
+    get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())
 }

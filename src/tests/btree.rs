@@ -97,7 +97,7 @@ impl<V: Unpack> NodeVisitor<V> for ResidencyVisitor {
 
 // Because this is a walk it implicitly checks the btree.  Returns
 // average residency as a _percentage_.
-fn calc_residency(root: u64) -> Result<usize> {
+pub fn calc_residency<V: Unpack>(root: u64) -> Result<usize> {
     let engine = get_bm()?;
     let walker = BTreeWalker::new(engine, false);
     let visitor = ResidencyVisitor {
@@ -106,11 +106,12 @@ fn calc_residency(root: u64) -> Result<usize> {
     };
     let mut path = Vec::new();
 
-    walker.walk::<ResidencyVisitor, Value64>(&mut path, &visitor, root)?;
+    walker.walk::<ResidencyVisitor, V>(&mut path, &visitor, root)?;
 
     let nr_entries = visitor.nr_entries.load(Ordering::SeqCst) as usize;
     let nr_leaves = visitor.nr_leaves.load(Ordering::SeqCst) as usize;
-    let max_entries = calc_max_entries::<Value64>();
+    debug!("nr_leaves = {}, nr_entries = {}", nr_leaves, nr_entries);
+    let max_entries = calc_max_entries::<V>();
 
     let percent = (nr_entries * 100) / (max_entries * nr_leaves);
 
@@ -186,7 +187,7 @@ fn check_keys_present(root: u64, keys: &[u64]) -> Result<()> {
 
 /// A little wrapper to let us store u64's in btrees.
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct Value64(u64);
+pub struct Value64(u64);
 
 impl Guest for Value64 {
     fn guest_len() -> usize {
@@ -217,6 +218,27 @@ impl Unpack for Value64 {
 impl Pack for Value64 {
     fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
         w.write_u64::<LittleEndian>(self.0)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Value32(u32);
+
+impl Unpack for Value32 {
+    fn disk_size() -> u32 {
+        4
+    }
+
+    fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
+        let (i, v) = le_u32(data)?;
+        Ok((i, Value32(v)))
+    }
+}
+
+impl Pack for Value32 {
+    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
+        w.write_u32::<LittleEndian>(self.0)?;
         Ok(())
     }
 }
@@ -392,7 +414,7 @@ impl<'a> BTreeTest<'a> {
     }
 
     fn residency(&self) -> Result<usize> {
-        calc_residency(self.root)
+        calc_residency::<Value64>(self.root)
     }
 }
 
