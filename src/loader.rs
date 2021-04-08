@@ -188,6 +188,28 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
     compound
 }
 
+fn mutate_u6<F: FnOnce(u8) -> u8>(mem: &mut Memory, loc: Addr, f: F) -> Result<()> {
+    let old = mem.read_into::<u8>(loc, 0)?;
+    let hi_bits = old & 0b11000000;
+    let lo_bits = old & 0b111111;
+    let new_lo_bits = f(lo_bits);
+
+    // assert!((new_lo_bits & 0b11000000) == 0);
+
+    let new = hi_bits | new_lo_bits;
+    let bytes = new.to_le_bytes();
+    mem.write(loc, &bytes, 0)
+        .map_err(|e| anyhow!("bad access at {}", e))
+}
+
+fn mutate_u8<F: FnOnce(u8) -> u8>(mem: &mut Memory, loc: Addr, f: F) -> Result<()> {
+    let old = mem.read_into::<u8>(loc, 0)?;
+    let new = f(old);
+    let bytes = new.to_le_bytes();
+    mem.write(loc, &bytes, 0)
+        .map_err(|e| anyhow!("bad access at {}", e))
+}
+
 fn mutate_u16<F: FnOnce(u16) -> u16>(mem: &mut Memory, loc: Addr, f: F) -> Result<()> {
     let old = mem.read_into::<u16>(loc, 0)?;
     let new = f(old);
@@ -269,11 +291,38 @@ fn relocate(
                 (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
             })?;
         }
+        Radd16 => {
+            mutate_u16(mem, location, |old| old + sym.0 as u16)?;
+        }
         Radd32 => {
             mutate_u32(mem, location, |old| old + sym.0 as u32)?;
         }
+        Radd64 => {
+            mutate_u64(mem, location, |old| old + sym.0 as u64)?;
+        }
+        Rsub6 => {
+            mutate_u6(mem, location, |old| old.wrapping_sub(sym.0 as u8))?;
+        }
+        Rsub8 => {
+            mutate_u8(mem, location, |old| old.wrapping_sub(sym.0 as u8))?;
+        }
+        Rsub16 => {
+            mutate_u16(mem, location, |old| old.wrapping_sub(sym.0 as u16))?;
+        }
         Rsub32 => {
             mutate_u32(mem, location, |old| old.wrapping_sub(sym.0 as u32))?;
+        }
+        Rsub64 => {
+            mutate_u64(mem, location, |old| old.wrapping_sub(sym.0 as u64))?;
+        }
+        Rset6 => {
+            mutate_u6(mem, location, |_| sym.0 as u8)?;
+        }
+        Rset8 => {
+            mutate_u8(mem, location, |_| sym.0 as u8)?;
+        }
+        Rset16 => {
+            mutate_u16(mem, location, |_| sym.0 as u16)?;
         }
         Rrvc_branch => {
             let offset = addr_offset(sym, location) as u16;
@@ -384,6 +433,7 @@ struct Module {
     text_sections: Sections,
     rw_sections: Sections,
     ro_sections: Sections,
+    debug_sections: Sections,
     relocations: Vec<CompoundRel>,
 }
 
@@ -439,11 +489,12 @@ fn filter_syms(syms: &[Rc<RefCell<Sym>>]) -> (Syms, Syms, Syms) {
 }
 
 // Returns (text, rw, ro, rel)
-fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sections) {
+fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sections, Sections) {
     let mut text_sections = Vec::new();
     let mut rw_sections = Vec::new();
     let mut ro_sections = Vec::new();
     let mut rel_sections = Vec::new();
+    let mut debug_sections = Vec::new();
 
     for section in sections {
         let s = section.borrow();
@@ -454,6 +505,11 @@ fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sectio
 
         if s.shdr.shtype == SHT_RELA {
             rel_sections.push(section.clone());
+            continue;
+        }
+
+        if s.shdr.name.starts_with(".debug") {
+            debug_sections.push(section.clone());
             continue;
         }
 
@@ -474,7 +530,13 @@ fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sectio
         }
     }
 
-    (text_sections, rw_sections, ro_sections, rel_sections)
+    (
+        text_sections,
+        rw_sections,
+        ro_sections,
+        rel_sections,
+        debug_sections,
+    )
 }
 
 fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
@@ -490,7 +552,8 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
 
     let syms = xlate_syms(syms, &sections);
     let (refs, defs, internal) = filter_syms(&syms[0..]);
-    let (text_sections, rw_sections, ro_sections, rel_sections) = filter_sections(&sections);
+    let (text_sections, rw_sections, ro_sections, rel_sections, debug_sections) =
+        filter_sections(&sections);
 
     // FIXME: factor out
     let mut relocations = Vec::new();
@@ -500,15 +563,17 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
         let index = rsection.shdr.info as usize;
         let associated_section = sections[index].clone();
 
-        // Hack to avoid relocating debug sections.  Really we should
-        // check to see if the associated section is going to be loaded.
-        if !has_flag(associated_section.borrow().shdr.flags, SHF_ALLOC) {
-            debug!(
-                "ignoring relocations for section {}",
-                associated_section.borrow().shdr.name
-            );
-            continue;
-        }
+        /*
+                // Hack to avoid relocating debug sections.  Really we should
+                // check to see if the associated section is going to be loaded.
+                if !has_flag(associated_section.borrow().shdr.flags, SHF_ALLOC) {
+                    debug!(
+                        "ignoring relocations for section {}",
+                        associated_section.borrow().shdr.name
+                    );
+                    continue;
+                }
+        */
 
         relocations.append(&mut parse_relocations(
             &rsection.data,
@@ -526,6 +591,7 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
         text_sections,
         rw_sections,
         ro_sections,
+        debug_sections,
 
         relocations,
     })
@@ -615,6 +681,7 @@ fn merge_modules(modules: Vec<Module>) -> Module {
     let mut text_sections = Vec::new();
     let mut rw_sections = Vec::new();
     let mut ro_sections = Vec::new();
+    let mut debug_sections = Vec::new();
 
     // Relocations may need to be pointed to a def sym
     let mut relocations = Vec::new();
@@ -651,6 +718,7 @@ fn merge_modules(modules: Vec<Module>) -> Module {
         text_sections.append(&mut m.text_sections);
         rw_sections.append(&mut m.rw_sections);
         ro_sections.append(&mut m.ro_sections);
+        debug_sections.append(&mut m.debug_sections);
 
         relocations.append(&mut m.relocations);
     }
@@ -674,6 +742,7 @@ fn merge_modules(modules: Vec<Module>) -> Module {
         text_sections,
         rw_sections,
         ro_sections,
+        debug_sections,
 
         relocations,
     }
@@ -763,11 +832,20 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         PERM_READ | PERM_WRITE,
     )?;
 
+    let debug_base = Addr(4 * space);
+    debug!("loading debug info starting at {:?}", debug_base);
+    load_sections(
+        mem,
+        debug_base,
+        &mut module.debug_sections,
+        PERM_READ | PERM_WRITE,
+    )?;
+
     // FIXME: factor out
     {
         // Create a section for undefined references.  These will be hooked by
         // test code.
-        let undefined_base = Addr(4 * space);
+        let undefined_base = Addr(5 * space);
         let undefined_end = Addr(undefined_base.0 + module.refs.len() as u64 * 4);
         mem.mmap_zeroes(
             undefined_base,
