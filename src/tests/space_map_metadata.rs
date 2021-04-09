@@ -17,25 +17,23 @@ struct MetadataSpaceMap {
     sb: Addr,
 }
 
-impl MetadataSpaceMap {
-    fn new() -> MetadataSpaceMap {
-        MetadataSpaceMap {bm: Addr(0), tm: Addr(0), sm: Addr(0), sb: Addr(0)}
+struct MetadataSMBuilder;
+
+impl SpaceMapBuilder for MetadataSMBuilder {
+    fn create(&self, fix: &mut Fixture, nr_blocks: u64) -> Result<Box<dyn space_map::SpaceMap>> {
+        let bm = dm_bm_create(fix, nr_blocks)?;
+        let (tm, sm) = dm_tm_create(fix, bm, 0)?;
+        let tm = tm;
+        let sm = sm;
+        let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
+
+        Ok(Box::new(MetadataSpaceMap {bm, tm, sm, sb}))
     }
 }
 
 impl space_map::SpaceMap for MetadataSpaceMap {
     fn addr(&self) -> Addr {
         self.sm
-    }
-
-    fn create(&mut self, fix: &mut Fixture, nr_blocks: u64) -> Result<()> {
-        self.bm = dm_bm_create(fix, nr_blocks)?;
-        let (tm, sm) = dm_tm_create(fix, self.bm, 0)?;
-        self.tm = tm;
-        self.sm = sm;
-        self.sb = dm_bm_write_lock_zero(fix, self.bm, 0, Addr(0))?;
-
-        Ok(())
     }
 
     fn commit(&mut self, fix: &mut Fixture) -> Result<()> {
@@ -52,22 +50,22 @@ impl space_map::SpaceMap for MetadataSpaceMap {
 fn test_boundary_size_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut sm = MetadataSpaceMap::new();
-    test_boundary_size(fix, &mut sm)
+    let mut builder = MetadataSMBuilder;
+    test_boundary_size(fix, &mut builder)
 }
 
 fn test_commit_cost_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut sm = MetadataSpaceMap::new();
-    test_commit_cost(fix, &mut sm)
+    let mut builder = MetadataSMBuilder;
+    test_commit_cost(fix, &mut builder)
 }
 
 fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut sm = MetadataSpaceMap::new();
-    test_wrapping_around(fix, &mut sm)
+    let mut builder = MetadataSMBuilder;
+    test_wrapping_around(fix, &mut builder)
 }
 
 //-------------------------------

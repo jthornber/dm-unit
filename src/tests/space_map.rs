@@ -128,15 +128,19 @@ fn free_blocks(
 
 pub trait SpaceMap {
     fn addr(&self) -> Addr;
-    fn create(&mut self, fix: &mut Fixture, nr_blocks: u64) -> Result<()>;
     fn commit(&mut self, fix: &mut Fixture) -> Result<()>;
+}
+
+// the factory trait
+pub trait SpaceMapBuilder {
+    fn create(&self, fix: &mut Fixture, nr_blocks: u64) -> Result<Box<dyn SpaceMap>>;
 }
 
 //-------------------------------
 
-pub fn test_boundary_size(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+pub fn test_boundary_size(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) -> Result<()> {
     let nr_blocks = ENTRIES_PER_BLOCK as u64;
-    sm.create(fix, nr_blocks)?;
+    let mut sm = builder.create(fix, nr_blocks)?;
     ensure!(nr_blocks == sm_get_nr_blocks(fix, sm.addr())?);
 
     let nr_free = sm_get_nr_free(fix, sm.addr())?;
@@ -151,9 +155,9 @@ pub fn test_boundary_size(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()
     Ok(())
 }
 
-pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+pub fn test_commit_cost(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) -> Result<()> {
     let count = 20000;
-    sm.create(fix, count + 1000)?;
+    let mut sm = builder.create(fix, count + 1000)?;
     sm.commit(fix)?;
 
     let commit_interval = 1000;
@@ -188,9 +192,9 @@ pub fn test_commit_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> 
     Ok(())
 }
 
-pub fn test_inc_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
+pub fn test_inc_cost(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) -> Result<()> {
     let count = 100;
-    sm.create(fix, 1024)?;
+    let mut sm = builder.create(fix, 1024)?;
     sm.commit(fix)?;
 
     let mut tracker = CostTracker::new("inc.csv")?;
@@ -204,8 +208,8 @@ pub fn test_inc_cost(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
     Ok(())
 }
 
-pub fn test_wrapping_around(fix: &mut Fixture, sm: &mut dyn SpaceMap) -> Result<()> {
-    sm.create(fix, (ENTRIES_PER_BLOCK * 2) as u64)?;
+pub fn test_wrapping_around(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) -> Result<()> {
+    let mut sm = builder.create(fix, (ENTRIES_PER_BLOCK * 2) as u64)?;
 
     let batch_size = 1000;
     let mut commit_begin = 0;
