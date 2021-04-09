@@ -531,44 +531,6 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
     })
 }
 
-fn adjust_relocation(
-    crel: &CompoundRel,
-    def_map: &BTreeMap<String, Rc<RefCell<Sym>>>,
-) -> CompoundRel {
-    use CompoundRel::*;
-
-    match crel {
-        Simple(rel) => {
-            let sym = rel.sym.borrow();
-            let bind = sym.bind;
-            let name = sym.name.clone();
-            drop(sym);
-
-            match (bind, def_map.get(&name)) {
-                (STB_GLOBAL, Some(sym)) => {
-                    let mut rel = rel.clone();
-                    rel.sym = sym.clone();
-                    Simple(rel)
-                }
-                _ => crel.clone(),
-            }
-        }
-        Pair(rel1, rel2) => {
-            let sym = rel1.sym.borrow();
-            match (sym.bind, def_map.get(&sym.name)) {
-                (STB_GLOBAL, Some(sym)) => {
-                    let mut rel1 = rel1.clone();
-                    rel1.sym = sym.clone();
-                    let mut rel2 = rel2.clone();
-                    rel2.sym = sym.clone();
-                    Pair(rel1, rel2)
-                }
-                _ => crel.clone(),
-            }
-        }
-    }
-}
-
 fn check_sym(sym: &Rc<RefCell<Sym>>) {
     let sym = sym.borrow();
     if sym.section.is_none() {
@@ -588,94 +550,6 @@ fn check_relocation(crel: &CompoundRel) {
             check_sym(&rel1.sym);
             check_sym(&rel2.sym);
         }
-    }
-}
-
-fn merge_modules(modules: Vec<Module>) -> Module {
-    // Build up a map of defs so we can wire up refs
-    // between modules.
-    let mut def_map: BTreeMap<String, Rc<RefCell<Sym>>> = BTreeMap::new();
-    for m in &modules {
-        for d in &m.defs {
-            check_sym(&d);
-            def_map.insert(d.borrow().name.clone(), d.clone());
-        }
-    }
-
-    // filter defs from other modules
-    let mut refs = Vec::new();
-
-    // This is just the aggregate of all defs
-    let mut defs = Vec::new();
-
-    // Add defs from other modules
-    let mut internal = Vec::new();
-
-    // Sections are just aggregated
-    let mut text_sections = Vec::new();
-    let mut rw_sections = Vec::new();
-    let mut ro_sections = Vec::new();
-
-    // Relocations may need to be pointed to a def sym
-    let mut relocations = Vec::new();
-
-    // We only want one instance of each external ref.  Relocations
-    // will need adjusting to point to the ref that was chosen.
-    let mut ref_map: BTreeMap<String, Rc<RefCell<Sym>>> = BTreeMap::new();
-    for mut m in modules {
-        for rc in m.refs {
-            let r = rc.borrow();
-
-            if r.name.is_empty() {
-                continue;
-            }
-
-            match (r.bind, def_map.get(&r.name)) {
-                (STB_GLOBAL, Some(sym)) => {
-                    // FIXME: internal is pointless
-                    internal.push(sym.clone());
-                }
-                _ => {
-                    if ref_map.contains_key(&r.name) {
-                        continue;
-                    } else {
-                        ref_map.insert(r.name.clone(), rc.clone());
-                        refs.push(rc.clone());
-                    }
-                }
-            }
-        }
-
-        defs.append(&mut m.defs);
-        internal.append(&mut m.internal);
-        text_sections.append(&mut m.text_sections);
-        rw_sections.append(&mut m.rw_sections);
-        ro_sections.append(&mut m.ro_sections);
-
-        relocations.append(&mut m.relocations);
-    }
-
-    // Combine def_map and ref_map.
-    // FIXME: must be a better way
-    for (k, sym) in ref_map {
-        def_map.insert(k, sym);
-    }
-
-    let relocations: Vec<CompoundRel> = relocations
-        .into_iter()
-        .map(|crel| adjust_relocation(&crel, &def_map))
-        .collect();
-
-    Module {
-        refs,
-        defs,
-        internal,
-
-        text_sections,
-        rw_sections,
-        ro_sections,
-
-        relocations,
     }
 }
 
@@ -847,16 +721,23 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     Ok(LoaderInfo::new(symtable))
 }
 
-pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
-    let mut modules = Vec::new();
-
+/// Links all the modules needed for a test into a single 'super' module.
+fn link_modules<P: AsRef<Path>>(paths: &[P], output: &str) -> Result<()> {
+    let cross_compile = std::env::var("CROSS_COMPILE").expect("You must set the CROSS_COMPILE env var");
+    let ld_cmd = format!("{}ld", cross_compile);
+    let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output];
     for p in paths {
-        modules.push(read_module(p)?);
+        args.push(p.as_ref().to_str().unwrap());
     }
+    duct::cmd(ld_cmd, args).run()?;
+    Ok(())
+}
 
-    // combine the modules
-    let module = merge_modules(modules);
-
+pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
+    // FIXME: not thread safe
+    let super_module = "./dm-unit.ko";
+    link_modules(paths, super_module)?;
+    let module = read_module(super_module)?;
     load_module(mem, module)
 }
 
