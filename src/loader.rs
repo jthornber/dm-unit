@@ -723,7 +723,19 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
 
 /// Links all the modules needed for a test into a single 'super' module.
 fn link_modules<P: AsRef<Path>>(paths: &[P], output: &str) -> Result<()> {
-    let cross_compile = std::env::var("CROSS_COMPILE").expect("You must set the CROSS_COMPILE env var");
+    use std::env::{var, VarError};
+
+    let cross_compile = match var("CROSS_COMPILE") {
+        Ok(s) => s,
+        Err(VarError::NotPresent) => {
+            debug!("CROSS_COMPILE environment variable not set, defaulting to 'riscv64-linux-gnu-'");
+            "riscv64-linux-gnu-".to_string()
+        }
+        e@Err(_) => {
+            e?
+        }
+    };
+
     let ld_cmd = format!("{}ld", cross_compile);
     let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output];
     for p in paths {
