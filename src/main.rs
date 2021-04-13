@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     let matches = parser.get_matches();
     let kernel_dir = Path::new(matches.value_of("KERNEL_DIR").unwrap());
 
-    let mut runner = TestRunner::new(kernel_dir);
+    let mut runner = TestRunner::new(kernel_dir)?;
     if let Some(pattern) = matches.value_of("FILTER") {
         let rx = Regex::new(pattern)?;
         runner.set_filter(rx);
