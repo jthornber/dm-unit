@@ -90,7 +90,8 @@ fn test_write_lock(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
     let bm = dm_bm_create(fix, 16)?;
     let validator = Addr(0); // Just passing NULL for now
-    let b = dm_bm_write_lock(fix, bm, 0, validator)?;
+
+    let b = dm_bm_write_lock_zero(fix, bm, 0, validator)?;
     let data = dm_block_data(fix, b)?;
     let mut buf = vec![0u8; 4096];
 
