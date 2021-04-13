@@ -3,7 +3,6 @@ use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
-use std::path::Path;
 use std::sync::Arc;
 use thinp::io_engine::*;
 use thinp::pdata::btree_walker::*;
@@ -433,7 +432,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
 
     pool.close_thin(fix, td)?;
     pool.show_mapping_residency()?;
-    get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
+    // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())
 }
