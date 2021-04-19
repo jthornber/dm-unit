@@ -1,6 +1,6 @@
 use log::*;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::emulator::decode::{self, *};
 use crate::emulator::memory::*;
@@ -363,7 +363,6 @@ impl Translator {
     /// Call this when you want to mutate the value of a guest register.
     /// It returns (old, new)
     fn mut_greg(&mut self, greg: &decode::Reg) -> (Reg, Reg) {
-        debug!("mut_greg: {:?}", greg);
         let mut new = self.next_reg();
         new.1 = Some(*greg);
         let old = self.guest_regs.get(greg).unwrap().clone();
@@ -1096,8 +1095,8 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
 /// Examines an rval and returns Some(rs) if it is a no op that could be
 /// replaced with a simple reference to rs
 fn is_noop(rval: &RValue) -> Option<Reg> {
-    use RValue::*;
     use ImmOp::*;
+    use RValue::*;
 
     match rval {
         Gbase => None,
@@ -1184,12 +1183,118 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
     r
 }
 
+//--------------------------------
+
+fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
+    use IR::*;
+    use RValue::*;
+
+    if seen.contains(reg) {
+        return;
+    }
+
+    let rval = defs.get(reg).unwrap();
+    match rval {
+        Gbase => {},
+        Gtoh { guest, len, perms } => {
+            emit(r, guest, defs, seen)
+                },
+        Li { .. } => {
+
+        }
+        Test { rs1, rs2, .. } => {
+            emit(r, rs1, defs, seen);
+            emit(r, rs2, defs, seen);
+        }
+        Cond { t, rs1, rs2 } => {
+            emit(r, t, defs, seen);
+            emit(r, rs1, defs, seen);
+            emit(r, rs2, defs, seen);
+        }
+        Ld { rs } => {
+            emit(r, rs, defs, seen);
+        }
+        Lb { rs } => {
+            emit(r, rs, defs, seen);
+            },
+        Lh { rs } => {
+            emit(r, rs,defs, seen);
+
+            },
+        Lw { rs } => {emit(r, rs, defs, seen);},
+        Lbu { rs } => {emit(r, rs, defs, seen);},
+        Lhu { rs } => {emit(r, rs, defs, seen);},
+        Lwu { rs } => {emit(r, rs, defs, seen);},
+
+        Imm { rs, .. } => {emit(r, rs,defs, seen);},
+        Shift { rs, .. } => {emit(r, rs, defs, seen);},
+        Bin { rs1, rs2, .. } => {
+        emit(r, rs1, defs, seen);
+        emit(r, rs2, defs, seen);},
+    }
+    r.push(Assign {rd: *reg, rval: *rval});
+    seen.insert(*reg);
+}
+
+/// Reorders instructions to try and keep assignments close to their use.  Also
+/// has the effect of removing dead code.
+fn reorder(instrs: &[IR]) -> Vec<IR> {
+    use IR::*;
+
+    let mut r = Vec::new();
+    let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
+
+    for ir in instrs {
+        match ir {
+            Assign { rd, rval } => {
+                defs.insert(*rd, *rval);
+            }
+            _ => {
+                // do nothing
+            }
+        }
+    }
+
+    let mut seen = BTreeSet::new();
+    for ir in instrs {
+        match ir {
+            Assign { .. } => {
+                // do nothing
+            }
+            Sb { rs1, rs2 } => {
+                emit(&mut r, rs1, &defs, &mut seen);
+                emit(&mut r, rs2, &defs, &mut seen);
+                r.push(Sb {rs1: *rs1, rs2: *rs2});
+            }
+            Sh { rs1, rs2 } => {
+                emit(&mut r, rs1, &defs, &mut seen);
+                emit(&mut r, rs2, &defs, &mut seen);
+                r.push(Sh {rs1: *rs1, rs2: *rs2});
+            }
+            Sw { rs1, rs2 } => {
+                emit(&mut r, rs1, &defs, &mut seen);
+                emit(&mut r, rs2, &defs, &mut seen);
+                r.push(Sw {rs1: *rs1, rs2: *rs2});
+            }
+            Sd { rs1, rs2 } => {
+                emit(&mut r, rs1, &defs, &mut seen);
+                emit(&mut r, rs2, &defs, &mut seen);
+                r.push(Sd {rs1: *rs1, rs2: *rs2});
+            }
+            Ecall => r.push(Ecall),
+            Ebreak => r.push(Ebreak),
+        }
+    }
+
+    r
+}
+
 // FIXME: take out the recursion
 fn optimise(instrs: &[IR]) -> Vec<IR> {
     let new_instrs = opt_cse(instrs);
     let new_instrs = opt_noop(&new_instrs);
     if new_instrs.len() == instrs.len() {
-        new_instrs
+        reorder(&new_instrs)
     } else {
         optimise(&new_instrs)
     }
