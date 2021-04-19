@@ -1096,20 +1096,23 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
 /// replaced with a simple reference to rs
 fn is_noop(rval: &RValue) -> Option<Reg> {
     use ImmOp::*;
+    use ShiftOp::*;
     use RValue::*;
+
+    let check = |t: bool, rs: &Reg| -> Option<Reg> {
+        if t {
+            Some(*rs)
+        } else {
+            None
+        }
+    };
 
     match rval {
         Gbase => None,
         Gtoh { .. } => None,
         Li { .. } => None,
         Test { rs1, rs2, .. } => None,
-        Cond { rs1, rs2, .. } => {
-            if rs1.0 == rs2.0 {
-                Some(*rs1)
-            } else {
-                None
-            }
-        }
+        Cond { rs1, rs2, .. } => check(rs1.0 == rs2.0, rs1),
         Ld { .. } => None,
         Lb { .. } => None,
         Lh { .. } => None,
@@ -1118,23 +1121,28 @@ fn is_noop(rval: &RValue) -> Option<Reg> {
         Lhu { .. } => None,
         Lwu { .. } => None,
         Imm { op, rs, imm } => {
+            // Many of these ops will sign extend an i32 result to i64, so
+            // eg, 'addiw rs 0' is not a noop.
             match op {
-                Addi => {
-                    if *imm == 0 {
-                        Some(*rs)
-                    } else {
-                        None
-                    }
-                }
-                Addiw => None, // FIXME: non sure about the sign extension
+                Addi => check(*imm == 0, rs),
+                Addiw => None, // addiw 0 will sign extend
                 Slti => None,
                 Sltiu => None,
                 Xori => None,
-                Ori => None,
-                Andi => None,
+                Ori => check(*imm == 0, rs),
+                Andi => check(*imm == -1i32, rs),
             }
         }
-        Shift { .. } => None,
+        Shift { op, rs, shamt } => {
+            match op {
+                Slli => check(*shamt == 0, rs),
+                Slliw => None,
+                Srli => check(*shamt == 0, rs),
+                Srliw => None,
+                Sraiw => None,
+                Srai => check(*shamt == 0, rs),
+            }
+        }
         Bin { .. } => None,
     }
 }
