@@ -1,4 +1,4 @@
-use crate::memory::Addr;
+use crate::emulator::memory::Addr;
 
 use anyhow::{anyhow, Result};
 use std::any::Any;

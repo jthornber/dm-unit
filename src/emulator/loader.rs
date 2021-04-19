@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use crate::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
+use crate::emulator::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
 
 //--------------------------
 

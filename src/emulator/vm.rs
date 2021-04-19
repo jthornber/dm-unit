@@ -6,8 +6,9 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
-use crate::decode::*;
-use crate::memory::*;
+use crate::emulator::decode::*;
+use crate::emulator::memory::*;
+use crate::emulator::ir::*;
 
 //-----------------------------
 
@@ -877,6 +878,22 @@ impl VM {
         }
 
         bb.hits += 1;
+
+        if bb.hits > 100 && bb.instrs.len() >= 8 {
+                debug!("riscv ({} instructions):", bb.instrs.len());
+		for (inst, width) in &bb.instrs {
+    		    debug!("    {}", inst);
+		}
+
+		let ir = to_ir(&bb.instrs);
+		debug!("ir ({} instructions):", ir.len());
+		for inst in ir {
+    		    debug!("    {}", inst);
+		}
+
+		assert!(false);
+        }
+
         for (inst, width) in &bb.instrs {
             // debug!("{:08x}: {}", addr, inst);
             self.step(*inst, *width as u64)?;

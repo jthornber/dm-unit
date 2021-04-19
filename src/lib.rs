@@ -8,16 +8,13 @@ extern crate regex;
 extern crate thiserror;
 
 pub mod block_manager;
-pub mod decode;
+pub mod emulator;
 pub mod fixture;
 pub mod guest;
-pub mod loader;
-pub mod memory;
 pub mod primitive;
 pub mod stats;
 pub mod stubs;
 pub mod test_runner;
 pub mod tests;
 pub mod user_data;
-pub mod vm;
 pub mod wrappers;
