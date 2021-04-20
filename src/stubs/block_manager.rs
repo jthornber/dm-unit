@@ -175,7 +175,6 @@ pub fn bm_prefetch(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn bm_forget(fix: &mut Fixture) -> Result<()> {
-    debug!("in stubbed bm_forget");
     let _bm_ptr = Addr(fix.vm.reg(A0));
     let b = fix.vm.reg(A1);
     let bm = get_bm()?;
@@ -183,7 +182,17 @@ pub fn bm_forget(fix: &mut Fixture) -> Result<()> {
 
     fix.vm.ret(0);
     Ok(())
-}    
+}
+
+pub fn bm_unlock_move(fix: &mut Fixture) -> Result<()> {
+    let _bm_ptr = Addr(fix.vm.reg(A0));
+    let gb_ptr = Addr(fix.vm.reg(A1));
+    let new_location = fix.vm.reg(A2);
+    let bm = get_bm()?;
+    bm.unlock_move(fix, gb_ptr, new_location)?;
+    fix.vm.ret(0);
+    Ok(())
+}
 
 pub fn bm_is_read_only(fix: &mut Fixture) -> Result<()> {
     let _bm_ptr = Addr(fix.vm.reg(A0));

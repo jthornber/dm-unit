@@ -104,7 +104,8 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     fix.at_func("dm_bm_is_read_only", Box::new(bm_is_read_only))?;
     fix.at_func("dm_bm_nr_blocks", Box::new(bm_nr_blocks))?;
     fix.at_func("dm_bm_prefetch", Box::new(bm_prefetch))?;
-    //fix.at_func("dm_bm_forget", Box::new(bm_forget))?;
+    fix.at_func("dm_bm_forget", Box::new(bm_forget))?;
+    fix.at_func("dm_bm_unlock_move", Box::new(bm_unlock_move))?;
     fix.at_func("dm_bm_read_lock", Box::new(bm_read_lock))?;
     fix.at_func("dm_bm_read_try_lock", Box::new(bm_read_lock))?;
     fix.at_func("dm_bm_set_read_only", Box::new(bm_set_read_only))?;

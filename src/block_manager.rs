@@ -77,6 +77,7 @@ impl Guest for GBlock {
 
 //-------------------------------
 
+#[derive(Clone)]
 pub enum Lock {
     // Locked for read, the block may be dirty from a prior write.
     Read {
@@ -100,6 +101,8 @@ pub enum Lock {
 
     // Clean data is moved back to the host.
     Clean {
+        // indicates whether the block is in memory, or just on disk
+        resident: bool,
         validator: Option<Addr>,
         data: Vec<u8>,
     },
@@ -112,6 +115,7 @@ pub struct BMInner {
     pub nr_read_locks: u64,
     pub nr_write_locks: u64,
     pub nr_prepares: u64,
+    pub nr_disk_reads: u64,
 }
 
 impl Drop for BMInner {
@@ -128,6 +132,7 @@ impl BMInner {
             nr_read_locks: 0,
             nr_write_locks: 0,
             nr_prepares: 0,
+            nr_disk_reads:  0,
         }
     }
 
@@ -231,6 +236,7 @@ impl BMInner {
                 Ok(guest_ptr)
             }
             Some(Lock::Clean {
+                resident,
                 validator: _maybe_validator,
                 data,
             }) => {
@@ -253,6 +259,9 @@ impl BMInner {
                     },
                 );
                 self.nr_read_locks += 1;
+                if !resident {
+                    self.nr_disk_reads += 1;
+                }
                 Ok(guest_ptr)
             }
             None => {
@@ -326,6 +335,7 @@ impl BMInner {
                 Ok(guest_ptr)
             }
             Some(Lock::Clean {
+                resident,
                 validator: _maybe_validator,
                 data,
             }) => {
@@ -350,6 +360,9 @@ impl BMInner {
                     },
                 );
                 self.nr_write_locks += 1;
+                if !resident {
+                    self.nr_disk_reads += 1;
+                }
                 Ok(guest_ptr)
             }
             None => {
@@ -431,6 +444,7 @@ impl BMInner {
                     self.locks.insert(
                         gb.loc,
                         Lock::Clean {
+                            resident: true,
                             validator: Some(validator),
                             data,
                         },
@@ -461,6 +475,62 @@ impl BMInner {
         }
     }
 
+    fn unlock_move(&mut self, fix: &mut Fixture, gb_ptr: Addr, new_location: u64) -> Result<()> {
+        let loc = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)?.loc;
+        self.unlock(fix, gb_ptr)?;
+
+        match self.locks.remove(&loc) {
+            Some(Lock::Read { .. }) => {
+                // Still held, so we have to create a new buffer and do a memcpy
+                // FIXME: erroring for now, since I don't think this can happen
+                Err(anyhow!("oh ... it can happen"))
+            }
+            Some(Lock::Write { .. }) => Err(anyhow!("block {} is still write locked somehow", loc)),
+            Some(Lock::Dirty {
+                validator,
+                guest_ptr,
+            }) => {
+                // flush this block
+                let gb = read_guest::<GBlock>(&fix.vm.mem, guest_ptr)?;
+                fix.vm.mem.change_perms(
+                    gb.data,
+                    Addr(gb.data.0 + BLOCK_SIZE as u64),
+                    PERM_READ | PERM_WRITE,
+                )?;
+                self.v_prep(fix, guest_ptr, validator)?;
+
+                let data = fix.vm.mem.free(gb.data)?;
+
+                // we deliberately don't count the cpu cost of this copy since
+                // it wouldn't be incurred with bufio.
+                let data_copy = data.clone();
+                self.locks.insert(
+                    gb.loc,
+                    Lock::Clean {
+                        resident: false,
+                        validator: Some(validator),
+                        data,
+                    },
+                );
+                self.locks.insert(
+                    new_location,
+                    Lock::Clean {
+                        resident: true,
+                        validator: Some(validator),
+                        data: data_copy,
+                    },
+                );
+                Ok(())
+            }
+            Some(l @ Lock::Clean { .. }) => {
+                self.locks.insert(loc, l.clone());
+                self.locks.insert(new_location, l);
+                Ok(())
+            }
+            None => Err(anyhow!("block {} has never been locked", loc)),
+        }
+    }
+
     fn flush(&mut self, fix: &mut Fixture) -> Result<()> {
         let mut locks = BTreeMap::new();
         std::mem::swap(&mut locks, &mut self.locks);
@@ -486,6 +556,7 @@ impl BMInner {
                     self.locks.insert(
                         gb.loc,
                         Lock::Clean {
+                            resident: true,
                             validator: Some(validator),
                             data,
                         },
@@ -501,7 +572,11 @@ impl BMInner {
     }
 
     fn write_to_disk(&self, path: &Path) -> Result<()> {
-        let mut file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)?;
         let zeroes = [0u8; 4096];
 
         for b in 0..self.nr_blocks {
@@ -527,13 +602,18 @@ impl BMInner {
     /// this method let's us throw away unused data.
     fn forget(&mut self, b: u64) -> Result<()> {
         self.check_bounds(b)?;
+        /*
         match self.locks.remove(&b) {
-            Some(Lock::Clean { .. }) => Ok(()),
-            Some(_) => Err(anyhow!(
-                "cannot forget a block that isn't clean and unlocked"
-            )),
+            Some(Lock::Clean { .. }) => {
+                debug!("forgetting block {}", b);
+                Ok(())
+            }
+            Some(Lock::Dirty { .. }) => Err(anyhow!("cannot forget a block that is dirty")),
+            Some(_) => Err(anyhow!("cannot forget a block that is locked")),
             None => Ok(()),
         }
+        */
+        Ok(())
     }
 
     fn set_read_only(&mut self, _ro: bool) {
@@ -604,6 +684,7 @@ impl BMInner {
                 self.locks.insert(
                     block.loc,
                     Lock::Clean {
+                        resident: true,
                         validator: None,
                         data: block.get_data().to_vec(),
                     },
@@ -651,6 +732,11 @@ impl BlockManager {
         inner.unlock(fix, gb_ptr)
     }
 
+    pub fn unlock_move(&self, fix: &mut Fixture, gb_ptr: Addr, new_location: u64) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.unlock_move(fix, gb_ptr, new_location)
+    }
+
     pub fn get_nr_read_locks(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
         inner.nr_read_locks
@@ -659,6 +745,11 @@ impl BlockManager {
     pub fn get_nr_write_locks(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
         inner.nr_write_locks
+    }
+
+    pub fn get_nr_disk_reads(&self) -> u64 {
+        let inner = self.inner.lock().unwrap();
+        inner.nr_disk_reads
     }
 
     pub fn get_nr_held_blocks(&self) -> u64 {
@@ -699,7 +790,7 @@ impl BlockManager {
         let mut inner = self.inner.lock().unwrap();
         inner.forget(b)
     }
-    
+
     pub fn write_to_disk(&self, path: &Path) -> Result<()> {
         let inner = self.inner.lock().unwrap();
         inner.write_to_disk(path)

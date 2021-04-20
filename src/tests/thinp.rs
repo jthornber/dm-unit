@@ -81,11 +81,12 @@ impl ThinPool {
     fn stats_report(&mut self, fix: &mut Fixture, desc: &str, count: u64) -> Result<()> {
         let delta = self.baseline.delta(fix);
         info!(
-            "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}, metadata = {}/{}",
+            "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}, disk_reads = {:2}, metadata = {}/{}",
             desc,
             delta.instrs / count,
             delta.read_locks as f64 / count as f64,
             delta.write_locks as f64 / count as f64,
+            delta.disk_reads as f64 / count as f64,
             self.nr_metadata_blocks - self.free_metadata_blocks(fix)?,
             self.nr_metadata_blocks,
         );
@@ -130,6 +131,10 @@ impl ThinPool {
     ) -> Result<()> {
         dm_thin_insert_block(fix, td.td, thin_b, data_b)
     }
+    
+    fn remove_range(&mut self, fix: &mut Fixture, td: &ThinDev, b: u64, e: u64) -> Result<()> {
+        dm_thin_remove_range(fix, td.td, b, e)
+    }
 
     fn free_metadata_blocks(&mut self, fix: &mut Fixture) -> Result<u64> {
         // thinp subtracts wiggle room of 0x400 from the free count as
@@ -150,6 +155,7 @@ impl ThinPool {
             metadata_sm.get_nr_blocks()?
         );
 
+/*
         // We discard unused blocks to save memory.
         // FIXME: only discard blocks that were allocated last transaction.
         let bm = get_bm()?.clone();
@@ -158,6 +164,7 @@ impl ThinPool {
                 bm.forget(b)?;
             }
         }
+        */
 
         let data_sm = space_maps.data_sm.lock().unwrap();
         debug!(
@@ -259,11 +266,19 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
     pool.create_thin(fix, 0)?;
     let td = pool.open_thin(fix, 0)?;
 
+    let mut alloc_tracker = CostTracker::new("single-alloc-block.csv")?;
+    let mut insert_tracker = CostTracker::new("single-insert-block.csv")?;
     let mut insert_count = 0;
     pool.stats_start(fix);
     for thin_b in thin_blocks {
+        alloc_tracker.begin(fix);
         let data_b = pool.alloc_data_block(fix)?;
+        alloc_tracker.end(fix)?;
+
+        insert_tracker.begin(fix);
         pool.insert_block(fix, &td, *thin_b, data_b)?;
+        insert_tracker.end(fix)?;
+
         insert_count += 1;
 
         if insert_count == commit_interval {
@@ -296,7 +311,7 @@ fn test_provision_single_thin_random(fix: &mut Fixture) -> Result<()> {
     do_provision_single_thin(fix, &thin_blocks)
 }
 
-fn generate_runs(nr_blocks: u64, average_run_length: u64) -> Vec<u64> {
+fn generate_ranges(nr_blocks: u64, average_run_length: u64) -> Vec<std::ops::Range<u64>> {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
 
     let mut endpoints = BTreeSet::new();
@@ -315,7 +330,11 @@ fn generate_runs(nr_blocks: u64, average_run_length: u64) -> Vec<u64> {
         last = e;
     }
     ranges.shuffle(&mut rng);
+    ranges
+}
 
+fn generate_runs(nr_blocks: u64, average_run_length: u64) -> Vec<u64> {
+    let ranges = generate_ranges(nr_blocks, average_run_length);
     let mut thin_blocks = Vec::new();
     for r in ranges {
         for k in r {
@@ -446,6 +465,114 @@ fn test_provision_rolling_snaps(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+const DISCARD_SINGLE_COUNT: u64 = 100000;
+
+fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
+    let commit_interval = 100;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
+    pool.create_thin(fix, 0)?;
+    let td = pool.open_thin(fix, 0)?;
+
+    // Fully provision the thin
+    info!("provisioning thin");
+    for b in 0..DISCARD_SINGLE_COUNT {
+        let data_b = pool.alloc_data_block(fix)?;
+        pool.insert_block(fix, &td, b, data_b)?;
+    }
+    pool.commit(fix)?;
+    info!("provisioned");
+
+    let mut discard_tracker = CostTracker::new("discard-blocks.csv")?;
+
+    let thin_blocks = generate_ranges(20_000, 20);
+    pool.stats_start(fix);
+    let mut discard_count = 0;
+    for std::ops::Range { start, end } in thin_blocks {
+        discard_count += 1;
+
+        discard_tracker.begin(fix);
+        pool.remove_range(fix, &td, start, end)?;
+        discard_tracker.end(fix)?;
+
+        if discard_count == commit_interval {
+            pool.commit(fix)?;
+            pool.stats_report(fix, "discard", commit_interval)?;
+            pool.check()?;
+            pool.stats_start(fix);
+            discard_count = 0;
+        }
+    }
+
+    pool.commit(fix)?;
+    pool.close_thin(fix, td)?;
+
+    Ok(())
+}
+
+//-------------------------------
+
+// Exactly the same as the provision rolling snap test, except we delete snaps
+// with a single, large discard.
+fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u64) -> Result<()> {
+    let commit_interval = 1000;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
+    let mut thin_id = 0;
+    pool.create_thin(fix, 0)?;
+    let td = pool.open_thin(fix, 0)?;
+
+    let mut discard_tracker = CostTracker::new("discard-whole-thin.csv")?;
+    let mut insert_count = 0;
+    for thin_b in thin_blocks {
+        let data_b = pool.alloc_data_block(fix)?;
+        pool.insert_block(fix, &td, *thin_b, data_b)?;
+
+        insert_count += 1;
+
+        if insert_count == commit_interval {
+            pool.commit(fix)?;
+
+            pool.create_snap(fix, thin_id + 1, 0)?;
+            thin_id += 1;
+            if thin_id > 10 {
+                let old_snap = pool.open_thin(fix, thin_id - 10)?;
+                
+                discard_tracker.begin(fix);
+                pool.remove_range(fix, &old_snap, 0, nr_blocks)?;
+                discard_tracker.end(fix)?;
+
+                pool.close_thin(fix, old_snap)?;
+                pool.delete_thin(fix, thin_id - 10)?;
+            }
+            pool.commit(fix)?;
+            pool.check()?;
+
+            insert_count = 0;
+        }
+    }
+
+    pool.close_thin(fix, td)?;
+    pool.show_mapping_residency()?;
+    // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
+
+    Ok(())
+}
+
+// This test blows up, with massive amounts of instrs, read/write locks per insert.
+// Probably the fault of the space maps.
+fn test_discard_rolling_snaps(fix: &mut Fixture) -> Result<()> {
+    let nr_blocks = 20_000;
+    let thin_blocks = generate_runs(nr_blocks, 20);
+    do_discard_rolling_snap(fix, &thin_blocks, nr_blocks)
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let mut prefix: Vec<&'static str> = Vec::new();
 
@@ -476,6 +603,8 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("provision-single-thin/runs", test_provision_single_thin_runs)
         test!("snaps/recursive", test_provision_recursive_snaps)
         test!("snaps/rolling", test_provision_rolling_snaps)
+        test!("discard/runs", test_discard_single_thin)
+        test!("discard/rolling", test_discard_rolling_snaps)
     }
 
     Ok(())
