@@ -301,19 +301,19 @@ impl std::fmt::Display for IR {
                 write!(f, "              sb {} {}", rs1, rs2)
             }
             Sh { rs1, rs2 } => {
-                write!(f, "            sh {} {}", rs1, rs2)
+                write!(f, "              sh {} {}", rs1, rs2)
             }
             Sw { rs1, rs2 } => {
-                write!(f, "            sw {} {}", rs1, rs2)
+                write!(f, "              sw {} {}", rs1, rs2)
             }
             Sd { rs1, rs2 } => {
-                write!(f, "            sd {} {}", rs1, rs2)
+                write!(f, "              sd {} {}", rs1, rs2)
             }
             Ecall => {
-                write!(f, "            ecall")
+                write!(f, "              ecall")
             }
             Ebreak => {
-                write!(f, "            ebreak")
+                write!(f, "              ebreak")
             }
         }
     }
@@ -1069,15 +1069,15 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
-            Sh { rs1, rs2 } => r.push(Sb {
+            Sh { rs1, rs2 } => r.push(Sh {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
-            Sw { rs1, rs2 } => r.push(Sb {
+            Sw { rs1, rs2 } => r.push(Sw {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
-            Sd { rs1, rs2 } => r.push(Sb {
+            Sd { rs1, rs2 } => r.push(Sd {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
@@ -1096,8 +1096,8 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
 /// replaced with a simple reference to rs
 fn is_noop(rval: &RValue) -> Option<Reg> {
     use ImmOp::*;
-    use ShiftOp::*;
     use RValue::*;
+    use ShiftOp::*;
 
     let check = |t: bool, rs: &Reg| -> Option<Reg> {
         if t {
@@ -1133,16 +1133,14 @@ fn is_noop(rval: &RValue) -> Option<Reg> {
                 Andi => check(*imm == -1i32, rs),
             }
         }
-        Shift { op, rs, shamt } => {
-            match op {
-                Slli => check(*shamt == 0, rs),
-                Slliw => None,
-                Srli => check(*shamt == 0, rs),
-                Srliw => None,
-                Sraiw => None,
-                Srai => check(*shamt == 0, rs),
-            }
-        }
+        Shift { op, rs, shamt } => match op {
+            Slli => check(*shamt == 0, rs),
+            Slliw => None,
+            Srli => check(*shamt == 0, rs),
+            Srliw => None,
+            Sraiw => None,
+            Srai => check(*shamt == 0, rs),
+        },
         Bin { .. } => None,
     }
 }
@@ -1170,15 +1168,15 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
-            Sh { rs1, rs2 } => r.push(Sb {
+            Sh { rs1, rs2 } => r.push(Sh {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
-            Sw { rs1, rs2 } => r.push(Sb {
+            Sw { rs1, rs2 } => r.push(Sw {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
-            Sd { rs1, rs2 } => r.push(Sb {
+            Sd { rs1, rs2 } => r.push(Sd {
                 rs1: subst_reg(*rs1, &substs),
                 rs2: subst_reg(*rs2, &substs),
             }),
@@ -1193,9 +1191,57 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
-    use IR::*;
+fn simplify(rval: &RValue, defs: &mut BTreeMap<Reg, RValue>) -> RValue {
+    use ImmOp::*;
     use RValue::*;
+
+    match rval {
+        Imm { op: Addi, rs, imm } => {
+            let rval2 = defs.get(rs).unwrap();
+            match rval2 {
+                Imm {
+                    op: Addi,
+                    rs: rs2,
+                    imm: imm2,
+                } => Imm {
+                    op: Addi,
+                    rs: *rs2,
+                    imm: *imm + *imm2,
+                },
+                _ => *rval,
+            }
+        }
+        _ => *rval,
+    }
+}
+
+/// Optimisation pass that tries to simplify expressions.  eg, many addi
+/// instructions can be collapsed into a single one.
+fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
+    use IR::*;
+
+    let mut r = Vec::new();
+    let mut defs = BTreeMap::new();
+    for ir in instrs {
+        match ir {
+            Assign { rd, rval } => {
+                let rval = simplify(&rval, &mut defs);
+                r.push(Assign { rd: *rd, rval });
+                defs.insert(*rd, rval);
+            }
+            _ => {
+                r.push(*ir);
+            }
+        }
+    }
+    r
+}
+
+//--------------------------------
+
+fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
+    use RValue::*;
+    use IR::*;
 
     if seen.contains(reg) {
         return;
@@ -1203,13 +1249,9 @@ fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTr
 
     let rval = defs.get(reg).unwrap();
     match rval {
-        Gbase => {},
-        Gtoh { guest, len, perms } => {
-            emit(r, guest, defs, seen)
-                },
-        Li { .. } => {
-
-        }
+        Gbase => {}
+        Gtoh { guest, len, perms } => emit(r, guest, defs, seen),
+        Li { .. } => {}
         Test { rs1, rs2, .. } => {
             emit(r, rs1, defs, seen);
             emit(r, rs2, defs, seen);
@@ -1224,23 +1266,38 @@ fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTr
         }
         Lb { rs } => {
             emit(r, rs, defs, seen);
-            },
+        }
         Lh { rs } => {
-            emit(r, rs,defs, seen);
+            emit(r, rs, defs, seen);
+        }
+        Lw { rs } => {
+            emit(r, rs, defs, seen);
+        }
+        Lbu { rs } => {
+            emit(r, rs, defs, seen);
+        }
+        Lhu { rs } => {
+            emit(r, rs, defs, seen);
+        }
+        Lwu { rs } => {
+            emit(r, rs, defs, seen);
+        }
 
-            },
-        Lw { rs } => {emit(r, rs, defs, seen);},
-        Lbu { rs } => {emit(r, rs, defs, seen);},
-        Lhu { rs } => {emit(r, rs, defs, seen);},
-        Lwu { rs } => {emit(r, rs, defs, seen);},
-
-        Imm { rs, .. } => {emit(r, rs,defs, seen);},
-        Shift { rs, .. } => {emit(r, rs, defs, seen);},
+        Imm { rs, .. } => {
+            emit(r, rs, defs, seen);
+        }
+        Shift { rs, .. } => {
+            emit(r, rs, defs, seen);
+        }
         Bin { rs1, rs2, .. } => {
-        emit(r, rs1, defs, seen);
-        emit(r, rs2, defs, seen);},
+            emit(r, rs1, defs, seen);
+            emit(r, rs2, defs, seen);
+        }
     }
-    r.push(Assign {rd: *reg, rval: *rval});
+    r.push(Assign {
+        rd: *reg,
+        rval: *rval,
+    });
     seen.insert(*reg);
 }
 
@@ -1272,22 +1329,34 @@ fn reorder(instrs: &[IR]) -> Vec<IR> {
             Sb { rs1, rs2 } => {
                 emit(&mut r, rs1, &defs, &mut seen);
                 emit(&mut r, rs2, &defs, &mut seen);
-                r.push(Sb {rs1: *rs1, rs2: *rs2});
+                r.push(Sb {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                });
             }
             Sh { rs1, rs2 } => {
                 emit(&mut r, rs1, &defs, &mut seen);
                 emit(&mut r, rs2, &defs, &mut seen);
-                r.push(Sh {rs1: *rs1, rs2: *rs2});
+                r.push(Sh {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                });
             }
             Sw { rs1, rs2 } => {
                 emit(&mut r, rs1, &defs, &mut seen);
                 emit(&mut r, rs2, &defs, &mut seen);
-                r.push(Sw {rs1: *rs1, rs2: *rs2});
+                r.push(Sw {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                });
             }
             Sd { rs1, rs2 } => {
                 emit(&mut r, rs1, &defs, &mut seen);
                 emit(&mut r, rs2, &defs, &mut seen);
-                r.push(Sd {rs1: *rs1, rs2: *rs2});
+                r.push(Sd {
+                    rs1: *rs1,
+                    rs2: *rs2,
+                });
             }
             Ecall => r.push(Ecall),
             Ebreak => r.push(Ebreak),
@@ -1297,10 +1366,13 @@ fn reorder(instrs: &[IR]) -> Vec<IR> {
     r
 }
 
+//--------------------------------
+
 // FIXME: take out the recursion
 fn optimise(instrs: &[IR]) -> Vec<IR> {
     let new_instrs = opt_cse(instrs);
     let new_instrs = opt_noop(&new_instrs);
+    let new_instrs = opt_simplify(&new_instrs);
     if new_instrs.len() == instrs.len() {
         reorder(&new_instrs)
     } else {

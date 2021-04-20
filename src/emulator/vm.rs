@@ -879,9 +879,9 @@ impl VM {
 
         bb.hits += 1;
 
-        if bb.hits > 100 && bb.instrs.len() >= 8 {
+        if bb.hits > 100 && bb.instrs.len() >= 22 {
                 debug!("riscv ({} instructions):", bb.instrs.len());
-		for (inst, width) in &bb.instrs {
+		for (inst, _width) in &bb.instrs {
     		    debug!("    {}", inst);
 		}
 
