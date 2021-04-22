@@ -16,7 +16,7 @@ use crate::emulator::memory::*;
 ///   This is doing no more than making a calling convention explicit.
 /// - No need for atomics, we only have one core.
 
-#[derive(Clone, Copy, Eq)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct Reg(u32, Option<decode::Reg>);
 
 impl PartialOrd for Reg {
@@ -62,6 +62,8 @@ pub enum TestOp {
     Geu,
 }
 
+use TestOp::*;
+
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub enum BinOp {
     Add,
@@ -94,6 +96,8 @@ pub enum BinOp {
     Remuw,
 }
 
+use BinOp::*;
+
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ImmOp {
     Addi,
@@ -105,6 +109,8 @@ pub enum ImmOp {
     Andi,
 }
 
+use ImmOp::*;
+
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ShiftOp {
     Slli,
@@ -114,6 +120,8 @@ pub enum ShiftOp {
     Sraiw,
     Srai,
 }
+
+use ShiftOp::*;
 
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub enum RValue {
@@ -139,6 +147,8 @@ pub enum RValue {
     Bin { op: BinOp, rs1: Reg, rs2: Reg },
 }
 
+use RValue::*;
+
 #[derive(Clone, Copy)]
 pub enum IR {
     Assign { rd: Reg, rval: RValue },
@@ -152,12 +162,12 @@ pub enum IR {
     Ebreak,
 }
 
+use IR::*;
+
 //-------------------------------
 
 impl std::fmt::Display for TestOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use TestOp::*;
-
         match self {
             Eq => write!(f, "=="),
             Ne => write!(f, "!="),
@@ -171,8 +181,6 @@ impl std::fmt::Display for TestOp {
 
 impl std::fmt::Display for BinOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use BinOp::*;
-
         match self {
             Add => write!(f, "+"),
             Addw => write!(f, "+w"),
@@ -208,8 +216,6 @@ impl std::fmt::Display for BinOp {
 
 impl std::fmt::Display for ImmOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ImmOp::*;
-
         match self {
             Addi => write!(f, "+"),
             Addiw => write!(f, "+w"),
@@ -224,8 +230,6 @@ impl std::fmt::Display for ImmOp {
 
 impl std::fmt::Display for ShiftOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ShiftOp::*;
-
         match self {
             Slli => write!(f, "<<"),
             Slliw => write!(f, "<<w"),
@@ -239,8 +243,6 @@ impl std::fmt::Display for ShiftOp {
 
 impl std::fmt::Display for RValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use RValue::*;
-
         match self {
             Gbase => write!(f, "gbase"),
             Gtoh { guest, len, perms } => {
@@ -291,8 +293,6 @@ impl std::fmt::Display for RValue {
 
 impl std::fmt::Display for IR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use IR::*;
-
         match self {
             Assign { rd, rval } => {
                 write!(f, "{:<10} <- {}", rd, rval)
@@ -414,10 +414,6 @@ impl Translator {
         op: TestOp,
         width: i32,
     ) {
-        use ImmOp::*;
-        use RValue::*;
-        use IR::*;
-
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let (old_pc, new_pc) = self.mut_greg(&decode::Reg::PC);
@@ -450,9 +446,6 @@ impl Translator {
         len: usize,
         func: F,
     ) {
-        use ImmOp::*;
-        use RValue::*;
-
         let rs = self.ref_greg(rs);
         let rd1 = self.assign_next(Imm {
             op: Addi,
@@ -478,10 +471,6 @@ impl Translator {
         len: usize,
         func: F,
     ) {
-        use ImmOp::*;
-        use RValue::*;
-        use IR::*;
-
         // Calc dest address
         let rs1 = self.ref_greg(rs1);
         let dest = self.assign_next(Imm {
@@ -528,12 +517,6 @@ impl Translator {
     }
 
     fn xlate_inst(&mut self, inst: &Inst, width: u8) {
-        use BinOp::*;
-        use ImmOp::*;
-        use RValue::*;
-        use ShiftOp::*;
-        use IR::*;
-
         let width = width as i32;
 
         match inst {
@@ -926,10 +909,6 @@ impl Translator {
     }
 
     fn xlate(&mut self, insts: &[(Inst, u8)]) {
-        use ImmOp::*;
-        use RValue::*;
-        use IR::*;
-
         let live_regs = collect_regs(insts);
         if live_regs.contains(&decode::Reg::Zero) {
             let zero = self.def_greg(&decode::Reg::Zero);
@@ -985,8 +964,6 @@ fn subst_reg(r: Reg, substs: &BTreeMap<Reg, Reg>) -> Reg {
 }
 
 fn apply_substitutions(rval: &RValue, substs: &BTreeMap<Reg, Reg>) -> RValue {
-    use RValue::*;
-
     match rval {
         Gbase => Gbase,
         Gtoh { guest, len, perms } => Gtoh {
@@ -1046,8 +1023,6 @@ fn apply_substitutions(rval: &RValue, substs: &BTreeMap<Reg, Reg>) -> RValue {
 
 /// Common subexpression elimination
 fn opt_cse(instrs: &[IR]) -> Vec<IR> {
-    use IR::*;
-
     let mut r = Vec::new();
     let mut seen: BTreeMap<RValue, Reg> = BTreeMap::new();
     let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
@@ -1095,10 +1070,6 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
 /// Examines an rval and returns Some(rs) if it is a no op that could be
 /// replaced with a simple reference to rs
 fn is_noop(rval: &RValue) -> Option<Reg> {
-    use ImmOp::*;
-    use RValue::*;
-    use ShiftOp::*;
-
     let check = |t: bool, rs: &Reg| -> Option<Reg> {
         if t {
             Some(*rs)
@@ -1147,8 +1118,6 @@ fn is_noop(rval: &RValue) -> Option<Reg> {
 
 /// Remove Noops like addi rs,0
 fn opt_noop(instrs: &[IR]) -> Vec<IR> {
-    use IR::*;
-
     let mut r = Vec::new();
     let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
 
@@ -1192,9 +1161,6 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
 //--------------------------------
 
 fn simplify(rval: &RValue, defs: &mut BTreeMap<Reg, RValue>) -> RValue {
-    use ImmOp::*;
-    use RValue::*;
-
     match rval {
         Imm { op: Addi, rs, imm } => {
             let rval2 = defs.get(rs).unwrap();
@@ -1218,8 +1184,6 @@ fn simplify(rval: &RValue, defs: &mut BTreeMap<Reg, RValue>) -> RValue {
 /// Optimisation pass that tries to simplify expressions.  eg, many addi
 /// instructions can be collapsed into a single one.
 fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
-    use IR::*;
-
     let mut r = Vec::new();
     let mut defs = BTreeMap::new();
     for ir in instrs {
@@ -1239,10 +1203,200 @@ fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
-    use RValue::*;
-    use IR::*;
+// We assume that there is a gap between all memory mapped regions.  So if
+// we can prove two gtoh calls are to adjacent guest addresses then we can
+// make do with a single call with an extended range.  In fact, I'm pretty
+// certain any gtoh where 'guest' is of the form: addi base offset, is ok.
+//
+// If this is called after we've done algebraic simplification then
+// there's a good chance all the guest ptrs will consist of the same
+// base register plus a constant.  It shouldn't be repeatedly called
+// however since it inserts 'addi base, offset' instructions that are
+// likely to be simplifiable themselves.
 
+#[derive(Clone, Copy, Debug)]
+struct GuestRange {
+    base: Reg,
+    offset: i32,
+    len: u32,
+    perms: u8,
+}
+
+enum Merge {
+    Merge(GuestRange),
+    NoMerge(GuestRange, GuestRange),
+}
+
+use Merge::*;
+
+fn extract_range(
+    guest: &Reg,
+    len: u32,
+    perms: u8,
+    defs: &BTreeMap<Reg, RValue>,
+) -> Option<GuestRange> {
+    let rval = defs.get(guest).unwrap();
+
+    match rval {
+        Imm { op: Addi, rs, imm } => Some(GuestRange {
+            base: *rs,
+            offset: *imm,
+            len,
+            perms,
+        }),
+        _ => None,
+    }
+}
+
+// This assumes r1.offset < r2.offset
+fn merge_ranges(r1: GuestRange, r2: GuestRange) -> Merge {
+    if r1.base != r2.base {
+        return NoMerge(r1, r2);
+    }
+
+    Merge(GuestRange {
+        base: r1.base,
+        offset: r1.offset,
+        len: ((r2.offset + r2.len as i32) - r1.offset) as u32,
+        perms: r1.perms | r2.perms,
+    })
+}
+
+fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
+    let mut defs = BTreeMap::new();
+    let mut highest_reg = 0;
+    for i in instrs {
+        match i {
+            Assign { rd, rval } => {
+                defs.insert(*rd, *rval);
+
+                if rd.0 > highest_reg {
+                    highest_reg = rd.0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut ranges = Vec::new();
+    for i in instrs {
+        match i {
+            Assign {
+                rd,
+                rval: Gtoh { guest, len, perms },
+            } => {
+                if let Some(range) = extract_range(guest, *len, *perms, &defs) {
+                    ranges.push(range);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    debug!("ranges before merge:");
+    for r in &ranges {
+        debug!("    {:?}", r);
+    }
+
+    ranges.sort_by_key(|r| (r.base.0, r.offset));
+    let mut merged = Vec::new();
+    let mut last: Option<GuestRange> = None;
+    for r in &ranges {
+        if let Some(gr) = last {
+            match merge_ranges(gr, *r) {
+                Merge(r) => {
+                    last = Some(r);
+                }
+                NoMerge(r1, r2) => {
+                    merged.push(r1);
+                    last = Some(r2);
+                }
+            }
+        } else {
+            last = Some(*r);
+        }
+    }
+    ranges = merged;
+
+    debug!("ranges after merge:");
+    for r in &ranges {
+        debug!("    {:?}", r);
+    }
+
+    // For each merged range we insert a large gtoh call just after it's base
+    // register is defined.  Other existing gtoh calls are replaced with:
+    //    addi new_base, offset
+
+    // allocate new_base registers
+    let mut by_base: BTreeMap<Reg, (Reg, Reg, GuestRange)> = BTreeMap::new();
+    for r in &ranges {
+        by_base.insert(r.base, (Reg(highest_reg, None), Reg(highest_reg + 1, None), r.clone()));
+        highest_reg += 2;
+    }
+
+    let mut result = Vec::new();
+    for i in instrs {
+        match i {
+            Assign { rd, rval } => {
+                if let Some((new_guest, new_base, gr)) = by_base.get(rd) {
+                    result.push(*i);
+                    result.push(Assign {
+                        rd: *new_guest,
+                        rval: Imm {
+                            op: Addi,
+                            rs: gr.base,
+                            imm: gr.offset,
+                        },
+                    });
+                    result.push(Assign {
+                        rd: *new_base,
+                        rval: Gtoh {
+                            guest: *new_guest,
+                            len: gr.len,
+                            perms: gr.perms,
+                        },
+                    });
+                } else {
+                    result.push(*i);
+                    // FIXME: finish
+                    /*
+                    match rval {
+                        Gtoh { guest, len, perms } => {
+                            if let Some(range) = extract_range(guest, *len, *perms, &defs) {
+                                // Which gr does this belong to?
+                                let (_, new_base, gr) = by_base.get(&range.base).unwrap();
+                                    result.push(Assign {
+                                        rd: *rd,
+                                        rval: Imm {
+                                            op: Addi,
+                                            rs: *new_base,
+                                            imm: range.offset - gr.offset,
+                                        },
+                                    });
+                                }
+                            } else {
+                                result.push(*i);
+                            }
+                        }
+                        _ => {
+                            result.push(*i);
+                        }
+                    }
+                    */
+                }
+            }
+            _ => {
+                result.push(*i);
+            }
+        }
+    }
+
+    result
+}
+
+//--------------------------------
+
+fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
     if seen.contains(reg) {
         return;
     }
@@ -1304,8 +1458,6 @@ fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTr
 /// Reorders instructions to try and keep assignments close to their use.  Also
 /// has the effect of removing dead code.
 fn reorder(instrs: &[IR]) -> Vec<IR> {
-    use IR::*;
-
     let mut r = Vec::new();
     let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
 
@@ -1368,11 +1520,12 @@ fn reorder(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-// FIXME: take out the recursion
 fn optimise(instrs: &[IR]) -> Vec<IR> {
     let new_instrs = opt_cse(instrs);
     let new_instrs = opt_noop(&new_instrs);
     let new_instrs = opt_simplify(&new_instrs);
+    let new_instrs = opt_gtoh(&new_instrs);
+
     if new_instrs.len() == instrs.len() {
         reorder(&new_instrs)
     } else {
