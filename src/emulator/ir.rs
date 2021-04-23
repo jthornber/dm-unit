@@ -1018,6 +1018,13 @@ fn apply_substitutions(rval: &RValue, substs: &BTreeMap<Reg, Reg>) -> RValue {
     }
 }
 
+fn is_load(rval: &RValue) -> bool {
+    match rval {
+        Ld {..} | Lb {..} | Lh {..} | Lw {..} | Lbu {..} | Lhu {..} | Lwu {..} => true,
+        _ => false
+    }
+}
+
 /// Common subexpression elimination
 fn opt_cse(instrs: &[IR]) -> Vec<IR> {
     let mut r = Vec::new();
@@ -1029,9 +1036,14 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
             Assign { rd, rval } => {
                 let rval = apply_substitutions(rval, &substs);
                 if let Some(old) = seen.get(&rval) {
-                    // skip this instruction, substituting the earlier value in
-                    // future expressions.
-                    substs.insert(*rd, *old);
+                    if is_load(&rval) {
+                        seen.insert(rval, *rd);
+                        r.push(Assign { rd: *rd, rval });
+                    } else {
+                        // skip this instruction, substituting the earlier value in
+                        // future expressions.
+                        substs.insert(*rd, *old);
+                    }
                 } else {
                     seen.insert(rval, *rd);
                     r.push(Assign { rd: *rd, rval });
