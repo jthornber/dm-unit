@@ -879,13 +879,13 @@ impl VM {
 
         bb.hits += 1;
 
-        if bb.hits > 100 && bb.instrs.len() >= 1 {
+        if bb.hits > 100 && bb.instrs.len() >= 4 {
                 debug!("riscv ({} instructions):", bb.instrs.len());
 		for (inst, _width) in &bb.instrs {
     		    debug!("    {}", inst);
 		}
 
-		let ir = to_ir(&bb.instrs);
+		let ir = renumber(&to_ir(&bb.instrs, false));
 		debug!("ir ({} instructions):", ir.len());
 		for inst in ir {
     		    debug!("    {}", inst);

@@ -1633,9 +1633,60 @@ fn optimise(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-pub fn to_ir(insts: &[(Inst, u8)]) -> Vec<IR> {
+pub fn to_ir(insts: &[(Inst, u8)], opt: bool) -> Vec<IR> {
     let mut b = Builder::default();
     riscv_to_ir(&mut b, insts);
-    let ir = b.buffer;
-    optimise(&ir)
+    if opt {
+        let ir = b.buffer;
+        optimise(&ir)
+    } else {
+        b.buffer
+    }
 }
+
+//--------------------------------
+
+// Renumbers all the registers used in IR into ascending
+// order.  Only useful if you're printing the instructions.
+pub fn renumber(instrs: &[IR]) -> Vec<IR> {
+    let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
+    let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
+    let mut next_reg = 0;
+
+    let mut r = Vec::new();
+    for ir in instrs {
+        match ir {
+            Assign { rd, rval } => {
+                let rval = apply_substitutions(rval, &substs);
+                let new_reg = Reg(next_reg, rd.1);
+                next_reg += 1;
+                substs.insert(*rd, new_reg);
+                r.push(Assign { rd: new_reg, rval });
+            }
+            Sb { rs1, rs2 } => r.push(Sb {
+                rs1: subst_reg(*rs1, &substs),
+                rs2: subst_reg(*rs2, &substs),
+            }),
+            Sh { rs1, rs2 } => r.push(Sh {
+                rs1: subst_reg(*rs1, &substs),
+                rs2: subst_reg(*rs2, &substs),
+            }),
+            Sw { rs1, rs2 } => r.push(Sw {
+                rs1: subst_reg(*rs1, &substs),
+                rs2: subst_reg(*rs2, &substs),
+            }),
+            Sd { rs1, rs2 } => r.push(Sd {
+                rs1: subst_reg(*rs1, &substs),
+                rs2: subst_reg(*rs2, &substs),
+            }),
+            _ => {
+                r.push(*ir);
+            }
+        }
+    }
+
+    r
+}
+
+//--------------------------------
+
