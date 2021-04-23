@@ -321,15 +321,15 @@ impl std::fmt::Display for IR {
 
 //----------------------------------
 
-struct Translator {
+struct Builder {
     buffer: Vec<IR>,
     current_reg: u32,
     guest_regs: BTreeMap<decode::Reg, Reg>,
 }
 
-impl Default for Translator {
+impl Default for Builder {
     fn default() -> Self {
-        Translator {
+        Builder {
             buffer: Vec::new(),
             current_reg: 0,
             guest_regs: BTreeMap::new(),
@@ -337,12 +337,12 @@ impl Default for Translator {
     }
 }
 
-impl Translator {
+impl Builder {
     fn push(&mut self, inst: IR) {
         self.buffer.push(inst);
     }
 
-    // Get a new reg to represent greg.  After this call any call to ref_greg() for
+    // Get a new reg to represent greg.  After this, calls to ref_greg() for
     // this register will return the new reg, so make sure you don't do this:
     //     let rd = self.def_reg(rd);
     //     let rs = self.ref_reg(rs);
@@ -406,7 +406,7 @@ impl Translator {
         );
     }
 
-    fn xlate_branch(
+    fn branch(
         &mut self,
         rs1: &decode::Reg,
         rs2: &decode::Reg,
@@ -438,7 +438,7 @@ impl Translator {
         );
     }
 
-    fn xlate_load<F: FnOnce(Reg) -> RValue>(
+    fn load<F: FnOnce(Reg) -> RValue>(
         &mut self,
         rd: &decode::Reg,
         rs: &decode::Reg,
@@ -463,7 +463,7 @@ impl Translator {
         self.assign(new_rd, func(rd2));
     }
 
-    fn xlate_store<F: FnOnce(Reg, Reg) -> IR>(
+    fn store<F: FnOnce(Reg, Reg) -> IR>(
         &mut self,
         rs1: &decode::Reg,
         rs2: &decode::Reg,
@@ -503,452 +503,449 @@ impl Translator {
         );
     }
 
-    fn xlate_imm(&mut self, rd: &decode::Reg, op: ImmOp, rs: &decode::Reg, imm: &i32) {
+    fn imm(&mut self, rd: &decode::Reg, op: ImmOp, rs: &decode::Reg, imm: &i32) {
         let rs = self.ref_greg(rs);
         let rd = self.def_greg(rd);
         self.assign(rd, RValue::Imm { op, rs, imm: *imm });
     }
 
-    fn xlate_bin(&mut self, rd: &decode::Reg, op: BinOp, rs1: &decode::Reg, rs2: &decode::Reg) {
+    fn bin(&mut self, rd: &decode::Reg, op: BinOp, rs1: &decode::Reg, rs2: &decode::Reg) {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let rd = self.def_greg(rd);
         self.assign(rd, RValue::Bin { op, rs1, rs2 });
     }
 
-    fn xlate_inst(&mut self, inst: &Inst, width: u8) {
-        let width = width as i32;
+}
 
-        match inst {
-            Inst::Lui { rd, imm } => {
-                let rd = self.ref_greg(rd);
-                self.assign(
-                    rd,
-                    Li {
-                        imm: (*imm as i64) << 12,
-                    },
-                );
-                self.inc_pc(width);
-            }
-            Inst::Auipc { rd, imm } => {
-                let pc = self.ref_greg(&decode::Reg::PC);
-                let rd1 = self.assign_next(Li {
+//------------------------------
+// Riscv to IR
+
+fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
+    let width = width as i32;
+
+    match inst {
+        Inst::Lui { rd, imm } => {
+            let rd = b.ref_greg(rd);
+            b.assign(
+                rd,
+                Li {
                     imm: (*imm as i64) << 12,
-                });
-                let rd2 = self.def_greg(rd);
-                self.assign(
-                    rd2,
-                    Bin {
-                        op: Add,
-                        rs1: pc,
-                        rs2: rd1,
-                    },
-                );
-                self.inc_pc(width);
-            }
-            Inst::Jal { rd, imm } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Jalr { rd, rs, imm } => {
-                let (old_pc, new_pc) = self.mut_greg(&decode::Reg::PC);
+                },
+            );
+            b.inc_pc(width);
+        }
+        Inst::Auipc { rd, imm } => {
+            let pc = b.ref_greg(&decode::Reg::PC);
+            let rd1 = b.assign_next(Li {
+                imm: (*imm as i64) << 12,
+            });
+            let rd2 = b.def_greg(rd);
+            b.assign(
+                rd2,
+                Bin {
+                    op: Add,
+                    rs1: pc,
+                    rs2: rd1,
+                },
+            );
+            b.inc_pc(width);
+        }
+        Inst::Jal { .. } => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Jalr { rd, rs, imm } => {
+            let (old_pc, new_pc) = b.mut_greg(&decode::Reg::PC);
 
-                // Save the return address
-                let rd = self.def_greg(rd);
-                self.assign(
-                    rd,
-                    Imm {
-                        op: Addi,
-                        rs: old_pc,
-                        imm: width as i32,
-                    },
-                );
+            // Save the return address
+            let rd = b.def_greg(rd);
+            b.assign(
+                rd,
+                Imm {
+                    op: Addi,
+                    rs: old_pc,
+                    imm: width as i32,
+                },
+            );
 
-                // And jump
-                let rs = self.ref_greg(rs);
-                self.assign(
-                    new_pc,
-                    Imm {
-                        op: Addi,
-                        rs,
-                        imm: *imm,
-                    },
-                );
-            }
-            Inst::Beq { rs1, rs2, imm } => {
-                self.xlate_branch(rs1, rs2, imm, TestOp::Eq, width);
-            }
-            Inst::Bne { rs1, rs2, imm } => {
-                self.xlate_branch(rs1, rs2, imm, TestOp::Ne, width);
-            }
-            Inst::Blt { rs1, rs2, imm } => {
-                self.xlate_branch(rs1, rs2, imm, TestOp::Lt, width);
-            }
-            Inst::Bge { rs1, rs2, imm } => {
-                self.xlate_branch(rs1, rs2, imm, TestOp::Ge, width);
-            }
-            Inst::Bltu { rs1, rs2, imm } => {
-                self.xlate_branch(rs1, rs2, imm, TestOp::Ltu, width);
-            }
-            Inst::Bgeu { rs1, rs2, imm } => {
-                self.xlate_branch(rs1, rs2, imm, TestOp::Geu, width);
-            }
-            Inst::Lb { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 1, |rs| Lb { rs });
-                self.inc_pc(width);
-            }
-            Inst::Lh { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 2, |rs| Lh { rs });
-                self.inc_pc(width);
-            }
-            Inst::Lw { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 4, |rs| Lw { rs });
-                self.inc_pc(width);
-            }
-            Inst::Lwu { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 4, |rs| Lwu { rs });
-                self.inc_pc(width);
-            }
-            Inst::Ld { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 8, |rs| Ld { rs });
-                self.inc_pc(width);
-            }
-            Inst::Lbu { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 1, |rs| Lbu { rs });
-                self.inc_pc(width);
-            }
-            Inst::Lhu { rd, rs, imm } => {
-                self.xlate_load(rd, rs, imm, 2, |rs| Lhu { rs });
-                self.inc_pc(width);
-            }
-            Inst::Sb { rs1, rs2, imm } => {
-                self.xlate_store(rs1, rs2, imm, 1, |rs1, rs2| Sb { rs1, rs2 });
-                self.inc_pc(width);
-            }
-            Inst::Sh { rs1, rs2, imm } => {
-                self.xlate_store(rs1, rs2, imm, 2, |rs1, rs2| Sh { rs1, rs2 });
-                self.inc_pc(width);
-            }
-            Inst::Sw { rs1, rs2, imm } => {
-                self.xlate_store(rs1, rs2, imm, 4, |rs1, rs2| Sw { rs1, rs2 });
-                self.inc_pc(width);
-            }
-            Inst::Sd { rs1, rs2, imm } => {
-                self.xlate_store(rs1, rs2, imm, 8, |rs1, rs2| Sd { rs1, rs2 });
-                self.inc_pc(width);
-            }
-            Inst::Addi { rd, rs, imm } => {
-                self.xlate_imm(rd, Addi, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Addiw { rd, rs, imm } => {
-                self.xlate_imm(rd, Addiw, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Slti { rd, rs, imm } => {
-                self.xlate_imm(rd, Slti, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Sltiu { rd, rs, imm } => {
-                self.xlate_imm(rd, Sltiu, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Xori { rd, rs, imm } => {
-                self.xlate_imm(rd, Xori, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Ori { rd, rs, imm } => {
-                self.xlate_imm(rd, Ori, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Andi { rd, rs, imm } => {
-                self.xlate_imm(rd, Andi, rs, imm);
-                self.inc_pc(width);
-            }
-            Inst::Slli { rd, rs, shamt } => {
-                self.xlate_shift(rd, Slli, rs, *shamt as u8);
-                self.inc_pc(width);
-            }
-            Inst::Slliw { rd, rs, shamt } => {
-                self.xlate_shift(rd, Slliw, rs, *shamt as u8);
-                self.inc_pc(width);
-            }
-            Inst::Srli { rd, rs, shamt } => {
-                self.xlate_shift(rd, Srli, rs, *shamt as u8);
-                self.inc_pc(width);
-            }
-            Inst::Srliw { rd, rs, shamt } => {
-                self.xlate_shift(rd, Srliw, rs, *shamt as u8);
-                self.inc_pc(width);
-            }
-            Inst::Sraiw { rd, rs, shamt } => {
-                self.xlate_shift(rd, Sraiw, rs, *shamt as u8);
-                self.inc_pc(width);
-            }
-            Inst::Srai { rd, rs, shamt } => {
-                self.xlate_shift(rd, Srai, rs, *shamt as u8);
-                self.inc_pc(width);
-            }
-            Inst::Add { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Add, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Addw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Addw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Sub { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Sub, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Subw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Subw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Sll { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Sll, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Sllw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Sllw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Srlw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Srlw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Sraw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Sraw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Slt { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Slt, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Sltu { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Sltu, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Xor { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Xor, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Srl { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Srl, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Sra { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Sra, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Or { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Or, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::And { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, And, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Mul { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Mul, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Mulh { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Mulh, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Mulhsu { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Mulhsu, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Mulhu { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Mulhu, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Mulw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Mulw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Div { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Div, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Divu { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Divu, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Divw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Divw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Divuw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Divuw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Rem { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Rem, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Remu { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Remu, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Remw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Remw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Remuw { rd, rs1, rs2 } => {
-                self.xlate_bin(rd, Remuw, rs1, rs2);
-                self.inc_pc(width);
-            }
-            Inst::Fence => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Fencei => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Ecall => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Ebreak => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Lrw { rd, rs } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Scw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoswapw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoaddw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoxorw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoandw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoorw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amominw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amomaxw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amominuw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amomaxuw { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Lrd { rd, rs } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Scd { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoswapd { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoaddd { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoxord { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoandd { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amoord { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amomind { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amomaxd { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amominud { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
-            Inst::Amomaxud { rd, rs1, rs2 } => {
-                todo!();
-                self.inc_pc(width);
-            }
+            // And jump
+            let rs = b.ref_greg(rs);
+            b.assign(
+                new_pc,
+                Imm {
+                    op: Addi,
+                    rs,
+                    imm: *imm,
+                },
+            );
+        }
+        Inst::Beq { rs1, rs2, imm } => {
+            b.branch(rs1, rs2, imm, TestOp::Eq, width);
+        }
+        Inst::Bne { rs1, rs2, imm } => {
+            b.branch(rs1, rs2, imm, TestOp::Ne, width);
+        }
+        Inst::Blt { rs1, rs2, imm } => {
+            b.branch(rs1, rs2, imm, TestOp::Lt, width);
+        }
+        Inst::Bge { rs1, rs2, imm } => {
+            b.branch(rs1, rs2, imm, TestOp::Ge, width);
+        }
+        Inst::Bltu { rs1, rs2, imm } => {
+            b.branch(rs1, rs2, imm, TestOp::Ltu, width);
+        }
+        Inst::Bgeu { rs1, rs2, imm } => {
+            b.branch(rs1, rs2, imm, TestOp::Geu, width);
+        }
+        Inst::Lb { rd, rs, imm } => {
+            b.load(rd, rs, imm, 1, |rs| Lb { rs });
+            b.inc_pc(width);
+        }
+        Inst::Lh { rd, rs, imm } => {
+            b.load(rd, rs, imm, 2, |rs| Lh { rs });
+            b.inc_pc(width);
+        }
+        Inst::Lw { rd, rs, imm } => {
+            b.load(rd, rs, imm, 4, |rs| Lw { rs });
+            b.inc_pc(width);
+        }
+        Inst::Lwu { rd, rs, imm } => {
+            b.load(rd, rs, imm, 4, |rs| Lwu { rs });
+            b.inc_pc(width);
+        }
+        Inst::Ld { rd, rs, imm } => {
+            b.load(rd, rs, imm, 8, |rs| Ld { rs });
+            b.inc_pc(width);
+        }
+        Inst::Lbu { rd, rs, imm } => {
+            b.load(rd, rs, imm, 1, |rs| Lbu { rs });
+            b.inc_pc(width);
+        }
+        Inst::Lhu { rd, rs, imm } => {
+            b.load(rd, rs, imm, 2, |rs| Lhu { rs });
+            b.inc_pc(width);
+        }
+        Inst::Sb { rs1, rs2, imm } => {
+            b.store(rs1, rs2, imm, 1, |rs1, rs2| Sb { rs1, rs2 });
+            b.inc_pc(width);
+        }
+        Inst::Sh { rs1, rs2, imm } => {
+            b.store(rs1, rs2, imm, 2, |rs1, rs2| Sh { rs1, rs2 });
+            b.inc_pc(width);
+        }
+        Inst::Sw { rs1, rs2, imm } => {
+            b.store(rs1, rs2, imm, 4, |rs1, rs2| Sw { rs1, rs2 });
+            b.inc_pc(width);
+        }
+        Inst::Sd { rs1, rs2, imm } => {
+            b.store(rs1, rs2, imm, 8, |rs1, rs2| Sd { rs1, rs2 });
+            b.inc_pc(width);
+        }
+        Inst::Addi { rd, rs, imm } => {
+            b.imm(rd, Addi, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Addiw { rd, rs, imm } => {
+            b.imm(rd, Addiw, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Slti { rd, rs, imm } => {
+            b.imm(rd, Slti, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Sltiu { rd, rs, imm } => {
+            b.imm(rd, Sltiu, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Xori { rd, rs, imm } => {
+            b.imm(rd, Xori, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Ori { rd, rs, imm } => {
+            b.imm(rd, Ori, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Andi { rd, rs, imm } => {
+            b.imm(rd, Andi, rs, imm);
+            b.inc_pc(width);
+        }
+        Inst::Slli { rd, rs, shamt } => {
+            b.xlate_shift(rd, Slli, rs, *shamt as u8);
+            b.inc_pc(width);
+        }
+        Inst::Slliw { rd, rs, shamt } => {
+            b.xlate_shift(rd, Slliw, rs, *shamt as u8);
+            b.inc_pc(width);
+        }
+        Inst::Srli { rd, rs, shamt } => {
+            b.xlate_shift(rd, Srli, rs, *shamt as u8);
+            b.inc_pc(width);
+        }
+        Inst::Srliw { rd, rs, shamt } => {
+            b.xlate_shift(rd, Srliw, rs, *shamt as u8);
+            b.inc_pc(width);
+        }
+        Inst::Sraiw { rd, rs, shamt } => {
+            b.xlate_shift(rd, Sraiw, rs, *shamt as u8);
+            b.inc_pc(width);
+        }
+        Inst::Srai { rd, rs, shamt } => {
+            b.xlate_shift(rd, Srai, rs, *shamt as u8);
+            b.inc_pc(width);
+        }
+        Inst::Add { rd, rs1, rs2 } => {
+            b.bin(rd, Add, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Addw { rd, rs1, rs2 } => {
+            b.bin(rd, Addw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Sub { rd, rs1, rs2 } => {
+            b.bin(rd, Sub, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Subw { rd, rs1, rs2 } => {
+            b.bin(rd, Subw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Sll { rd, rs1, rs2 } => {
+            b.bin(rd, Sll, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Sllw { rd, rs1, rs2 } => {
+            b.bin(rd, Sllw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Srlw { rd, rs1, rs2 } => {
+            b.bin(rd, Srlw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Sraw { rd, rs1, rs2 } => {
+            b.bin(rd, Sraw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Slt { rd, rs1, rs2 } => {
+            b.bin(rd, Slt, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Sltu { rd, rs1, rs2 } => {
+            b.bin(rd, Sltu, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Xor { rd, rs1, rs2 } => {
+            b.bin(rd, Xor, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Srl { rd, rs1, rs2 } => {
+            b.bin(rd, Srl, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Sra { rd, rs1, rs2 } => {
+            b.bin(rd, Sra, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Or { rd, rs1, rs2 } => {
+            b.bin(rd, Or, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::And { rd, rs1, rs2 } => {
+            b.bin(rd, And, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Mul { rd, rs1, rs2 } => {
+            b.bin(rd, Mul, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Mulh { rd, rs1, rs2 } => {
+            b.bin(rd, Mulh, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Mulhsu { rd, rs1, rs2 } => {
+            b.bin(rd, Mulhsu, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Mulhu { rd, rs1, rs2 } => {
+            b.bin(rd, Mulhu, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Mulw { rd, rs1, rs2 } => {
+            b.bin(rd, Mulw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Div { rd, rs1, rs2 } => {
+            b.bin(rd, Div, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Divu { rd, rs1, rs2 } => {
+            b.bin(rd, Divu, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Divw { rd, rs1, rs2 } => {
+            b.bin(rd, Divw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Divuw { rd, rs1, rs2 } => {
+            b.bin(rd, Divuw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Rem { rd, rs1, rs2 } => {
+            b.bin(rd, Rem, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Remu { rd, rs1, rs2 } => {
+            b.bin(rd, Remu, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Remw { rd, rs1, rs2 } => {
+            b.bin(rd, Remw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Remuw { rd, rs1, rs2 } => {
+            b.bin(rd, Remuw, rs1, rs2);
+            b.inc_pc(width);
+        }
+        Inst::Fence => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Fencei => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Ecall => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Ebreak => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Lrw { .. } => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Scw { rd, rs1, rs2 } => {
+            // FIXME: finish
+            b.inc_pc(width);
+        }
+        Inst::Amoswapw { rd, rs1, rs2 } => {
+            let t = b.assign_next(Lw {rs: b.ref_greg(rs1)});
+            b.store(rs1, rs2, &0, 4, |rs1, rs2| Sw {rs1, rs2});
+            let rd = b.def_greg(rd);
+            b.assign(rd, Imm {op: Addi, rs: t, imm: 0});
+            b.inc_pc(width);
+        }
+        Inst::Amoaddw { rd, rs1, rs2 } => {
+            /*
+            let rs1 = b.reg_greg(rs1);
+            let t = b.assign_next(Lw {rs: rs1});
+            let new_value = b.assign_next(func(t, rs2));
+            b.store(rs1, new_value, &0, 4, |rs1, rs2| Sw {rs1, rs2});
+            let rd = b.def_greg(rd);
+            b.assign(rd, Mv {rs: t});
+            */
+
+            b.inc_pc(width);
+        }
+        Inst::Amoxorw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoandw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoorw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amominw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amomaxw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amominuw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amomaxuw { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Lrd { rd, rs } => {
+            b.inc_pc(width);
+        }
+        Inst::Scd { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoswapd { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoaddd { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoxord { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoandd { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amoord { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amomind { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amomaxd { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amominud { rd, rs1, rs2 } => {
+            b.inc_pc(width);
+        }
+        Inst::Amomaxud { rd, rs1, rs2 } => {
+            b.inc_pc(width);
         }
     }
+}
 
-    fn xlate(&mut self, insts: &[(Inst, u8)]) {
-        let live_regs = collect_regs(insts);
-        if live_regs.contains(&decode::Reg::Zero) {
-            let zero = self.def_greg(&decode::Reg::Zero);
-            self.assign(zero, Li { imm: 0 });
+fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
+    let live_regs = collect_regs(insts);
+    if live_regs.contains(&decode::Reg::Zero) {
+        let zero = b.def_greg(&decode::Reg::Zero);
+        b.assign(zero, Li { imm: 0 });
+    }
+
+    // Load all guest registers, except zero
+    let base = b.assign_next(Gbase);
+    for greg in &live_regs {
+        if *greg == decode::Reg::Zero {
+            continue;
         }
 
-        // Load all guest registers, except zero
-        let base = self.assign_next(Gbase);
-        for greg in &live_regs {
-            if *greg == decode::Reg::Zero {
-                continue;
-            }
+        let rd1 = b.assign_next(Imm {
+            op: Addi,
+            rs: base,
+            imm: *greg as i32 * 8,
+        });
+        let rd2 = b.def_greg(&greg);
+        b.assign(rd2, Ld { rs: rd1 });
+    }
 
-            let rd1 = self.assign_next(Imm {
-                op: Addi,
-                rs: base,
-                imm: *greg as i32 * 8,
-            });
-            let rd2 = self.def_greg(&greg);
-            self.assign(rd2, Ld { rs: rd1 });
-        }
+    // xlate instructions
+    for (inst, width) in insts {
+        xlate_inst(b, inst, *width);
+    }
 
-        // xlate instructions
-        for (inst, width) in insts {
-            self.xlate_inst(inst, *width);
+    // Save all guest registers, except zero
+    for greg in &live_regs {
+        if *greg == decode::Reg::Zero {
+            continue;
         }
-
-        // Save all guest registers, except zero
-        for greg in &live_regs {
-            if *greg == decode::Reg::Zero {
-                continue;
-            }
-            let rs1 = self.assign_next(Imm {
-                op: Addi,
-                rs: base,
-                imm: *greg as i32 * 8,
-            });
-            let rs2 = self.ref_greg(&greg);
-            self.push(Sd { rs1, rs2 });
-        }
+        let rs1 = b.assign_next(Imm {
+            op: Addi,
+            rs: base,
+            imm: *greg as i32 * 8,
+        });
+        let rs2 = b.ref_greg(&greg);
+        b.push(Sd { rs1, rs2 });
     }
 }
 
@@ -1316,6 +1313,9 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
             last = Some(*r);
         }
     }
+    if let Some(last) = last {
+        merged.push(last);
+    }
     ranges = merged;
 
     debug!("ranges after merge:");
@@ -1330,7 +1330,14 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     // allocate new_base registers
     let mut by_base: BTreeMap<Reg, (Reg, Reg, GuestRange)> = BTreeMap::new();
     for r in &ranges {
-        by_base.insert(r.base, (Reg(highest_reg, None), Reg(highest_reg + 1, None), r.clone()));
+        by_base.insert(
+            r.base,
+            (
+                Reg(highest_reg, None),
+                Reg(highest_reg + 1, None),
+                r.clone(),
+            ),
+        );
         highest_reg += 2;
     }
 
@@ -1357,13 +1364,10 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
                         },
                     });
                 } else {
-                    result.push(*i);
-                    // FIXME: finish
-                    /*
                     match rval {
                         Gtoh { guest, len, perms } => {
                             if let Some(range) = extract_range(guest, *len, *perms, &defs) {
-                                // Which gr does this belong to?
+                                debug!("range.base = {}", range.base);
                                 let (_, new_base, gr) = by_base.get(&range.base).unwrap();
                                     result.push(Assign {
                                         rd: *rd,
@@ -1373,7 +1377,6 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
                                             imm: range.offset - gr.offset,
                                         },
                                     });
-                                }
                             } else {
                                 result.push(*i);
                             }
@@ -1382,7 +1385,6 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
                             result.push(*i);
                         }
                     }
-                    */
                 }
             }
             _ => {
@@ -1520,23 +1522,33 @@ fn reorder(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
+fn optimise_(instrs: &[IR]) -> Vec<IR> {
+    let new_instrs = opt_cse(instrs);
+    let new_instrs = opt_noop(&new_instrs);
+    let new_instrs = opt_simplify(&new_instrs);
+
+    if new_instrs.len() == instrs.len() {
+        new_instrs
+    } else {
+        optimise_(&new_instrs)
+    }
+}
+
 fn optimise(instrs: &[IR]) -> Vec<IR> {
     let new_instrs = opt_cse(instrs);
     let new_instrs = opt_noop(&new_instrs);
     let new_instrs = opt_simplify(&new_instrs);
     let new_instrs = opt_gtoh(&new_instrs);
 
-    if new_instrs.len() == instrs.len() {
-        reorder(&new_instrs)
-    } else {
-        optimise(&new_instrs)
-    }
+    // Loop around some of the passes
+    reorder(&optimise_(&new_instrs))
 }
 
 //--------------------------------
 
 pub fn to_ir(insts: &[(Inst, u8)]) -> Vec<IR> {
-    let mut x = Translator::default();
-    x.xlate(insts);
-    optimise(&x.buffer)
+    let mut b = Builder::default();
+    riscv_to_ir(&mut b, insts);
+    let ir = b.buffer;
+    optimise(&ir)
 }
