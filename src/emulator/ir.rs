@@ -1398,6 +1398,80 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
+// Remove store instructions of the form: Sx dest { Lx { dest } }
+fn opt_redundant_stores(instrs: &[IR]) -> Vec<IR> {
+    let mut defs = BTreeMap::new();
+    for i in instrs {
+        match i {
+            Assign { rd, rval } => {
+                defs.insert(*rd, *rval);
+            }
+            _ => {}
+        }
+    }
+
+    let mut result = Vec::new();
+    for i in instrs {
+        match i {
+            Sb { rs1, rs2 } => {
+                match defs.get(rs2).unwrap() {
+                    Lb { rs } => {
+                        if rs != rs1 {
+                            result.push(*i);
+                        }
+                    }
+                    _ => {
+                        result.push(*i);
+                    }
+                }
+            }
+            Sh { rs1, rs2 } => {
+                match defs.get(rs2).unwrap() {
+                    Lh { rs } => {
+                        if rs != rs1 {
+                            result.push(*i);
+                        }
+                    }
+                    _ => {
+                        result.push(*i);
+                    }
+                }
+            }
+            Sw { rs1, rs2 } => {
+                match defs.get(rs2).unwrap() {
+                    Lw { rs } => {
+                        if rs != rs1 {
+                            result.push(*i);
+                        }
+                    }
+                    _ => {
+                        result.push(*i);
+                    }
+                }
+            }
+            Sd { rs1, rs2 } => {
+                match defs.get(rs2).unwrap() {
+                    Ld { rs } => {
+                        if rs != rs1 {
+                            result.push(*i);
+                        }
+                    }
+                    _ => {
+                        result.push(*i);
+                    }
+                }
+            }
+            _ => {
+                result.push(*i);
+            }
+        }
+    }
+
+    result
+}
+
+//--------------------------------
+
 fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
     if seen.contains(reg) {
         return;
@@ -1526,6 +1600,7 @@ fn optimise_(instrs: &[IR]) -> Vec<IR> {
     let new_instrs = opt_cse(instrs);
     let new_instrs = opt_noop(&new_instrs);
     let new_instrs = opt_simplify(&new_instrs);
+    let new_instrs = opt_redundant_stores(&new_instrs);
 
     if new_instrs.len() == instrs.len() {
         new_instrs
