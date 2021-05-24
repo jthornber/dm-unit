@@ -791,6 +791,7 @@ fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
+    let kmodules = vec![PDATA_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
 
     macro_rules! test_section {
@@ -806,7 +807,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             prefix.push($path);
             let p = prefix.concat();
             prefix.pop().unwrap();
-            runner.register(&p, Box::new($func));
+            runner.register(&p, Test::new(kmodules.clone(), Box::new($func)));
         }};
     }
 

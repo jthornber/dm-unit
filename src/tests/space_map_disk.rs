@@ -30,7 +30,13 @@ impl SpaceMapBuilder for DiskSMBuilder {
         let sm_disk = dm_sm_disk_create(fix, tm, nr_blocks)?;
         let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
 
-        Ok(Box::new(DiskSpaceMap {bm, tm, sm_meta, sm_disk, sb}))
+        Ok(Box::new(DiskSpaceMap {
+            bm,
+            tm,
+            sm_meta,
+            sm_disk,
+            sb,
+        }))
     }
 }
 
@@ -79,14 +85,25 @@ fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     test_wrapping_around(fix, &mut builder)
 }
 
-
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    runner.register("/pdata/space-map/disk/boundary-size", Box::new(test_boundary_size_));
-    runner.register("/pdata/space-map/disk/commit-cost", Box::new(test_commit_cost_));
-    runner.register("/pdata/space-map/disk/inc-cost", Box::new(test_inc_cost_));
-    runner.register("/pdata/space-map/disk/wrapping-around", Box::new(test_wrapping_around_));
+    let kmodules = vec![PDATA_MOD];
+
+    runner.register(
+        "/pdata/space-map/disk/boundary-size",
+        Test::new(kmodules.clone(), Box::new(test_boundary_size_)),
+    );
+    runner.register(
+        "/pdata/space-map/disk/commit-cost",
+        Test::new(kmodules.clone(), Box::new(test_commit_cost_)),
+    );
+    runner.register("/pdata/space-map/disk/inc-cost",
+                   Test::new(kmodules.clone(), Box::new(test_inc_cost_)));
+    runner.register(
+        "/pdata/space-map/disk/wrapping-around",
+        Test::new(kmodules.clone(), Box::new(test_wrapping_around_)),
+    );
     Ok(())
 }
 

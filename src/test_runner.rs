@@ -165,15 +165,29 @@ fn check_kernel_version<P: AsRef<Path>>(kernel_dir: P) -> Result<()> {
 
 //-------------------------------
 
+pub type TestFn = Box<dyn Fn(&mut Fixture) -> Result<()>>;
+
+pub struct Test {
+    kmodules: Vec<KernelModule>,
+    func: TestFn,
+}
+
+impl Test {
+    pub fn new(kmodules: Vec<KernelModule>, func: TestFn) -> Self {
+        Test {
+            kmodules,
+            func: Box::new(func),
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub struct TestRunner<'a> {
     kernel_dir: PathBuf,
     filter_fn: Box<dyn Fn(&str) -> bool + 'a>,
-    tests: BTreeMap<String, TestFn>,
+    tests: BTreeMap<String, Test>,
     gdb: bool,
 }
-
-pub type TestFn = Box<dyn Fn(&mut Fixture) -> Result<()>>;
 
 impl<'a> TestRunner<'a> {
     pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Result<Self> {
@@ -204,7 +218,7 @@ impl<'a> TestRunner<'a> {
         &self.kernel_dir
     }
 
-    pub fn register(&mut self, path: &str, t: TestFn) {
+    pub fn register(&mut self, path: &str, t: Test) {
         self.tests.insert(path.to_string(), t);
     }
 
@@ -221,9 +235,9 @@ impl<'a> TestRunner<'a> {
             let components = path_components(p);
             formatter.print(&components);
 
-            let mut fix = Fixture::new(&self.kernel_dir)?;
+            let mut fix = Fixture::new(&self.kernel_dir, &t.kmodules)?;
 
-            if let Err(e) = (*t)(&mut fix) {
+            if let Err(e) = (t.func)(&mut fix) {
                 fail += 1;
                 println!(" FAIL");
                 info!("{}", e);

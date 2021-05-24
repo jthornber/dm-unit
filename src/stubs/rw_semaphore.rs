@@ -140,11 +140,11 @@ fn up_write(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn rw_sem_stubs(fix: &mut Fixture) -> Result<()> {
-    fix.at_func("__init_rwsem", Box::new(init_rwsem))?;
-    fix.at_func("down_read", Box::new(down_read))?;
-    fix.at_func("up_read", Box::new(up_read))?;
-    fix.at_func("down_write", Box::new(down_write))?;
-    fix.at_func("up_write", Box::new(up_write))?;
+    let _ = fix.at_func("__init_rwsem", Box::new(init_rwsem));
+    let _ = fix.at_func("down_read", Box::new(down_read));
+    let _ = fix.at_func("up_read", Box::new(up_read));
+    let _ = fix.at_func("down_write", Box::new(down_write));
+    let _ = fix.at_func("up_write", Box::new(up_write));
     Ok(())
 }
 

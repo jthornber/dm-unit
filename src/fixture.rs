@@ -34,24 +34,47 @@ pub struct Fixture {
     trace_indent: usize,
 }
 
-impl Fixture {
-    pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Result<Self> {
+#[derive(Clone)]
+pub struct KernelModule {
+    basename: &'static str,
+    relative_path: &'static str,
+}
+
+impl KernelModule {
+    pub fn path<P: AsRef<Path>>(&self, kernel_dir: P) -> PathBuf {
         let mut module = PathBuf::new();
         module.push(kernel_dir);
-        let module_path = |m| {
-            let mut module = module.clone();
-            module.push(m);
-            module
-        };
+        module.push(self.relative_path.to_string());
+        module
+    }
+}
 
-        // These need to be in link order with the lowest level first.
-        let modules: Vec<PathBuf> = [
-            "drivers/md/persistent-data/dm-persistent-data.ko",
-            "drivers/md/dm-thin-pool.ko",
-        ]
-        .iter()
-        .map(module_path)
-        .collect();
+pub const PDATA_MOD: KernelModule = KernelModule {
+    basename: "dm-persistent-data",
+    relative_path: "drivers/md/persistent-data/dm-persistent-data.ko",
+};
+
+pub const THIN_MOD: KernelModule = KernelModule {
+    basename: "dm-thin-pool",
+    relative_path: "drivers/md/dm-thin-pool.ko",
+};
+
+pub const CACHE_MOD: KernelModule = KernelModule {
+    basename: "dm-cache",
+    relative_path: "drivers/md/dm-cache.ko",
+};
+
+pub const CACHE_SMQ_MOD: KernelModule = KernelModule {
+    basename: "dm-cache-smq",
+    relative_path: "drivers/md/dm-cache-smq.ko",
+};
+
+impl Fixture {
+    pub fn new<P: AsRef<Path> + Clone>(kernel_dir: P, kmodules: &[KernelModule]) -> Result<Self> {
+        let mut modules = Vec::new();
+        for km in kmodules {
+            modules.push(km.path(kernel_dir.clone()));
+        }
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
         let heap_end = Addr(heap_begin.0 + (32 * 1024 * 1024));

@@ -116,18 +116,32 @@ fn test_write_lock(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
-    let mut reg = move |path, func| {
-        let mut p = "/pdata/block-manager/".to_string();
-        p.push_str(path);
-        runner.register(&p, func);
-    };
+    let kmodules = vec![PDATA_MOD];
 
-    reg("create/nomem", Box::new(test_create_nomem));
-    reg("create/success", Box::new(test_create_success));
-    reg("block-size", Box::new(test_block_size));
-    reg("nr-blocks", Box::new(test_nr_blocks));
-    reg("read-lock", Box::new(test_read_lock));
-    reg("write-lock", Box::new(test_write_lock));
+    runner.register(
+        "/pdata/block-manager/create/nomem",
+        Test::new(kmodules.clone(), Box::new(test_create_nomem)),
+    );
+    runner.register(
+        "/pdata/block-manager/create/success",
+        Test::new(kmodules.clone(), Box::new(test_create_success)),
+    );
+    runner.register(
+        "/pdata/block-manager/block-size",
+        Test::new(kmodules.clone(), Box::new(test_block_size)),
+    );
+    runner.register(
+        "/pdata/block-manager/nr-blocks",
+        Test::new(kmodules.clone(), Box::new(test_nr_blocks)),
+    );
+    runner.register(
+        "/pdata/block-manager/read-lock",
+        Test::new(kmodules.clone(), Box::new(test_read_lock)),
+    );
+    runner.register(
+        "/pdata/block-manager/write-lock",
+        Test::new(kmodules.clone(), Box::new(test_write_lock)),
+    );
 
     Ok(())
 }
