@@ -1,4 +1,5 @@
 #![feature(map_first_last)]
+#![feature(box_into_inner)]
 
 extern crate clap;
 extern crate elf;
@@ -7,6 +8,7 @@ extern crate nom;
 extern crate regex;
 extern crate thiserror;
 
+pub mod anymap;
 pub mod block_manager;
 pub mod decode;
 pub mod fixture;

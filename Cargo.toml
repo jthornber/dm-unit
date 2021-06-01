@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.35"
+bit-set = "0.5.2"
 byteorder = "1.3"
 clap = "2.33"
 crc32c = "0.4"
@@ -23,8 +24,8 @@ nom = "6.0.1"
 regex = "1"
 rand = "0.8.0"
 rand_chacha = "0.3"
-thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", branch = "main" }
-# thinp = { path = "../thinp-for-dmunit" }
+# thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", branch = "main" }
+thinp = { path = "../thinp-for-dmunit" }
 thiserror = "1.0"
 
 [profile.release]

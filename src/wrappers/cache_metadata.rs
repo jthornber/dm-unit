@@ -99,7 +99,11 @@ pub fn dm_cache_changed_this_transaction(fix: &mut Fixture, cmd: Addr) -> Result
     Ok(if fix.vm.reg(A0) == 0 { false } else { true })
 }
 
-pub fn dm_cache_set_dirty_bits(_fix: &mut Fixture, _cmd: Addr, _bits: &bit_set::BitSet) -> Result<()> {
+pub fn dm_cache_set_dirty_bits(
+    _fix: &mut Fixture,
+    _cmd: Addr,
+    _bits: &bit_set::BitSet,
+) -> Result<()> {
     todo!();
 }
 
@@ -139,7 +143,12 @@ impl Guest for CacheStats {
         let read_misses = r.read_u32::<LittleEndian>()?;
         let write_hits = r.read_u32::<LittleEndian>()?;
         let write_misses = r.read_u32::<LittleEndian>()?;
-        Ok(CacheStats { read_hits, read_misses, write_hits, write_misses })
+        Ok(CacheStats {
+            read_hits,
+            read_misses,
+            write_hits,
+            write_misses,
+        })
     }
 }
 
@@ -155,8 +164,7 @@ pub fn dm_cache_metadata_get_stats(fix: &mut Fixture, cmd: Addr) -> Result<Cache
 }
 
 pub fn dm_cache_metadata_set_stats(fix: &mut Fixture, cmd: Addr, stats: &CacheStats) -> Result<()> {
-    let (mut fix, result_ptr) =
-       auto_guest::<CacheStats>(fix, stats, PERM_READ | PERM_WRITE)?;
+    let (mut fix, result_ptr) = auto_guest::<CacheStats>(fix, stats, PERM_READ | PERM_WRITE)?;
     fix.vm.set_reg(A0, cmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
 
@@ -165,7 +173,7 @@ pub fn dm_cache_metadata_set_stats(fix: &mut Fixture, cmd: Addr, stats: &CacheSt
 
 pub fn dm_cache_commit(fix: &mut Fixture, cmd: Addr, clean_shutdown: bool) -> Result<()> {
     fix.vm.set_reg(A0, cmd.0);
-    fix.vm.set_reg(A1, if clean_shutdown { 1 } else { 0} );
+    fix.vm.set_reg(A1, if clean_shutdown { 1 } else { 0 });
     fix.call_with_errno("dm_cache_commit")
 }
 
@@ -194,7 +202,11 @@ fn bool_query(fix: &mut Fixture, cmd: Addr, symbol: &str) -> Result<bool> {
     fix.vm.set_reg(A0, cmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno(symbol)?;
-    Ok(if fix.vm.mem.read_into::<u32>(result_ptr, PERM_READ)? == 0 { false } else { true })
+    if fix.vm.mem.read_into::<u32>(result_ptr, PERM_READ)? == 0 {
+        Ok(false)
+    } else {
+        Ok(true)
+    }
 }
 
 pub fn dm_cache_metadata_all_clean(fix: &mut Fixture, cmd: Addr) -> Result<bool> {
@@ -225,19 +237,122 @@ pub fn dm_cache_metadata_abort(fix: &mut Fixture, cmd: Addr) -> Result<()> {
     fix.call_with_errno("dm_cache_metadata_abort")
 }
 
+#[derive(Clone, Debug)]
+pub struct CacheMapping {
+    pub cblock: u64,
+    pub oblock: u64,
+    pub dirty: bool,
+    pub hint: Option<u32>,
+}
+
+pub fn dm_cache_load_mappings(fix: &mut Fixture, cmd: Addr) -> Result<Vec<CacheMapping>> {
+    let (mut fix, callback_ptr) = auto_ebreak(fix)?;
+    
+    type Mappings = Vec<CacheMapping>;
+    let mappings: Mappings = Vec::new();
+    fix.contexts.insert(callback_ptr, mappings);
+
+    let callback = move |fix: &mut Fixture| {
+        let _context = fix.vm.reg(A0);
+        let oblock = fix.vm.reg(A1);
+        let cblock = fix.vm.reg(A2);
+        let dirty = fix.vm.reg(A3);
+        let hint = fix.vm.reg(A4) as u32;
+        let hint_valid = fix.vm.reg(A5);
+
+        let dirty = if dirty == 0 { false } else { true };
+        let hint = if hint_valid == 0 { None } else { Some(hint) };
+
+        {
+            let mappings = fix.contexts.get_mut::<Mappings>(&callback_ptr).unwrap();
+            mappings.push(CacheMapping {
+                cblock,
+                oblock,
+                dirty,
+                hint,
+            });
+        }
+        fix.vm.ret(0);
+        Ok(())
+    };
+
+    fix.bp_at_addr(callback_ptr, Box::new(callback));
+
+    fix.vm.set_reg(A0, cmd.0);
+
+    // I want to keep the policy separate from the metadata tests.  So we
+    // pass in a NULL policy ptr, and stub hints_array_available() which
+    // is the only use of it.
+    fix.vm.set_reg(A1, 0);
+    fix.vm.set_reg(A2, callback_ptr.0);
+    fix.stub("hints_array_available", 0)?;
+    fix.vm.set_reg(A3, 0);
+
+    fix.call_with_errno("dm_cache_load_mappings")?;
+
+    let mappings = Box::into_inner(fix.contexts.remove::<Mappings>(&callback_ptr));
+    Ok(mappings)
+}
+
+/*
+pub fn dm_cache_load_discards(fix: &mut Fixture, cmd: Addr) -> Result<FixedBitSet> {
+    let nr_dblocks = todo!();
+    let discards: Box<RefCell<FixedBitSet>> = Box::new(FixedBitSet::with_capacity(nr_dblocks));
+
+    let (mut fix, callback_ptr) = auto_ebreak(fix)?;
+    fix.add_context(callback_ptr.0, discards);
+
+    let callback = move |fix: &mut Fixture| {
+        let _context = fix.vm.reg(A0);
+        let _dblock_size = fix.vm.reg(A1);
+        let dblock = fix.vm.reg(A2);
+        let discarded = fix.vm.reg(A3);
+
+        {
+            let discards = fix.rm_context(&callback_ptr.0);
+            let mut inner = discards
+                .downcast_ref::<RefCell<Vec<CacheMapping>>>()
+                .unwrap()
+                .borrow_mut();
+            inner.push(CacheMapping {
+                cblock,
+                oblock,
+                dirty,
+                hint,
+            });
+            drop(inner);
+            fix.add_context(callback_ptr.0, mappings);
+        }
+        fix.vm.ret(0);
+        Ok(())
+    };
+
+    fix.bp_at_addr(callback_ptr, Box::new(callback));
+
+    fix.vm.set_reg(A0, cmd.0);
+
+    // I want to keep the policy separate from the metadata tests.  So we
+    // pass in a NULL policy ptr, and stub hints_array_available() which
+    // is the only use of it.
+    fix.vm.set_reg(A1, 0);
+    fix.vm.set_reg(A2, callback_ptr.0);
+    fix.stub("hints_array_available", 0)?;
+    fix.vm.set_reg(A3, 0);
+
+    fix.call_with_errno("dm_cache_load_mappings")?;
+
+    let context = fix.rm_context(&callback_ptr.0);
+    let mappings = context.downcast_ref::<RefCell<Vec<CacheMapping>>>().unwrap().borrow();
+
+    // FIXME: redundant copy
+    Ok(mappings.to_vec())
+}
+*/
 /*
 typedef int (*load_discard_fn)(void *context, sector_t discard_block_size,
                    dm_dblock_t dblock, bool discarded);
 int dm_cache_load_discards(struct dm_cache_metadata *cmd,
                load_discard_fn fn, void *context);
-
-typedef int (*load_mapping_fn)(void *context, dm_oblock_t oblock,
-                   dm_cblock_t cblock, bool dirty,
-                   uint32_t hint, bool hint_valid);
-int dm_cache_load_mappings(struct dm_cache_metadata *cmd,
-               struct dm_cache_policy *policy,
-               load_mapping_fn fn,
-               void *context);
 */
 
 //-------------------------------

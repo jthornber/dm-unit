@@ -1,3 +1,4 @@
+use crate::anymap::*;
 use crate::decode::Reg;
 use crate::guest::*;
 use crate::loader::*;
@@ -32,6 +33,10 @@ pub struct Fixture {
 
     // Current indentation for function tracing.
     trace_indent: usize,
+
+    // A useful place to store host structures against a guest
+    // address.
+    pub contexts: AnyMap<Addr>,
 }
 
 #[derive(Clone)]
@@ -90,6 +95,7 @@ impl Fixture {
             loader_info,
             breakpoints: BTreeMap::new(),
             trace_indent: 0,
+            contexts: AnyMap::default(),
         })
     }
 
@@ -113,6 +119,14 @@ impl Fixture {
                     // gets around some issues with the fixture being held multiple
                     // times, and allows the breakpoints to recurse back into here.  The
                     // downside is you cannot recurse a particular breakpoint.
+
+                    /*
+                                        // This debug is expensive, but useful when bug hunting.
+                                        if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
+                                            debug!("calling stub for {}", global);
+                                        }
+                    */
+
                     if let Some(callback) = self.breakpoints.remove(&loc) {
                         let r = (*callback)(self);
                         self.breakpoints.insert(loc, callback);
@@ -139,6 +153,7 @@ impl Fixture {
 
     // Sometimes we need a unique location to set a breakpoint, to do this
     // we allocate a word on the heap and fill it out with an ebreak.
+    // FIXME: memleak
     fn alloc_ebreak(&mut self) -> Result<Addr> {
         // We need a unique address return control to us.
         let ptr = self.vm.mem.alloc_bytes(vec![0u8; 4], PERM_EXEC)?;
@@ -162,7 +177,6 @@ impl Fixture {
         self.vm.set_reg(Ra, exit_addr.0);
         self.vm.set_pc(code);
 
-        // FIXME: use AtommicBool
         let completed = Arc::new(AtomicBool::new(false));
         {
             let completed = completed.clone();
@@ -313,14 +327,14 @@ impl Fixture {
     }
 
     pub fn log_func_calls(&self, func: &str) -> Result<()> {
-	let ptr = self.lookup_fn(func)?;
-	if let Some(stats) = self.vm.get_bb_stats(ptr) {
-    		debug!("{}: {} calls", func, stats.hits);
-	} else {
-    		debug!("{}: never called", func);
-	}
+        let ptr = self.lookup_fn(func)?;
+        if let Some(stats) = self.vm.get_bb_stats(ptr) {
+            debug!("{}: {} calls", func, stats.hits);
+        } else {
+            debug!("{}: never called", func);
+        }
 
-	Ok(())
+        Ok(())
     }
 
     pub fn log_top_funcs(&mut self, mut count: usize) {
@@ -398,7 +412,24 @@ impl<'a> DerefMut for AutoGPtr<'a> {
 }
 
 pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
-    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
+    let ptr = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
+    Ok((AutoGPtr::new(fix, ptr), ptr))
+}
+
+/// Allocates an excutable chunk of memory that we can use to fake a callback.
+/// You will have to hook the return addr.
+pub fn auto_ebreak(fix: &mut Fixture) -> Result<(AutoGPtr, Addr)> {
+    // We need a unique address return control to us.
+    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; 4], PERM_EXEC)?;
+
+    // Fill out a c.ebreak at this address because basic blocks are decoded
+    // before breakpoints are checked.
+    let ret: u16 = 0b1001000000000010;
+    let bytes = (ret as u32).to_le_bytes();
+    fix.vm.mem.write(ptr, &bytes, 0)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 

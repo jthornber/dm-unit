@@ -131,7 +131,7 @@ impl ThinPool {
     ) -> Result<()> {
         dm_thin_insert_block(fix, td.td, thin_b, data_b)
     }
-    
+
     fn remove_range(&mut self, fix: &mut Fixture, td: &ThinDev, b: u64, e: u64) -> Result<()> {
         dm_thin_remove_range(fix, td.td, b, e)
     }
@@ -155,7 +155,7 @@ impl ThinPool {
             metadata_sm.get_nr_blocks()?
         );
 
-/*
+        /*
         // We discard unused blocks to save memory.
         // FIXME: only discard blocks that were allocated last transaction.
         let bm = get_bm()?.clone();
@@ -541,7 +541,7 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
             thin_id += 1;
             if thin_id > 10 {
                 let old_snap = pool.open_thin(fix, thin_id - 10)?;
-                
+
                 discard_tracker.begin(fix);
                 pool.remove_range(fix, &old_snap, 0, nr_blocks)?;
                 discard_tracker.end(fix)?;

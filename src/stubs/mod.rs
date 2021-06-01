@@ -3,7 +3,7 @@ use crate::fixture::*;
 use crate::memory::*;
 
 use anyhow::Result;
-use log::info;
+use log::*;
 
 pub mod block_device;
 pub mod block_manager;
@@ -48,6 +48,34 @@ pub fn memcpy(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+pub fn memcmp(fix: &mut Fixture) -> Result<()> {
+    let s1 = Addr(fix.vm.reg(A0));
+    let s2 = Addr(fix.vm.reg(A1));
+    let len = fix.vm.reg(A2) as usize;
+
+    let mut b1 = vec![0u8; len];
+    fix.vm.mem.read(s1, &mut b1, PERM_READ)?;
+
+    let mut b2 = vec![0u8; len];
+    fix.vm.mem.read(s2, &mut b2, PERM_READ)?;
+
+    let mut r: i64 = 0;
+    
+    for i in 0..len {
+        if b1[i] < b2[i] {
+            r = -1;
+            break;
+        } else if b1[i] > b2[i] {
+            r = 1;
+            break;
+        }
+    }
+
+    fix.vm.ret(r as u64);
+    fix.vm.stats.instrs += (len as u64 * 3) / 8;
+    Ok(())
+}
+
 pub fn kmalloc(fix: &mut Fixture) -> Result<()> {
     let len = fix.vm.reg(Reg::A0);
     let ptr = fix
@@ -78,6 +106,33 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+pub fn strncpy(fix: &mut Fixture) -> Result<()> {
+    let dest = Addr(fix.vm.reg(A0));
+    let src = Addr(fix.vm.reg(A1));
+    let n = fix.vm.reg(A2);
+
+    let mut buffer = Vec::new();
+    fix.vm.mem.read_some(src, PERM_READ, |bytes| {
+        for i in 0..usize::min(bytes.len(), n as usize) {
+            if bytes[i] == 0 {
+                break;
+            }
+
+            buffer.push(bytes[i]);
+        }
+    })?;
+
+    // null terminate the string
+    buffer.push(0);
+
+    // write to the dest
+    fix.vm.mem.write(dest, &buffer, PERM_WRITE)?;
+
+    fix.vm.stats.instrs += ((buffer.len() * 3) / 8) as u64;
+    fix.vm.ret(0);
+    Ok(())
+}
+
 //-------------------------------
 
 /// Attaches a standard set of global implementations.
@@ -95,6 +150,8 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.stub("_raw_spin_lock", 0);
     let _ = fix.stub("_raw_spin_unlock", 0);
     let _ = fix.stub("__mutex_init", 0);
+    let _ = fix.stub("mutex_lock", 0);
+    let _ = fix.stub("mutex_unlock", 0);
     let _ = fix.stub("___ratelimit", 0);
 
     let _ = fix.at_func("dm_block_data", Box::new(bm_block_data));
@@ -121,8 +178,10 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.at_func("kmalloc_order", Box::new(kmalloc));
     let _ = fix.at_func("memcpy", Box::new(memcpy));
     let _ = fix.at_func("memmove", Box::new(memcpy));
+    let _ = fix.at_func("memcmp", Box::new(memcmp));
     let _ = fix.at_func("memset", Box::new(memset));
     let _ = fix.at_func("printk", Box::new(printk));
+    let _ = fix.at_func("strncpy", Box::new(strncpy));
 
     rw_semaphore::rw_sem_stubs(fix)?;
     Ok(())
