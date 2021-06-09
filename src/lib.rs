@@ -1,5 +1,6 @@
 #![feature(map_first_last)]
 #![feature(box_into_inner)]
+#![feature(trait_alias)]
 
 extern crate clap;
 extern crate elf;

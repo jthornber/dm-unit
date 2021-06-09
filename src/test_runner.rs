@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{prelude::*, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use threadpool::ThreadPool;
 
 use crate::fixture::*;
 
@@ -165,7 +167,8 @@ fn check_kernel_version<P: AsRef<Path>>(kernel_dir: P) -> Result<()> {
 
 //-------------------------------
 
-pub type TestFn = Box<dyn Fn(&mut Fixture) -> Result<()>>;
+trait TestFn_ = FnOnce(&mut Fixture) -> Result<()> + Send + 'static;
+pub type TestFn = Box<dyn TestFn_>;
 
 pub struct Test {
     kmodules: Vec<KernelModule>,
@@ -187,6 +190,24 @@ pub struct TestRunner<'a> {
     filter_fn: Box<dyn Fn(&str) -> bool + 'a>,
     tests: BTreeMap<String, Test>,
     gdb: bool,
+}
+
+fn run_test_(kernel_dir: PathBuf, t: Test) -> Result<()> {
+    let mut fix = Fixture::new(kernel_dir, &t.kmodules)?;
+    (t.func)(&mut fix)?;
+    Ok(())
+}
+
+/// Wraps a test so we can run it in a thread.
+fn run_test(
+    path: String,
+    kernel_dir: PathBuf,
+    t: Test,
+    results: Arc<Mutex<BTreeMap<String, Result<()>>>>,
+) {
+    let res = run_test_(kernel_dir, t);
+    let mut results = results.lock().unwrap();
+    results.insert(path.clone(), res);
 }
 
 impl<'a> TestRunner<'a> {
@@ -222,32 +243,45 @@ impl<'a> TestRunner<'a> {
         self.tests.insert(path.to_string(), t);
     }
 
-    pub fn exec(&mut self) -> Result<(usize, usize)> {
+    pub fn exec(self) -> Result<(usize, usize)> {
         let mut pass = 0;
         let mut fail = 0;
         let mut formatter = PathFormatter::new();
 
-        for (p, t) in &mut self.tests {
-            if !(*self.filter_fn)(p) {
+        let nr_threads = num_cpus::get() * 2;
+        let pool = ThreadPool::new(nr_threads);
+
+        let results: Arc<Mutex<BTreeMap<String, Result<()>>>> = Arc::new(Mutex::new(BTreeMap::new()));
+        for (p, t) in self.tests {
+            if !(*self.filter_fn)(&p) {
                 continue;
             }
 
-            let components = path_components(p);
+            let kernel_dir = self.kernel_dir.clone();
+            let results = results.clone();
+            pool.execute(|| {
+                run_test(p, kernel_dir, t, results);
+            });
+        }
+
+        pool.join();
+
+        let results = Arc::try_unwrap(results).unwrap().into_inner()?;
+
+        for (p, res) in results.into_iter() {
+            let components = path_components(&p);
             formatter.print(&components);
 
-            let mut fix = Fixture::new(&self.kernel_dir, &t.kmodules)?;
-
-            if let Err(e) = (t.func)(&mut fix) {
-                fail += 1;
-                println!(" FAIL");
-                info!("{}", e);
-                debug!("{}", fix.vm);
-                drop(fix);
-            } else {
-                fix.log_top_funcs(20);
-                drop(fix);
-                pass += 1;
-                println!(" PASS");
+            match res {
+                Err(e) => {
+                    fail += 1;
+                    println!(" FAIL");
+                    info!("{}", e);
+                }
+                Ok(()) => {
+                    pass += 1;
+                    println!(" PASS");
+                }
             }
         }
 
