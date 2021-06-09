@@ -21,11 +21,15 @@ intrusive-collections = "0.9"
 libc = "0.2.82"
 log = "0.4"
 nom = "6.0.1"
+num_cpus = "1.13"
 regex = "1"
 rand = "0.8.0"
 rand_chacha = "0.3"
+tempfile = "3.2"
+threadpool = "1.0"
 # thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", branch = "main" }
 thinp = { path = "../thinp-for-dmunit" }
+
 thiserror = "1.0"
 
 [profile.release]

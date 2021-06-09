@@ -1,1 +1,6 @@
 /target
+*.csv
+*.pdf
+*.rej
+*.orig
+*.log

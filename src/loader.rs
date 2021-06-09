@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
+use tempfile::NamedTempFile;
 
 use crate::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
 
@@ -722,22 +723,22 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
 }
 
 /// Links all the modules needed for a test into a single 'super' module.
-fn link_modules<P: AsRef<Path>>(paths: &[P], output: &str) -> Result<()> {
+fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
     use std::env::{var, VarError};
 
     let cross_compile = match var("CROSS_COMPILE") {
         Ok(s) => s,
         Err(VarError::NotPresent) => {
-            debug!("CROSS_COMPILE environment variable not set, defaulting to 'riscv64-linux-gnu-'");
+            debug!(
+                "CROSS_COMPILE environment variable not set, defaulting to 'riscv64-linux-gnu-'"
+            );
             "riscv64-linux-gnu-".to_string()
         }
-        e@Err(_) => {
-            e?
-        }
+        e @ Err(_) => e?,
     };
 
     let ld_cmd = format!("{}ld", cross_compile);
-    let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output];
+    let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output.to_str().unwrap()];
     for p in paths {
         args.push(p.as_ref().to_str().unwrap());
     }
@@ -746,10 +747,9 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &str) -> Result<()> {
 }
 
 pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
-    // FIXME: not thread safe
-    let super_module = "./dm-unit.ko";
-    link_modules(paths, super_module)?;
-    let module = read_module(super_module)?;
+    let super_module = NamedTempFile::new()?;
+    link_modules(paths, super_module.path())?;
+    let module = read_module(super_module.path())?;
     load_module(mem, module)
 }
 
