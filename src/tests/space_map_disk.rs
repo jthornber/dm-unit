@@ -45,6 +45,10 @@ impl space_map::SpaceMap for DiskSpaceMap {
         self.sm_disk
     }
 
+    fn get_bm(&self) -> Addr {
+        self.bm
+    }
+
     fn commit(&mut self, fix: &mut Fixture) -> Result<()> {
         sm_commit(fix, self.sm_disk)?;
         dm_tm_pre_commit(fix, self.tm)?;

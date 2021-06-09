@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::prelude::*;
 
 use crate::fixture::*;
-use crate::stubs::block_manager::*;
+use crate::block_manager::*;
 
 //-------------------------------
 
@@ -26,8 +26,7 @@ impl Default for Stats {
 }
 
 impl Stats {
-    pub fn collect_stats(fix: &Fixture) -> Self {
-        let bm = get_bm().unwrap();
+    pub fn collect_stats(fix: &Fixture, bm: &BlockManager) -> Self {
         Stats {
             instrs: fix.vm.stats.instrs,
             read_locks: bm.get_nr_read_locks(),
@@ -36,8 +35,8 @@ impl Stats {
         }
     }
 
-    pub fn delta(&self, fix: &Fixture) -> Self {
-        let rhs = Stats::collect_stats(fix);
+    pub fn delta(&self, fix: &Fixture, bm: &BlockManager) -> Self {
+        let rhs = Stats::collect_stats(fix, bm);
         Stats {
             instrs: rhs.instrs - self.instrs,
             read_locks: rhs.read_locks - self.read_locks,
@@ -68,13 +67,13 @@ impl CostTracker {
         })
     }
 
-    pub fn begin(&mut self, fix: &mut Fixture) {
-        self.baseline = Stats::collect_stats(fix);
+    pub fn begin(&mut self, fix: &mut Fixture, bm: &BlockManager) {
+        self.baseline = Stats::collect_stats(fix, bm);
         self.iteration += 1;
     }
 
-    pub fn end(&mut self, fix: &mut Fixture) -> Result<()> {
-        let delta = Stats::delta(&self.baseline, fix);
+    pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
+        let delta = Stats::delta(&self.baseline, fix, bm);
         write!(
             self.csv_out,
             "{}, {}, {}, {}, {}\n",

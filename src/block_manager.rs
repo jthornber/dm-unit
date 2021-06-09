@@ -50,6 +50,7 @@ impl Guest for Validator {
 //-------------------------------
 
 pub struct GBlock {
+    pub bm_ptr: Addr,
     pub loc: u64,
 
     // We hold the data in a separate allocation so the same Vec can be
@@ -59,19 +60,21 @@ pub struct GBlock {
 
 impl Guest for GBlock {
     fn guest_len() -> usize {
-        16
+        24
     }
 
     fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        w.write_u64::<LittleEndian>(self.bm_ptr.0)?;
         w.write_u64::<LittleEndian>(self.loc)?;
         w.write_u64::<LittleEndian>(self.data.0)
     }
 
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let bm_ptr = Addr(r.read_u64::<LittleEndian>()?);
         let loc = r.read_u64::<LittleEndian>()?;
         let data = Addr(r.read_u64::<LittleEndian>()?);
 
-        Ok(GBlock { loc, data })
+        Ok(GBlock { bm_ptr, loc, data })
     }
 }
 
@@ -109,6 +112,7 @@ pub enum Lock {
 }
 
 pub struct BMInner {
+    bm_ptr: Addr,
     nr_blocks: u64,
     locks: BTreeMap<u64, Lock>,
 
@@ -125,8 +129,9 @@ impl Drop for BMInner {
 }
 
 impl BMInner {
-    fn new(nr_blocks: u64) -> Self {
+    fn new(nr_blocks: u64, bm_ptr: Addr) -> Self {
         BMInner {
+            bm_ptr,
             nr_blocks,
             locks: BTreeMap::new(),
             nr_read_locks: 0,
@@ -245,7 +250,7 @@ impl BMInner {
                 // FIXME: run validator->check()
 
                 // Create guest ptr.
-                let gb = GBlock { loc, data };
+                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -275,7 +280,7 @@ impl BMInner {
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)?;
 
                 // Create guest ptr.
-                let gb = GBlock { loc, data };
+                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -347,7 +352,7 @@ impl BMInner {
 
                 // Create guest ptr.
                 let data = mem.alloc_aligned(data, PERM_READ | PERM_WRITE, 4096)?;
-                let gb = GBlock { loc, data };
+                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -379,7 +384,7 @@ impl BMInner {
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)?;
 
                 // Create guest ptr.
-                let gb = GBlock { loc, data };
+                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -700,9 +705,9 @@ pub struct BlockManager {
 }
 
 impl BlockManager {
-    pub fn new(nr_blocks: u64) -> Self {
+    pub fn new(nr_blocks: u64, bm_ptr: Addr) -> Self {
         BlockManager {
-            inner: Mutex::new(BMInner::new(nr_blocks)),
+            inner: Mutex::new(BMInner::new(nr_blocks, bm_ptr)),
         }
     }
 

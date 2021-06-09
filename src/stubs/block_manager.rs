@@ -15,31 +15,6 @@ use Reg::*;
 
 //-------------------------------
 
-// We only support a single bm atm.
-static mut BLOCK_MANAGER: Option<(Addr, Arc<BlockManager>)> = None;
-
-pub fn get_bm() -> Result<Arc<BlockManager>> {
-    unsafe {
-        match &BLOCK_MANAGER {
-            None => Err(anyhow!("no block manager created")),
-            Some((_, bm)) => Ok(bm.clone()),
-        }
-    }
-}
-
-pub fn set_bm(gptr: Addr, bm: Arc<BlockManager>) -> Result<()> {
-    unsafe {
-        BLOCK_MANAGER = Some((gptr, bm));
-        Ok(())
-    }
-}
-
-pub fn clear_bm() {
-    unsafe {
-        BLOCK_MANAGER = None;
-    }
-}
-
 pub fn bm_create(fix: &mut Fixture) -> Result<()> {
     let bdev_ptr = Addr(fix.vm.reg(A0));
     let bdev = read_guest::<BlockDevice>(&fix.vm.mem, bdev_ptr)?;
@@ -51,17 +26,19 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
 
     let nr_blocks = inode.nr_sectors / (block_size / 512);
 
-    let bm = Arc::new(BlockManager::new(nr_blocks));
-    let guest_addr = fix.vm.mem.alloc_bytes(vec![0u8; 4], PERM_READ | PERM_WRITE)?;
-    set_bm(guest_addr, bm)?;
-
+    let guest_addr = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; 4], PERM_READ | PERM_WRITE)?;
+    let bm = Arc::new(BlockManager::new(nr_blocks, guest_addr));
+    fix.contexts.insert(guest_addr, bm);
     fix.vm.ret(guest_addr.0);
     Ok(())
 }
 
 pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
     let bm_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let bm: Box<Arc<BlockManager>> = fix.contexts.remove(&bm_ptr);
 
     if bm.get_nr_held_blocks() > 0 {
         return Err(anyhow!(
@@ -69,7 +46,6 @@ pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
         ));
     }
 
-    clear_bm();
     fix.vm.mem.free(bm_ptr)?;
     fix.vm.ret(0);
     Ok(())
@@ -81,19 +57,23 @@ pub fn bm_block_size(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn bm_nr_blocks(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let bm = get_bm(fix, bm_ptr);
     let nr_blocks = bm.get_nr_blocks();
     fix.vm.ret(nr_blocks);
     Ok(())
 }
 
+pub fn get_bm(fix: &Fixture, bm_ptr: Addr) -> Arc<BlockManager> {
+    fix.contexts.get::<Arc<BlockManager>>(&bm_ptr).unwrap().clone()
+}
+
 pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
+    let bm_ptr = Addr(fix.vm.reg(A0));
     let loc = fix.vm.reg(A1);
     let v_ptr = Addr(fix.vm.reg(A2));
     let result_ptr = fix.vm.reg(A3);
-    let bm = get_bm()?;
+    let bm = get_bm(fix, bm_ptr);
     let guest_ptr = bm.read_lock(&mut fix.vm.mem, loc, v_ptr)?;
 
     // fill out result ptr
@@ -107,11 +87,11 @@ pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
 }
 
 fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
-    let _bm_ptr = fix.vm.reg(A0);
+    let bm_ptr = Addr(fix.vm.reg(A0));
     let loc = fix.vm.reg(A1);
     let v_ptr = Addr(fix.vm.reg(A2));
     let result_ptr = fix.vm.reg(A3);
-    let bm = get_bm()?;
+    let bm = get_bm(fix, bm_ptr);
     let guest_addr = if zero {
         bm.write_lock_zero(&mut fix.vm.mem, loc, v_ptr)?
     } else {
@@ -138,7 +118,8 @@ pub fn bm_write_lock_zero(fix: &mut Fixture) -> Result<()> {
 
 pub fn bm_unlock(fix: &mut Fixture) -> Result<()> {
     let gb_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let gb = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)?;
+    let bm = get_bm(fix, gb.bm_ptr);
     bm.unlock(fix, gb_ptr)?;
     fix.vm.ret(0);
     Ok(())
@@ -159,8 +140,8 @@ pub fn bm_block_data(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn bm_flush(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let bm = get_bm(fix, bm_ptr);
     bm.flush(fix)?;
 
     fix.vm.ret(0);
@@ -175,9 +156,9 @@ pub fn bm_prefetch(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn bm_forget(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
+    let bm_ptr = Addr(fix.vm.reg(A0));
     let b = fix.vm.reg(A1);
-    let bm = get_bm()?;
+    let bm = get_bm(fix, bm_ptr);
     bm.forget(b)?;
 
     fix.vm.ret(0);
@@ -185,34 +166,34 @@ pub fn bm_forget(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn bm_unlock_move(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
+    let bm_ptr = Addr(fix.vm.reg(A0));
     let gb_ptr = Addr(fix.vm.reg(A1));
     let new_location = fix.vm.reg(A2);
-    let bm = get_bm()?;
+    let bm = get_bm(fix, bm_ptr);
     bm.unlock_move(fix, gb_ptr, new_location)?;
     fix.vm.ret(0);
     Ok(())
 }
 
 pub fn bm_is_read_only(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let bm = get_bm(fix, bm_ptr);
     let result = if bm.is_read_only() { 1 } else { 0 };
     fix.vm.ret(result);
     Ok(())
 }
 
 pub fn bm_set_read_only(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let bm = get_bm(fix, bm_ptr);
     bm.set_read_only(true);
     fix.vm.ret(0);
     Ok(())
 }
 
 pub fn bm_set_read_write(fix: &mut Fixture) -> Result<()> {
-    let _bm_ptr = Addr(fix.vm.reg(A0));
-    let bm = get_bm()?;
+    let bm_ptr = Addr(fix.vm.reg(A0));
+    let bm = get_bm(fix, bm_ptr);
     bm.set_read_only(false);
     fix.vm.ret(0);
     Ok(())

@@ -2,11 +2,11 @@ use crate::fixture::*;
 use crate::memory::*;
 use crate::stats::*;
 use crate::wrappers::space_map::*;
+use crate::stubs::block_manager::*;
 
 use anyhow::{anyhow, ensure, Result};
 use log::*;
 use std::collections::VecDeque;
-
 
 //-------------------------------
 
@@ -128,6 +128,7 @@ fn free_blocks(
 
 pub trait SpaceMap {
     fn addr(&self) -> Addr;
+    fn get_bm(&self) -> Addr;
     fn commit(&mut self, fix: &mut Fixture) -> Result<()>;
 }
 
@@ -163,16 +164,17 @@ pub fn test_commit_cost(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) ->
     let commit_interval = 1000;
 
     let mut tracker = CostTracker::new("new-block.csv")?;
-    let mut baseline = Stats::collect_stats(fix);
+    let bm = get_bm(fix, sm.get_bm());
+    let mut baseline = Stats::collect_stats(fix, &bm);
     let mut stats = Vec::<Stats>::new();
     let mut commit_count = commit_interval;
     for _ in 0..count {
-        tracker.begin(fix);
+        tracker.begin(fix, &bm);
         let _b = sm_new_block(fix, sm.addr())?;
-        tracker.end(fix)?;
+        tracker.end(fix, &bm)?;
         if commit_count == commit_interval {
             // This was the first new_block after the commmit
-            let delta = baseline.delta(fix);
+            let delta = baseline.delta(fix, &bm);
             stats_report(&delta, "new_block", 1);
             stats.push(delta);
         }
@@ -182,7 +184,7 @@ pub fn test_commit_cost(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) ->
         if commit_count == 0 {
             sm.commit(fix)?;
             commit_count = commit_interval;
-            baseline = Stats::collect_stats(fix);
+            baseline = Stats::collect_stats(fix, &bm);
         }
     }
 
@@ -199,9 +201,10 @@ pub fn test_inc_cost(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) -> Re
 
     let mut tracker = CostTracker::new("inc.csv")?;
     for _ in 0..10 {
-        tracker.begin(fix);
+        let bm = get_bm(fix, sm.get_bm());
+        tracker.begin(fix, &bm);
         sm_inc_block(fix, sm.addr(), 0, count)?;
-        tracker.end(fix)?;
+        tracker.end(fix, &bm)?;
         sm.commit(fix)?;
     }
 

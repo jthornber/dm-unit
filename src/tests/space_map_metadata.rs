@@ -36,6 +36,10 @@ impl space_map::SpaceMap for MetadataSpaceMap {
         self.sm
     }
 
+    fn get_bm(&self) -> Addr {
+        self.bm
+    }
+
     fn commit(&mut self, fix: &mut Fixture) -> Result<()> {
         dm_tm_pre_commit(fix, self.tm)?;
         dm_tm_commit(fix, self.tm, self.sb)?;

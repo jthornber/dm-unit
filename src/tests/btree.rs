@@ -1,9 +1,10 @@
+use crate::block_manager::*;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::memory::*;
 use crate::stats::*;
-use crate::stubs::block_manager::*;
 use crate::stubs::*;
+use crate::stubs::block_manager::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::btree::*;
@@ -20,7 +21,7 @@ use std::io;
 use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex};
+use std::sync::{Arc, Mutex};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
@@ -53,6 +54,7 @@ impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
     }
 }
 
+/*
 #[allow(dead_code)]
 fn check_btree(root: u64) -> Result<()> {
     let walker = BTreeWalker::new(get_bm()?, false);
@@ -63,6 +65,7 @@ fn check_btree(root: u64) -> Result<()> {
 
     Ok(())
 }
+*/
 
 //-------------------------------
 
@@ -97,9 +100,8 @@ impl<V: Unpack> NodeVisitor<V> for ResidencyVisitor {
 
 // Because this is a walk it implicitly checks the btree.  Returns
 // average residency as a _percentage_.
-pub fn calc_residency<V: Unpack>(root: u64) -> Result<usize> {
-    let engine = get_bm()?;
-    let walker = BTreeWalker::new(engine, false);
+pub fn calc_residency<V: Unpack>(bm: &Arc<BlockManager>, root: u64) -> Result<usize> {
+    let walker = BTreeWalker::new(bm.clone(), false);
     let visitor = ResidencyVisitor {
         nr_entries: AtomicU32::new(0),
         nr_leaves: AtomicU32::new(0),
@@ -163,9 +165,8 @@ impl NodeVisitor<Value64> for EntryVisitor {
     }
 }
 
-fn check_keys_present(root: u64, keys: &[u64]) -> Result<()> {
-    let engine = get_bm()?;
-    let walker = BTreeWalker::new(engine, false);
+fn check_keys_present(bm: &Arc<BlockManager>, root: u64, keys: &[u64]) -> Result<()> {
+    let walker = BTreeWalker::new(bm.clone(), false);
     let visitor = EntryVisitor {
         seen: Mutex::new(BTreeSet::new()),
     };
@@ -346,7 +347,10 @@ impl<'a> BTreeTest<'a> {
             vtype,
         };
         let root = dm_btree_empty(fix, &info)?;
-        let baseline = Stats::collect_stats(fix);
+        let baseline = {
+            let bm = get_bm(fix, bm);
+            Stats::collect_stats(fix, &bm)
+        };
 
         Ok(BTreeTest {
             fix,
@@ -386,7 +390,8 @@ impl<'a> BTreeTest<'a> {
     // This uses Rust code, rather than doing look ups via the kernel
     // code.
     fn check_keys_present(&self, keys: &[u64]) -> Result<()> {
-        check_keys_present(self.root, keys)
+        let bm = get_bm(self.fix, self.bm);
+        check_keys_present(&bm, self.root, keys)
     }
 
     fn commit(&mut self) -> Result<()> {
@@ -397,11 +402,13 @@ impl<'a> BTreeTest<'a> {
     }
 
     fn stats_start(&mut self) {
-        self.baseline = Stats::collect_stats(self.fix);
+        let bm = get_bm(self.fix, self.bm);
+        self.baseline = Stats::collect_stats(self.fix, &bm);
     }
 
     fn stats_report(&self, desc: &str, count: u64) -> Result<()> {
-        let delta = self.baseline.delta(self.fix);
+        let bm = get_bm(self.fix, self.bm);
+        let delta = self.baseline.delta(self.fix, &bm);
         info!(
             "{}: residency = {}, instrs = {}, read_locks = {:.1}, write_locks = {:.1}",
             desc,
@@ -414,7 +421,8 @@ impl<'a> BTreeTest<'a> {
     }
 
     fn residency(&self) -> Result<usize> {
-        calc_residency::<Value64>(self.root)
+        let bm = get_bm(self.fix, self.bm);
+        calc_residency::<Value64>(&bm, self.root)
     }
 }
 
@@ -539,7 +547,9 @@ fn mk_node(fix: &mut Fixture, key_begin: u64, nr_entries: usize) -> Result<(Auto
         value_size: Value64::guest_len() as u32,
     };
     let keys: Vec<u64> = (key_begin..key_begin + nr_entries as u64).collect();
-    let values: Vec<Value64> = (key_begin..key_begin + nr_entries as u64).map(Value64).collect();
+    let values: Vec<Value64> = (key_begin..key_begin + nr_entries as u64)
+        .map(Value64)
+        .collect();
     let node = Node::Leaf {
         header,
         keys,
@@ -576,7 +586,7 @@ fn check_node(node: &Node<Value64>, key_begin: u64, nr_entries: usize) -> Result
         i += 1;
     }
 
-    if let Node::<Value64>::Leaf {values, ..} = node {
+    if let Node::<Value64>::Leaf { values, .. } = node {
         i = key_begin;
         for value in values.iter() {
             ensure!((*value).0 == i);
@@ -735,7 +745,12 @@ fn test_redistribute2_right_below_target(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-fn test_redistribute_3(fix: &mut Fixture, nr_left: usize, nr_center: usize, nr_right: usize) -> Result<()> {
+fn test_redistribute_3(
+    fix: &mut Fixture,
+    nr_left: usize,
+    nr_center: usize,
+    nr_right: usize,
+) -> Result<()> {
     standard_globals(fix)?;
 
     let total = nr_left + nr_center + nr_right;

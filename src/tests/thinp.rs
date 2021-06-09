@@ -27,6 +27,7 @@ use crate::wrappers::thinp_metadata::*;
 #[allow(dead_code)]
 struct ThinPool {
     nr_metadata_blocks: u64,
+    bm_ptr: Addr,
     pmd: Addr,
     baseline: Stats,
 }
@@ -65,21 +66,26 @@ impl ThinPool {
         let bdev_ptr = mk_block_device(&mut fix.vm.mem, 0, 8 * nr_metadata_blocks)?;
         let pmd = dm_pool_metadata_open(fix, bdev_ptr, data_block_size, true)?;
         dm_pool_resize_data_dev(fix, pmd, nr_data_blocks)?;
-        let baseline = Stats::collect_stats(fix);
+        let bm_ptr = dm_pool_get_block_manager(fix, pmd)?;
+        let bm = get_bm(fix, bm_ptr);
+        let baseline = Stats::collect_stats(fix, &bm);
 
         Ok(ThinPool {
             nr_metadata_blocks,
+            bm_ptr,
             pmd,
             baseline,
         })
     }
 
     fn stats_start(&mut self, fix: &mut Fixture) {
-        self.baseline = Stats::collect_stats(fix);
+        let bm = get_bm(fix, self.bm_ptr);
+        self.baseline = Stats::collect_stats(fix, &bm);
     }
 
     fn stats_report(&mut self, fix: &mut Fixture, desc: &str, count: u64) -> Result<()> {
-        let delta = self.baseline.delta(fix);
+        let bm = get_bm(fix, self.bm_ptr);
+        let delta = self.baseline.delta(fix, &bm);
         info!(
             "{}: instrs = {}, read_locks = {:.1}, write_locks = {:.1}, disk_reads = {:2}, metadata = {}/{}",
             desc,
@@ -143,10 +149,10 @@ impl ThinPool {
         dm_pool_get_free_metadata_block_count(fix, self.pmd).map(|n| n + 0x400)
     }
 
-    fn check(&mut self) -> Result<()> {
+    fn check(&mut self, fix: &Fixture) -> Result<()> {
         // let report = std::sync::Arc::new(Report::new(Box::new(DebugReportInner {})));
         let report = std::sync::Arc::new(mk_quiet_report());
-        let engine = get_bm()?.clone();
+        let engine = get_bm(fix, self.bm_ptr).clone();
         let space_maps = check_with_maps(engine, report)?;
         let metadata_sm = space_maps.metadata_sm.lock().unwrap();
         debug!(
@@ -176,8 +182,9 @@ impl ThinPool {
         Ok(())
     }
 
-    fn show_mapping_residency(&self) -> Result<()> {
-        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm()?.clone();
+    fn show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
+        let bm = get_bm(fix, self.bm_ptr);
+        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
         let sb = read_superblock(engine.as_ref(), 0)?;
 
         let mut path = Vec::new();
@@ -186,24 +193,24 @@ impl ThinPool {
             debug!(
                 "residency of thin {} = {}",
                 thin_id,
-                calc_residency::<Value64>(root)?
+                calc_residency::<Value64>(&bm, root)?
             );
         }
 
         let root = unpack::<SMRoot>(&sb.data_sm_root[0..])?;
         debug!(
             "residency of data sm index entries: {}",
-            calc_residency::<IndexEntry>(root.bitmap_root)?
+            calc_residency::<IndexEntry>(&bm, root.bitmap_root)?
         );
         debug!(
             "residency of data sm overflow: {}",
-            calc_residency::<Value32>(root.ref_count_root)?
+            calc_residency::<Value32>(&bm, root.ref_count_root)?
         );
 
         let root = unpack::<SMRoot>(&sb.metadata_sm_root[0..])?;
         debug!(
             "residency of metadata sm overflow: {}",
-            calc_residency::<Value32>(root.ref_count_root)?
+            calc_residency::<Value32>(&bm, root.ref_count_root)?
         );
         Ok(())
     }
@@ -269,15 +276,16 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
     let mut alloc_tracker = CostTracker::new("single-alloc-block.csv")?;
     let mut insert_tracker = CostTracker::new("single-insert-block.csv")?;
     let mut insert_count = 0;
+    let bm = get_bm(fix, pool.bm_ptr);
     pool.stats_start(fix);
     for thin_b in thin_blocks {
-        alloc_tracker.begin(fix);
+        alloc_tracker.begin(fix, &bm);
         let data_b = pool.alloc_data_block(fix)?;
-        alloc_tracker.end(fix)?;
+        alloc_tracker.end(fix, &bm)?;
 
-        insert_tracker.begin(fix);
+        insert_tracker.begin(fix, &bm);
         pool.insert_block(fix, &td, *thin_b, data_b)?;
-        insert_tracker.end(fix)?;
+        insert_tracker.end(fix, &bm)?;
 
         insert_count += 1;
 
@@ -417,15 +425,16 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     let mut insert_tracker = CostTracker::new("insert-block.csv")?;
     let mut delete_tracker = CostTracker::new("delete-thin.csv")?;
     let mut insert_count = 0;
+    let bm = get_bm(fix, pool.bm_ptr);
     pool.stats_start(fix);
     for thin_b in thin_blocks {
-        alloc_tracker.begin(fix);
+        alloc_tracker.begin(fix, &bm);
         let data_b = pool.alloc_data_block(fix)?;
-        alloc_tracker.end(fix)?;
+        alloc_tracker.end(fix, &bm)?;
 
-        insert_tracker.begin(fix);
+        insert_tracker.begin(fix, &bm);
         pool.insert_block(fix, &td, *thin_b, data_b)?;
-        insert_tracker.end(fix)?;
+        insert_tracker.end(fix, &bm)?;
 
         insert_count += 1;
 
@@ -436,13 +445,13 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
             pool.create_snap(fix, thin_id + 1, 0)?;
             thin_id += 1;
             if thin_id > 10 {
-                delete_tracker.begin(fix);
+                delete_tracker.begin(fix, &bm);
                 pool.delete_thin(fix, thin_id - 10)?;
-                delete_tracker.end(fix)?;
+                delete_tracker.end(fix, &bm)?;
             }
             pool.commit(fix)?;
             //pool.stats_report(fix, "provision", commit_interval)?;
-            pool.check()?;
+            pool.check(fix)?;
 
             pool.stats_start(fix);
             insert_count = 0;
@@ -450,7 +459,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     }
 
     pool.close_thin(fix, td)?;
-    pool.show_mapping_residency()?;
+    pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())
@@ -488,19 +497,20 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
     let mut discard_tracker = CostTracker::new("discard-blocks.csv")?;
 
     let thin_blocks = generate_ranges(20_000, 20);
+    let bm = get_bm(fix, pool.bm_ptr);
     pool.stats_start(fix);
     let mut discard_count = 0;
     for std::ops::Range { start, end } in thin_blocks {
         discard_count += 1;
 
-        discard_tracker.begin(fix);
+        discard_tracker.begin(fix, &bm);
         pool.remove_range(fix, &td, start, end)?;
-        discard_tracker.end(fix)?;
+        discard_tracker.end(fix, &bm)?;
 
         if discard_count == commit_interval {
             pool.commit(fix)?;
             pool.stats_report(fix, "discard", commit_interval)?;
-            pool.check()?;
+            pool.check(fix)?;
             pool.stats_start(fix);
             discard_count = 0;
         }
@@ -523,6 +533,7 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
 
     let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
     let mut thin_id = 0;
+    let bm = get_bm(fix, pool.bm_ptr);
     pool.create_thin(fix, 0)?;
     let td = pool.open_thin(fix, 0)?;
 
@@ -542,22 +553,22 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
             if thin_id > 10 {
                 let old_snap = pool.open_thin(fix, thin_id - 10)?;
 
-                discard_tracker.begin(fix);
+                discard_tracker.begin(fix, &bm);
                 pool.remove_range(fix, &old_snap, 0, nr_blocks)?;
-                discard_tracker.end(fix)?;
+                discard_tracker.end(fix, &bm)?;
 
                 pool.close_thin(fix, old_snap)?;
                 pool.delete_thin(fix, thin_id - 10)?;
             }
             pool.commit(fix)?;
-            pool.check()?;
+            pool.check(fix)?;
 
             insert_count = 0;
         }
     }
 
     pool.close_thin(fix, td)?;
-    pool.show_mapping_residency()?;
+    pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())

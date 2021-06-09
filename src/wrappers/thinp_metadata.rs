@@ -6,7 +6,7 @@ use crate::memory::*;
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 
 use Reg::*;
 
@@ -25,6 +25,16 @@ pub fn dm_pool_metadata_open(
 
     // FIXME: check for ERR_PTR
     Ok(Addr(fix.vm.reg(A0)))
+}
+
+pub fn dm_pool_get_block_manager(fix: &mut Fixture, pmd: Addr) -> Result<Addr> {
+    let bm_ptr = Addr(fix.vm.mem.read_some(pmd, PERM_READ, |bytes| {
+        let mut r = Cursor::new(bytes);
+        r.set_position(24);
+        let bm_ptr = r.read_u64::<LittleEndian>().unwrap();
+        bm_ptr
+    })?);
+    Ok(bm_ptr)
 }
 
 pub fn dm_pool_metadata_close(fix: &mut Fixture, pmd: Addr) -> Result<()> {

@@ -53,6 +53,10 @@ impl AnyEntry {
         self.value.downcast_mut()
     }
 
+    pub fn get<T: AnyMapTrait>(&self) -> Option<&T> {
+        self.value.downcast_ref()
+    }
+
     pub fn get_mut_or_set_with<T: AnyMapTrait>(&mut self, set_with: impl FnOnce() -> T) -> &mut T {
         if !self.value.is::<T>() {
             *self = Self::new(set_with());
@@ -77,8 +81,8 @@ impl<Key: Hash + Eq> Default for AnyMap<Key> {
 }
 
 impl<Key: Hash + Eq> AnyMap<Key> {
-    pub fn get<T: AnyMapTrait>(&mut self, key: &Key) -> Option<&T> {
-        self.get_mut(key).map(|x| &*x)
+    pub fn get<T: AnyMapTrait>(&self, key: &Key) -> Option<&T> {
+        self.0.get(key)?.get()
     }
 
     pub fn get_mut<T: AnyMapTrait>(&mut self, key: &Key) -> Option<&mut T> {
