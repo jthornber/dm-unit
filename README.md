@@ -1,3 +1,8 @@
+# IMPORTANT
+
+dm-unit currently doesn't work with riscv-linux-gnu-gcc v11, v10.2 is fine.
+
+
 # Introduction
 
 Definition: By 'unit testing' I mean small, deterministic, tests of
