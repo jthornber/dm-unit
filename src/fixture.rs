@@ -64,6 +64,11 @@ pub const THIN_MOD: KernelModule = KernelModule {
     relative_path: "drivers/md/dm-thin-pool.ko",
 };
 
+pub const THIN2_MOD: KernelModule = KernelModule {
+    basename: "dm-thin2",
+    relative_path: "drivers/md/dm-thin2.ko",
+};
+
 pub const CACHE_MOD: KernelModule = KernelModule {
     basename: "dm-cache",
     relative_path: "drivers/md/dm-cache.ko",

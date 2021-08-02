@@ -7,6 +7,7 @@ use dm_unit::tests::btree;
 use dm_unit::tests::cache;
 use dm_unit::tests::space_map_disk;
 use dm_unit::tests::thinp;
+use dm_unit::tests::thinp2;
 use dm_unit::tests::space_map_metadata;
 
 use anyhow::Result;
@@ -23,6 +24,7 @@ fn register_tests(runner: &mut TestRunner) -> Result<()> {
     space_map_disk::register_tests(runner)?;
     space_map_metadata::register_tests(runner)?;
     thinp::register_tests(runner)?;
+    thinp2::register_tests(runner)?;
     
     Ok(())
 }

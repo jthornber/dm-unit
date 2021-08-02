@@ -7,6 +7,7 @@ use std::io::{prelude::*, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
+use instant::Instant;
 
 use crate::fixture::*;
 
@@ -260,7 +261,10 @@ impl<'a> TestRunner<'a> {
             let kernel_dir = self.kernel_dir.clone();
             let results = results.clone();
             pool.execute(|| {
+                let start = Instant::now();
+                let components = path_components(&p).clone();
                 run_test(p, kernel_dir, t, results);
+                println!("{:?} {:?}", &components, (Instant::now() - start).as_secs());
             });
         }
 
