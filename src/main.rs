@@ -42,9 +42,11 @@ fn main() -> Result<()> {
                 .value_name("KERNEL_DIR"),
         )
         .arg(
-            Arg::with_name("GDB")
-                .long("gdb")
-                .help("Listen on a socket for a gdb connection"),
+            Arg::with_name("JOBS")
+            .short("j")
+            .help("Number of tests to run concurrently.")
+            .required(false)
+            .value_name("JOBS"),
         )
         .arg(
             Arg::with_name("FILTER")
@@ -57,13 +59,15 @@ fn main() -> Result<()> {
     let kernel_dir = Path::new(matches.value_of("KERNEL_DIR").unwrap());
 
     let mut runner = TestRunner::new(kernel_dir)?;
+
     if let Some(pattern) = matches.value_of("FILTER") {
         let rx = Regex::new(pattern)?;
         runner.set_filter(rx);
     }
 
-    if matches.is_present("GDB") {
-        runner.enable_gdb();
+    if let Some(job_str) = matches.value_of("JOBS") {
+        let jobs = job_str.to_string().parse::<usize>().expect("couldn't parse jobs");
+        runner.set_jobs(jobs);
     }
 
     register_tests(&mut runner)?;

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use log::{debug, info};
+use log::*;
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -189,7 +189,7 @@ pub struct TestRunner<'a> {
     kernel_dir: PathBuf,
     filter_fn: Box<dyn Fn(&str) -> bool + 'a>,
     tests: BTreeMap<String, Test>,
-    gdb: bool,
+    jobs: usize,
 }
 
 fn run_test_(kernel_dir: PathBuf, t: Test) -> Result<()> {
@@ -223,16 +223,16 @@ impl<'a> TestRunner<'a> {
             kernel_dir: path,
             filter_fn,
             tests: BTreeMap::new(),
-            gdb: false,
+            jobs: 1,
         })
-    }
-
-    pub fn enable_gdb(&mut self) {
-        self.gdb = true;
     }
 
     pub fn set_filter(&mut self, filter: Regex) {
         self.filter_fn = Box::new(move |p| filter.is_match(p));
+    }
+
+    pub fn set_jobs(&mut self, jobs: usize) {
+        self.jobs = jobs;
     }
 
     pub fn get_kernel_dir(&self) -> &Path {
@@ -248,10 +248,10 @@ impl<'a> TestRunner<'a> {
         let mut fail = 0;
         let mut formatter = PathFormatter::new();
 
-        let nr_threads = num_cpus::get() * 2;
-        let pool = ThreadPool::new(nr_threads);
+        let pool = ThreadPool::new(self.jobs);
 
-        let results: Arc<Mutex<BTreeMap<String, Result<()>>>> = Arc::new(Mutex::new(BTreeMap::new()));
+        let results: Arc<Mutex<BTreeMap<String, Result<()>>>> =
+            Arc::new(Mutex::new(BTreeMap::new()));
         for (p, t) in self.tests {
             if !(*self.filter_fn)(&p) {
                 continue;
