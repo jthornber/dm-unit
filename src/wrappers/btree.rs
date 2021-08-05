@@ -28,7 +28,7 @@ impl<G: Guest> Guest for BTreeValueType<G> {
         4 * 8 + 4
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.context.0)?;
         w.write_u32::<LittleEndian>(G::guest_len() as u32)?;
         w.write_u32::<LittleEndian>(0)?; // padding
@@ -38,7 +38,7 @@ impl<G: Guest> Guest for BTreeValueType<G> {
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let context = Addr(r.read_u64::<LittleEndian>()?);
         let size = r.read_u32::<LittleEndian>()?;
         let _padding = r.read_u32::<LittleEndian>()?;
@@ -66,21 +66,21 @@ pub struct BTreeInfo<G: Guest> {
 
 impl<G: Guest> Guest for BTreeInfo<G> {
     fn guest_len() -> usize {
-        8 + 4 + BTreeValueType::<G>::guest_len()
+        56
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.tm.0)?;
         w.write_u32::<LittleEndian>(self.levels)?;
         w.write_u32::<LittleEndian>(0)?; // padding
-        self.vtype.pack(w)
+        self.vtype.pack(w, Addr(ptr.0 + 16))
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, ptr: Addr) -> io::Result<Self> {
         let tm = Addr(r.read_u64::<LittleEndian>()?);
         let levels = r.read_u32::<LittleEndian>()?;
         let _padding = r.read_u32::<LittleEndian>()?;
-        let vtype = BTreeValueType::unpack(r)?;
+        let vtype = BTreeValueType::unpack(r, Addr(ptr.0 + 16))?;
 
         Ok(BTreeInfo { tm, levels, vtype })
     }
@@ -113,7 +113,10 @@ pub fn dm_btree_del<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>, root: u64)
 }
 
 fn auto_keys<'a>(fix: &'a mut Fixture, keys: &[u64]) -> Result<(AutoGPtr<'a>, Addr)> {
-    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; 8 * keys.len()], PERM_READ | PERM_WRITE)?;
+    let ptr = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; 8 * keys.len()], PERM_READ | PERM_WRITE)?;
 
     for (i, _item) in keys.iter().enumerate() {
         let bytes = keys[i].to_le_bytes();
@@ -353,7 +356,7 @@ impl Guest for ShadowSpine {
         40
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.info.0)?;
         assert!(self.nodes.len() <= 2);
         w.write_u32::<LittleEndian>(self.nodes.len() as u32)?;
@@ -380,7 +383,7 @@ impl Guest for ShadowSpine {
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let info = Addr(r.read_u64::<LittleEndian>()?);
         let count = r.read_u32::<LittleEndian>()?;
         let _padding = r.read_u32::<LittleEndian>()?;

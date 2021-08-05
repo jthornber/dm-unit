@@ -30,11 +30,11 @@ impl Guest for Validator {
         24
     }
 
-    fn pack<W: Write>(&self, _w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, _w: &mut W, _ptr: Addr) -> io::Result<()> {
         todo!();
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let name = Addr(r.read_u64::<LittleEndian>()?);
         let prepare = Addr(r.read_u64::<LittleEndian>()?);
         let check = Addr(r.read_u64::<LittleEndian>()?);
@@ -63,13 +63,13 @@ impl Guest for GBlock {
         24
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.bm_ptr.0)?;
         w.write_u64::<LittleEndian>(self.loc)?;
         w.write_u64::<LittleEndian>(self.data.0)
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let bm_ptr = Addr(r.read_u64::<LittleEndian>()?);
         let loc = r.read_u64::<LittleEndian>()?;
         let data = Addr(r.read_u64::<LittleEndian>()?);

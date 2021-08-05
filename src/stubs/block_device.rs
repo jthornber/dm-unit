@@ -20,13 +20,13 @@ impl Guest for INode {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.nr_sectors)?;
         w.write_u64::<LittleEndian>(if self.ro { 1 } else { 0 })?;
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let nr_sectors = r.read_u64::<LittleEndian>()?;
         let ro = !r.read_u64::<LittleEndian>()? == 0;
         Ok(INode { nr_sectors, ro })
@@ -61,7 +61,7 @@ impl Guest for BlockDevice {
         BDEV_SIZE
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_all(&[0u8; BD_DEV_OFFSET])?;
         w.write_u32::<LittleEndian>(self.dev_node)?;
         w.write_all(&[0u8; BD_INODE_OFFSET - 4 - BD_DEV_OFFSET])?;
@@ -71,7 +71,7 @@ impl Guest for BlockDevice {
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let mut buf = [0u8; BD_DEV_OFFSET];
         r.read_exact(&mut buf)?;
         let dev_node = r.read_u32::<LittleEndian>()?;

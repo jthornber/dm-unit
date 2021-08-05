@@ -41,13 +41,13 @@ impl Guest for RWSem {
         72
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.count)?;
         w.write_all(&[0u8; 72 - 8])?;
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let count = r.read_u64::<LittleEndian>()?;
         Ok(RWSem { count })
     }

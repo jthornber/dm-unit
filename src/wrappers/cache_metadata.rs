@@ -130,7 +130,7 @@ impl Guest for CacheStats {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u32::<LittleEndian>(self.read_hits)?;
         w.write_u32::<LittleEndian>(self.read_misses)?;
         w.write_u32::<LittleEndian>(self.write_hits)?;
@@ -138,7 +138,7 @@ impl Guest for CacheStats {
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let read_hits = r.read_u32::<LittleEndian>()?;
         let read_misses = r.read_u32::<LittleEndian>()?;
         let write_hits = r.read_u32::<LittleEndian>()?;

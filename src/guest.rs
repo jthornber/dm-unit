@@ -4,6 +4,7 @@ use crate::memory::{Addr, PERM_READ};
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
+use log::*;
 use std::io::{Cursor, Read, Write};
 
 //-------------------------------
@@ -15,18 +16,19 @@ use std::io::{Cursor, Read, Write};
 // memory.
 pub trait Guest {
     fn guest_len() -> usize;
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()>;
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self>
+    fn pack<W: Write>(&self, w: &mut W, ptr: Addr) -> io::Result<()>;
+    fn unpack<R: Read>(r: &mut R, ptr: Addr) -> io::Result<Self>
     where
         Self: std::marker::Sized;
 }
 
 // Allocates space on the guest and copies 'bytes' into it.
 pub fn alloc_guest<G: Guest>(mem: &mut Memory, v: &G, perms: u8) -> Result<Addr> {
-    let mut bytes = vec![0; G::guest_len()];
-    let mut w = Cursor::new(&mut bytes);
-    v.pack(&mut w)?;
-    let ptr = mem.alloc_bytes(bytes, perms)?;
+    let ptr = mem.alloc_with(perms, G::guest_len(), |bytes, ptr| {
+        let mut w = std::io::Cursor::new(bytes);
+        v.pack(&mut w, ptr).map_err(|_| MemErr::OutOfSpace)?;
+        Ok(())
+    })?;
     Ok(ptr)
 }
 
@@ -36,7 +38,7 @@ pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
     let mut bytes = vec![0; len];
     mem.read(ptr, &mut bytes, PERM_READ)?;
     let mut r = Cursor::new(&bytes);
-    let v = G::unpack(&mut r)?;
+    let v = G::unpack(&mut r, ptr)?;
     Ok(v)
 }
 
@@ -44,7 +46,7 @@ pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
 pub fn write_guest<G: Guest>(mem: &mut Memory, ptr: Addr, v: &G) -> Result<()> {
     let mut bytes = vec![0; G::guest_len()];
     let mut w = Cursor::new(&mut bytes);
-    v.pack(&mut w)?;
+    v.pack(&mut w, ptr)?;
     mem.write(ptr, &bytes, 0)?;
     Ok(())
 }
@@ -61,11 +63,11 @@ impl Guest for u64 {
         8
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(*self)
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         r.read_u64::<LittleEndian>()
     }
 }

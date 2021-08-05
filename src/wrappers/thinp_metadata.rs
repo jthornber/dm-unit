@@ -153,14 +153,14 @@ impl Guest for LookupResult {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.block)?;
         w.write_u8(if self.shared { 1u8 } else { 0u8 })?;
         w.write_all(&[0u8, 7])?;
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let block = r.read_u64::<LittleEndian>()?;
         let shared = r.read_u8()? != 0;
         Ok(LookupResult { block, shared })

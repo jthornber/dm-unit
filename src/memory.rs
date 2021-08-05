@@ -445,6 +445,25 @@ impl Memory {
         Ok(ptr)
     }
 
+    pub fn alloc_with<F>(&mut self, perms: u8, len: usize, func: F) -> Result<Addr>
+    where
+        F: FnOnce(&mut Vec<u8>, Addr) -> Result<()>,
+    {
+        // We allocate an extra double word before and after the block to
+        // detect overwrites.
+        let heap_len = len + 8;
+        let heap_ptr = self.heap.alloc(heap_len)?;
+
+        // mmap just the central part that may be used.
+        let ptr = Addr(heap_ptr.0 + 4);
+        let mut bytes = Vec::with_capacity(len);
+        func(&mut bytes, ptr)?;
+        assert!(bytes.len() == len);
+        self.mmap_bytes(ptr, bytes, perms)?;
+        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
+        Ok(ptr)
+    }
+
     pub fn alloc_aligned(&mut self, bytes: Vec<u8>, perms: u8, align: usize) -> Result<Addr> {
         // We allocate an extra double word before and after the block to
         // detect overwrites.

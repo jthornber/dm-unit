@@ -38,7 +38,7 @@ impl Guest for SpaceMap {
         112
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.destroy.0)?;
         w.write_u64::<LittleEndian>(self.extend.0)?;
         w.write_u64::<LittleEndian>(self.get_nr_blocks.0)?;
@@ -56,7 +56,7 @@ impl Guest for SpaceMap {
         Ok(())
     }
 
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
         let destroy = Addr(r.read_u64::<LittleEndian>()?);
         let extend = Addr(r.read_u64::<LittleEndian>()?);
         let get_nr_blocks = Addr(r.read_u64::<LittleEndian>()?);
