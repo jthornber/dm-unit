@@ -4,7 +4,6 @@ use crate::memory::{Addr, PERM_READ};
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
-use log::*;
 use std::io::{Cursor, Read, Write};
 
 //-------------------------------

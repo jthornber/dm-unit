@@ -79,6 +79,11 @@ pub const CACHE_SMQ_MOD: KernelModule = KernelModule {
     relative_path: "drivers/md/dm-cache-smq.ko",
 };
 
+pub const RBTREE_MOD: KernelModule = KernelModule {
+    basename: "rbtree",
+    relative_path: "lib/rbtree.ko",
+};
+
 impl Fixture {
     pub fn new<P: AsRef<Path> + Clone>(kernel_dir: P, kmodules: &[KernelModule]) -> Result<Self> {
         let mut modules = Vec::new();
