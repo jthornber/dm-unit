@@ -1,8 +1,3 @@
-# IMPORTANT
-
-dm-unit currently doesn't work with riscv-linux-gnu-gcc v11, v10.2 is fine.
-
-
 # Introduction
 
 Definition: By 'unit testing' I mean small, deterministic, tests of
@@ -119,6 +114,10 @@ to .config in your kernel source dir.
 ```bash
 cp path/to/dm-unit/misc/no-inlining-kernel.config .config
 ```
+
+If you configure by hand be sure to disable any stack protection.
+It's not needed and uses the thread pointer register which dm-unit
+doesn't set up.
 
 Now you can build the modules:
 
