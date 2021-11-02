@@ -66,6 +66,7 @@ pub const PERM_WRITE: u8 = 1 << 1;
 pub const PERM_EXEC: u8 = 1 << 2;
 
 /// Memory for a region of the address space.
+#[derive(Clone)]
 struct MMap {
     perms: u8,
     begin: u64,
@@ -196,7 +197,18 @@ pub struct Memory {
     allocations: BTreeMap<u64, (u64, usize)>,
 }
 
-// FIXME: implement snapshotting.
+fn copy_mmaps(mmaps: &RBTree<MMapAdapter>) -> RBTree<MMapAdapter> {
+    let mut cur = mmaps.front();
+    let mut ret = RBTree::new(MMapAdapter::new());
+
+    while let Some(ops) = cur.get() {
+        let mm = ops.mmap.borrow();
+        ret.insert(Box::new(MMapNode::new((*mm).clone())));
+        cur.move_next();
+    }
+
+    ret
+}
 
 impl Memory {
     pub fn new(heap_begin: Addr, heap_end: Addr) -> Self {
@@ -204,6 +216,14 @@ impl Memory {
             mmaps: RBTree::new(MMapAdapter::new()),
             heap: Heap::new(heap_begin, heap_end),
             allocations: BTreeMap::new(),
+        }
+    }
+
+    pub fn snapshot(&self) -> Self {
+        Memory {
+            mmaps: copy_mmaps(&self.mmaps),
+            heap: self.heap.clone(),
+            allocations: self.allocations.clone(),
         }
     }
 
@@ -493,6 +513,7 @@ impl Memory {
 
 //-------------------------------------
 
+#[derive(Clone)]
 pub struct BuddyAllocator {
     // free_blocks[0] holds blocks of size 'block_size',
     // free_blocks[1]         "            2 * 'block_size' etc.
@@ -617,6 +638,7 @@ const MIN_BLOCK_MASK: u64 = 0b111;
 /// A simple buddy allocator.  This is not attached to the memory directly
 /// so the layer above this needs to allocate via this heap, and then mmap
 /// the new chunk of memory.  Likewise the caller of free needs to unmap.
+#[derive(Clone)]
 pub struct Heap {
     base: u64,
     allocator: BuddyAllocator,

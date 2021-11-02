@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use log::*;
 use regex::Regex;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::{prelude::*, BufReader};
 use std::path::{Path, PathBuf};
@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 
 use crate::fixture::*;
+use crate::loader::*;
+use crate::memory::*;
 
 //-------------------------------
 
@@ -192,22 +194,9 @@ pub struct TestRunner<'a> {
     jobs: usize,
 }
 
-fn run_test_(kernel_dir: PathBuf, t: Test) -> Result<()> {
-    let mut fix = Fixture::new(kernel_dir, &t.kmodules)?;
-    (t.func)(&mut fix)?;
-    Ok(())
-}
-
 /// Wraps a test so we can run it in a thread.
-fn run_test(
-    path: String,
-    kernel_dir: PathBuf,
-    t: Test,
-    results: Arc<Mutex<BTreeMap<String, Result<()>>>>,
-) {
-    let res = run_test_(kernel_dir, t);
-    let mut results = results.lock().unwrap();
-    results.insert(path.clone(), res);
+fn run_test(mut fix: Fixture, t: Test) -> Result<()> {
+    (t.func)(&mut fix)
 }
 
 impl<'a> TestRunner<'a> {
@@ -252,16 +241,59 @@ impl<'a> TestRunner<'a> {
 
         let results: Arc<Mutex<BTreeMap<String, Result<()>>>> =
             Arc::new(Mutex::new(BTreeMap::new()));
+
+        let mut memories: BTreeMap<BTreeSet<String>, Result<(LoaderInfo, Memory)>> =
+            BTreeMap::new();
+
         for (p, t) in self.tests {
             if !(*self.filter_fn)(&p) {
                 continue;
             }
 
-            let kernel_dir = self.kernel_dir.clone();
-            let results = results.clone();
-            pool.execute(|| {
-                run_test(p, kernel_dir, t, results);
-            });
+            let mut modules = BTreeSet::new();
+            for m in &t.kmodules {
+                modules.insert(m.name());
+            }
+
+            let rmem;
+            {
+                let kernel_dir = self.kernel_dir.clone();
+                rmem = memories
+                    .entry(modules)
+                    .or_insert_with(|| Fixture::prep_memory(kernel_dir, &t.kmodules));
+            }
+            match rmem {
+                Ok((loader_info, mem)) => {
+                    let results = results.clone();
+                    let loader_info = loader_info.clone();
+                    let mem = mem.snapshot();
+
+                    pool.execute(move || {
+                        match Fixture::new(loader_info, mem) {
+                            Ok(fix) => {
+                                let res = run_test(fix, t);
+
+                                // FIXME: common code
+                                let mut results = results.lock().unwrap();
+                                results.insert(p.clone(), res);
+                                drop(results);
+                            }
+                            Err(e) => {
+                                // FIXME: common code
+                                let mut results = results.lock().unwrap();
+                                results.insert(p.clone(), Err(e));
+                                drop(results);
+                            }
+                        }
+                    });
+                }
+                Err(_) => {
+                    // FIXME: common code
+                    let mut results = results.lock().unwrap();
+                    results.insert(p.clone(), Err(anyhow!("unable to load kernel modules")));
+                    drop(results);
+                }
+            }
         }
 
         pool.join();
