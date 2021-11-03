@@ -8,7 +8,7 @@ use std::rc::Weak;
 
 //-------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(usize)]
 pub enum Reg {
     Zero = 0,
@@ -1506,6 +1506,404 @@ pub fn decode_basic_block(
         instrs,
         next: Weak::new(),
     })
+}
+
+/// Collects a set of registers that are used in a block of code.
+pub fn collect_regs(insts: &[(Inst, u8)]) -> BTreeSet<Reg> {
+    use Inst::*;
+    let mut r: BTreeSet<Reg> = BTreeSet::new();
+    for (i, _) in insts {
+        match i {
+            Lui { rd, .. } => {
+                r.insert(*rd);
+            }
+            Auipc { rd, .. } => {
+                r.insert(*rd);
+            }
+            Jal { rd, .. } => {
+                r.insert(*rd);
+            }
+            Jalr { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Beq { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Bne { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Blt { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Bge { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Bltu { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Bgeu { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+
+            Lb { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Lh { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Lw { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Lwu { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Ld { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Lbu { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Lhu { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Sb { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sh { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sw { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sd { rs1, rs2, .. } => {
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Addi { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Addiw { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Slti { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Sltiu { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Xori { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Ori { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Andi { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Slli { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Slliw { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Srli { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Srliw { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Sraiw { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Srai { rd, rs, .. } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Add { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Addw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sub { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Subw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sll { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sllw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Srlw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sraw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Slt { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sltu { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Xor { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Srl { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Sra { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Or { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            And { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Mul { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Mulh { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Mulhsu { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Mulhu { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Mulw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Div { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Divu { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Divw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Divuw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Rem { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Remu { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Remw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Remuw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Fence => {}
+            Fencei => {}
+            Ecall => {}
+            Ebreak => {}
+            Lrw { rd, rs } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Scw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoswapw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoaddw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoxorw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoandw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoorw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amominw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amomaxw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amominuw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amomaxuw { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Lrd { rd, rs } => {
+                r.insert(*rd);
+                r.insert(*rs);
+            }
+            Scd { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoswapd { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoaddd { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoxord { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoandd { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amoord { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amomind { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amomaxd { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amominud { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+            Amomaxud { rd, rs1, rs2 } => {
+                r.insert(*rd);
+                r.insert(*rs1);
+                r.insert(*rs2);
+            }
+        }
+    }
+    r.insert(Reg::PC);
+    r
 }
 
 //----------------------------------

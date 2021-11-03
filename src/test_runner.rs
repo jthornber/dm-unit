@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 
 use crate::fixture::*;
-use crate::loader::*;
-use crate::memory::*;
+use crate::emulator::loader::*;
+use crate::emulator::memory::*;
 
 //-------------------------------
 

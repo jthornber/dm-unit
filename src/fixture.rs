@@ -1,10 +1,10 @@
 use crate::anymap::*;
-use crate::decode::Reg;
+use crate::emulator::decode::Reg;
+use crate::emulator::loader::*;
+use crate::emulator::memory::*;
+use crate::emulator::memory::{Addr, PERM_EXEC};
+use crate::emulator::vm::*;
 use crate::guest::*;
-use crate::loader::*;
-use crate::memory::*;
-use crate::memory::{Addr, PERM_EXEC};
-use crate::vm::*;
 
 use anyhow::{anyhow, ensure, Result};
 use libc::{c_int, strerror_r};

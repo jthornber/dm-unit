@@ -1,7 +1,7 @@
 use crate::block_manager::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 use crate::stats::*;
 use crate::stubs::*;
 use crate::stubs::block_manager::*;
