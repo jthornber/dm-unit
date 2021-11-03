@@ -6,6 +6,8 @@ use std::fmt;
 use std::io::Cursor;
 use std::rc::Weak;
 
+use crate::emulator::ir::IR;
+
 //-------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1441,6 +1443,7 @@ pub struct BasicBlock {
     pub breakpoint: bool,
 
     pub instrs: Vec<(Inst, u8)>,
+    pub ir: Option<Vec<IR>>,
 
     // The bb that was executed after this one, might save
     // a lookup in the bb cache.
@@ -1504,6 +1507,7 @@ pub fn decode_basic_block(
         end: pc,
         breakpoint: is_bp,
         instrs,
+        ir: None,
         next: Weak::new(),
     })
 }

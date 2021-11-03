@@ -52,7 +52,7 @@ impl std::fmt::Display for Reg {
 
 //------------------------------
 
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum TestOp {
     Eq,
     Ne,
@@ -64,7 +64,7 @@ pub enum TestOp {
 
 use TestOp::*;
 
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum BinOp {
     Add,
     Addw,
@@ -98,7 +98,7 @@ pub enum BinOp {
 
 use BinOp::*;
 
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ImmOp {
     Addi,
     Addiw,
@@ -111,7 +111,7 @@ pub enum ImmOp {
 
 use ImmOp::*;
 
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ShiftOp {
     Slli,
     Slliw,
@@ -123,7 +123,7 @@ pub enum ShiftOp {
 
 use ShiftOp::*;
 
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum RValue {
     Gbase,
     Gtoh { guest: Reg, len: u32, perms: u8 },
@@ -149,7 +149,7 @@ pub enum RValue {
 
 use RValue::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum IR {
     Assign { rd: Reg, rval: RValue },
 
@@ -515,7 +515,6 @@ impl Builder {
         let rd = self.def_greg(rd);
         self.assign(rd, RValue::Bin { op, rs1, rs2 });
     }
-
 }
 
 //------------------------------
@@ -831,10 +830,19 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
             b.inc_pc(width);
         }
         Inst::Amoswapw { rd, rs1, rs2 } => {
-            let t = b.assign_next(Lw {rs: b.ref_greg(rs1)});
-            b.store(rs1, rs2, &0, 4, |rs1, rs2| Sw {rs1, rs2});
+            let t = b.assign_next(Lw {
+                rs: b.ref_greg(rs1),
+            });
+            b.store(rs1, rs2, &0, 4, |rs1, rs2| Sw { rs1, rs2 });
             let rd = b.def_greg(rd);
-            b.assign(rd, Imm {op: Addi, rs: t, imm: 0});
+            b.assign(
+                rd,
+                Imm {
+                    op: Addi,
+                    rs: t,
+                    imm: 0,
+                },
+            );
             b.inc_pc(width);
         }
         Inst::Amoaddw { rd, rs1, rs2 } => {
@@ -1020,8 +1028,10 @@ fn apply_substitutions(rval: &RValue, substs: &BTreeMap<Reg, Reg>) -> RValue {
 
 fn is_load(rval: &RValue) -> bool {
     match rval {
-        Ld {..} | Lb {..} | Lh {..} | Lw {..} | Lbu {..} | Lhu {..} | Lwu {..} => true,
-        _ => false
+        Ld { .. } | Lb { .. } | Lh { .. } | Lw { .. } | Lbu { .. } | Lhu { .. } | Lwu { .. } => {
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1091,7 +1101,7 @@ fn is_noop(rval: &RValue) -> Option<Reg> {
         Gbase => None,
         Gtoh { .. } => None,
         Li { .. } => None,
-        Test { rs1, rs2, .. } => None,
+        Test { .. } => None,
         Cond { rs1, rs2, .. } => check(rs1.0 == rs2.0, rs1),
         Ld { .. } => None,
         Lb { .. } => None,
@@ -1291,8 +1301,8 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     for i in instrs {
         match i {
             Assign {
-                rd,
                 rval: Gtoh { guest, len, perms },
+                ..
             } => {
                 if let Some(range) = extract_range(guest, *len, *perms, &defs) {
                     ranges.push(range);
@@ -1302,10 +1312,12 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
         }
     }
 
+/*
     debug!("ranges before merge:");
     for r in &ranges {
         debug!("    {:?}", r);
     }
+    */
 
     ranges.sort_by_key(|r| (r.base.0, r.offset));
     let mut merged = Vec::new();
@@ -1330,10 +1342,12 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     }
     ranges = merged;
 
+/*
     debug!("ranges after merge:");
     for r in &ranges {
         debug!("    {:?}", r);
     }
+    */
 
     // For each merged range we insert a large gtoh call just after it's base
     // register is defined.  Other existing gtoh calls are replaced with:
@@ -1379,16 +1393,16 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
                     match rval {
                         Gtoh { guest, len, perms } => {
                             if let Some(range) = extract_range(guest, *len, *perms, &defs) {
-                                debug!("range.base = {}", range.base);
+                                // debug!("range.base = {}", range.base);
                                 let (_, new_base, gr) = by_base.get(&range.base).unwrap();
-                                    result.push(Assign {
-                                        rd: *rd,
-                                        rval: Imm {
-                                            op: Addi,
-                                            rs: *new_base,
-                                            imm: range.offset - gr.offset,
-                                        },
-                                    });
+                                result.push(Assign {
+                                    rd: *rd,
+                                    rval: Imm {
+                                        op: Addi,
+                                        rs: *new_base,
+                                        imm: range.offset - gr.offset,
+                                    },
+                                });
                             } else {
                                 result.push(*i);
                             }
@@ -1425,54 +1439,46 @@ fn opt_redundant_stores(instrs: &[IR]) -> Vec<IR> {
     let mut result = Vec::new();
     for i in instrs {
         match i {
-            Sb { rs1, rs2 } => {
-                match defs.get(rs2).unwrap() {
-                    Lb { rs } => {
-                        if rs != rs1 {
-                            result.push(*i);
-                        }
-                    }
-                    _ => {
+            Sb { rs1, rs2 } => match defs.get(rs2).unwrap() {
+                Lb { rs } => {
+                    if rs != rs1 {
                         result.push(*i);
                     }
                 }
-            }
-            Sh { rs1, rs2 } => {
-                match defs.get(rs2).unwrap() {
-                    Lh { rs } => {
-                        if rs != rs1 {
-                            result.push(*i);
-                        }
-                    }
-                    _ => {
+                _ => {
+                    result.push(*i);
+                }
+            },
+            Sh { rs1, rs2 } => match defs.get(rs2).unwrap() {
+                Lh { rs } => {
+                    if rs != rs1 {
                         result.push(*i);
                     }
                 }
-            }
-            Sw { rs1, rs2 } => {
-                match defs.get(rs2).unwrap() {
-                    Lw { rs } => {
-                        if rs != rs1 {
-                            result.push(*i);
-                        }
-                    }
-                    _ => {
+                _ => {
+                    result.push(*i);
+                }
+            },
+            Sw { rs1, rs2 } => match defs.get(rs2).unwrap() {
+                Lw { rs } => {
+                    if rs != rs1 {
                         result.push(*i);
                     }
                 }
-            }
-            Sd { rs1, rs2 } => {
-                match defs.get(rs2).unwrap() {
-                    Ld { rs } => {
-                        if rs != rs1 {
-                            result.push(*i);
-                        }
-                    }
-                    _ => {
+                _ => {
+                    result.push(*i);
+                }
+            },
+            Sd { rs1, rs2 } => match defs.get(rs2).unwrap() {
+                Ld { rs } => {
+                    if rs != rs1 {
                         result.push(*i);
                     }
                 }
-            }
+                _ => {
+                    result.push(*i);
+                }
+            },
             _ => {
                 result.push(*i);
             }
@@ -1492,7 +1498,7 @@ fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTr
     let rval = defs.get(reg).unwrap();
     match rval {
         Gbase => {}
-        Gtoh { guest, len, perms } => emit(r, guest, defs, seen),
+        Gtoh { guest, .. } => emit(r, guest, defs, seen),
         Li { .. } => {}
         Test { rs1, rs2, .. } => {
             emit(r, rs1, defs, seen);
@@ -1649,7 +1655,7 @@ pub fn to_ir(insts: &[(Inst, u8)], opt: bool) -> Vec<IR> {
 // Renumbers all the registers used in IR into ascending
 // order.  Only useful if you're printing the instructions.
 pub fn renumber(instrs: &[IR]) -> Vec<IR> {
-    let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
+    // let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
     let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
     let mut next_reg = 0;
 
@@ -1689,4 +1695,3 @@ pub fn renumber(instrs: &[IR]) -> Vec<IR> {
 }
 
 //--------------------------------
-
