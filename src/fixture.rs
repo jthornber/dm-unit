@@ -6,7 +6,7 @@ use crate::emulator::memory::{Addr, PERM_EXEC};
 use crate::emulator::vm::*;
 use crate::guest::*;
 
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use libc::{c_int, strerror_r};
 use log::*;
 use std::collections::BTreeMap;

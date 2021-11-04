@@ -1,4 +1,3 @@
-use log::*;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -837,7 +836,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Scw { rd, rs1, rs2 } => {
+        Inst::Scw { .. /* rd, rs1, rs2 */ } => {
             // FIXME: finish
             b.inc_pc(width);
             todo!();
@@ -858,7 +857,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
             );
             b.inc_pc(width);
         }
-        Inst::Amoaddw { rd, rs1, rs2 } => {
+        Inst::Amoaddw { .. /* rd, rs1, rs2 */ } => {
             /*
             let rs1 = b.ref_greg(rs1);
             let rs2 = b.ref_greg(rs2);
@@ -873,75 +872,75 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoxorw { rd, rs1, rs2 } => {
+        Inst::Amoxorw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoandw { rd, rs1, rs2 } => {
+        Inst::Amoandw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoorw { rd, rs1, rs2 } => {
+        Inst::Amoorw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amominw { rd, rs1, rs2 } => {
+        Inst::Amominw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amomaxw { rd, rs1, rs2 } => {
+        Inst::Amomaxw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amominuw { rd, rs1, rs2 } => {
+        Inst::Amominuw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amomaxuw { rd, rs1, rs2 } => {
+        Inst::Amomaxuw { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Lrd { rd, rs } => {
+        Inst::Lrd { .. /* rd, rs */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Scd { rd, rs1, rs2 } => {
+        Inst::Scd { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoswapd { rd, rs1, rs2 } => {
+        Inst::Amoswapd { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoaddd { rd, rs1, rs2 } => {
+        Inst::Amoaddd { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoxord { rd, rs1, rs2 } => {
+        Inst::Amoxord { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoandd { rd, rs1, rs2 } => {
+        Inst::Amoandd { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amoord { rd, rs1, rs2 } => {
+        Inst::Amoord { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amomind { rd, rs1, rs2 } => {
+        Inst::Amomind { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amomaxd { rd, rs1, rs2 } => {
+        Inst::Amomaxd { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amominud { rd, rs1, rs2 } => {
+        Inst::Amominud { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }
-        Inst::Amomaxud { rd, rs1, rs2 } => {
+        Inst::Amomaxud { .. /* rd, rs1, rs2 */ } => {
             b.inc_pc(width);
             todo!();
         }

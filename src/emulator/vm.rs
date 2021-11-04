@@ -867,7 +867,7 @@ impl VM {
         self.find_bb()
     }
 
-    fn run_ir(&mut self, ir: &[IR]) -> Result<()> {
+    fn run_ir(&mut self, _ir: &[IR]) -> Result<()> {
         todo!();
     }
 
