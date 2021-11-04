@@ -342,10 +342,11 @@ impl Builder {
         self.buffer.push(inst);
     }
 
-    // Get a new reg to represent greg.  After this, calls to ref_greg() for
-    // this register will return the new reg, so make sure you don't do this:
-    //     let rd = self.def_reg(rd);
-    //     let rs = self.ref_reg(rs);
+    // Get a new reg to represent greg (guest reg).  After this,
+    // calls to ref_greg() for this register will return the new reg,
+    // so make sure you don't do this:
+    //     let rd = self.def_greg(rd);
+    //     let rs = self.ref_greg(rs);
     // Since rs could be rd, and so you'll end up with something like: t59 <- t59 + 0x0.
     // Instead call def_greg() after getting any references you need to build the instruction.
     fn def_greg(&mut self, greg: &decode::Reg) -> Reg {
@@ -406,6 +407,8 @@ impl Builder {
         );
     }
 
+    // Pushes a sequence of instructions that implement a branch.
+    // if rs1 <op> rs2 { pc += offset } else { pc += width }
     fn branch(
         &mut self,
         rs1: &decode::Reg,
@@ -417,12 +420,15 @@ impl Builder {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let (old_pc, new_pc) = self.mut_greg(&decode::Reg::PC);
+
+        // FIXME: double check that this only gets executed if the branch
+        // is taken.
         let dest = self.assign_next(Imm {
             op: Addi,
             rs: old_pc,
             imm: *offset,
         });
-        let t = self.assign_next(Test { op: op, rs1, rs2 });
+        let t = self.assign_next(Test { op, rs1, rs2 });
         let next_instr = self.assign_next(Imm {
             op: Addi,
             rs: old_pc,
@@ -553,6 +559,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
         Inst::Jal { .. } => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Jalr { rd, rs, imm } => {
             let (old_pc, new_pc) = b.mut_greg(&decode::Reg::PC);
@@ -808,26 +815,32 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
         Inst::Fence => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Fencei => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Ecall => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Ebreak => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Lrw { .. } => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Scw { rd, rs1, rs2 } => {
             // FIXME: finish
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoswapw { rd, rs1, rs2 } => {
             let t = b.assign_next(Lw {
@@ -847,69 +860,90 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
         }
         Inst::Amoaddw { rd, rs1, rs2 } => {
             /*
-            let rs1 = b.reg_greg(rs1);
-            let t = b.assign_next(Lw {rs: rs1});
-            let new_value = b.assign_next(func(t, rs2));
-            b.store(rs1, new_value, &0, 4, |rs1, rs2| Sw {rs1, rs2});
+            let rs1 = b.ref_greg(rs1);
+            let rs2 = b.ref_greg(rs2);
+            let t = b.assign_next(Lw { rs: rs1 });
+
+            let new_value = b.assign_next(RValue::Bin { Addw, t, rs2 });
+            b.store(rs1, new_value, &0, 4, |rs1, rs2| Sw { rs1, rs2 });
             let rd = b.def_greg(rd);
-            b.assign(rd, Mv {rs: t});
+            b.assign(rd, Mv { rs: t });
             */
 
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoxorw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoandw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoorw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amominw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amomaxw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amominuw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amomaxuw { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Lrd { rd, rs } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Scd { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoswapd { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoaddd { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoxord { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoandd { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amoord { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amomind { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amomaxd { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amominud { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
         Inst::Amomaxud { rd, rs1, rs2 } => {
             b.inc_pc(width);
+            todo!();
         }
     }
 }
@@ -1312,7 +1346,7 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
         }
     }
 
-/*
+    /*
     debug!("ranges before merge:");
     for r in &ranges {
         debug!("    {:?}", r);
@@ -1342,7 +1376,7 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     }
     ranges = merged;
 
-/*
+    /*
     debug!("ranges after merge:");
     for r in &ranges {
         debug!("    {:?}", r);

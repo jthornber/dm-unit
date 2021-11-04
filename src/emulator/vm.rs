@@ -865,6 +865,19 @@ impl VM {
         self.find_bb()
     }
 
+    fn run_ir(&mut self, ir: &[IR]) -> Result<()> {
+        todo!();
+    }
+
+    fn run_riscv(&mut self, instrs: &[(Inst, u8)]) -> Result<()> {
+        for (inst, width) in instrs {
+            // debug!("{:08x}: {}", addr, inst);
+            self.step(*inst, *width as u64)?;
+        }
+
+        Ok(())
+    }
+
     fn exec_bb(&mut self, bb: &Rc<RefCell<BasicBlock>>) -> Result<()> {
         let pc = self.pc();
         let mut bb = bb.borrow_mut();
@@ -898,10 +911,19 @@ impl VM {
             bb.ir = Some(ir);
         }
 
-        for (inst, width) in &bb.instrs {
-            // debug!("{:08x}: {}", addr, inst);
-            self.step(*inst, *width as u64)?;
+        if let Some(ir) = &bb.ir {
+            self.run_ir(ir)?;
+        } else {
+            self.run_riscv(&bb.instrs)?;
+            /*
+            // FIXME: factor out
+            for (inst, width) in &bb.instrs {
+                // debug!("{:08x}: {}", addr, inst);
+                self.step(*inst, *width as u64)?;
+            }
+            */
         }
+
         Ok(())
     }
 
