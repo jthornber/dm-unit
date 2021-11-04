@@ -5,7 +5,7 @@ use std::io;
 use std::io::{Read, Write};
 
 use crate::guest::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 
 //-------------------------------
 

@@ -1,8 +1,8 @@
 use crate::block_manager::*;
-use crate::decode::Reg;
+use crate::emulator::riscv::Reg;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::memory::{Addr, PERM_READ, PERM_WRITE};
+use crate::emulator::memory::{Addr, PERM_READ, PERM_WRITE};
 use crate::stubs::block_device::*;
 
 use anyhow::{anyhow, Result};

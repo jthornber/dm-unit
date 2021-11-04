@@ -1,7 +1,7 @@
-use crate::decode::*;
+use crate::emulator::riscv::*;
+use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::memory::*;
 
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -247,7 +247,7 @@ pub struct CacheMapping {
 
 pub fn dm_cache_load_mappings(fix: &mut Fixture, cmd: Addr) -> Result<Vec<CacheMapping>> {
     let (mut fix, callback_ptr) = auto_ebreak(fix)?;
-    
+
     type Mappings = Vec<CacheMapping>;
     let mappings: Mappings = Vec::new();
     fix.contexts.insert(callback_ptr, mappings);

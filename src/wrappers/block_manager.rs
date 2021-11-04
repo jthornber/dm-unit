@@ -1,5 +1,5 @@
-use crate::decode::*;
-use crate::memory::*;
+use crate::emulator::riscv::*;
+use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::stubs::block_device::*;
 

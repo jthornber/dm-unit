@@ -1,5 +1,5 @@
 use crate::fixture::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::space_map::{self, *};

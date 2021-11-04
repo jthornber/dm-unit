@@ -6,8 +6,9 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
-use crate::decode::*;
-use crate::memory::*;
+use crate::emulator::riscv::*;
+use crate::emulator::ir::*;
+use crate::emulator::memory::*;
 
 //-----------------------------
 
@@ -64,6 +65,7 @@ pub struct VM {
     inst_cache: InstCache,
     next_bb_hits: u64,
     next_bb_misses: u64,
+    jit: bool,
 }
 
 impl Drop for VM {
@@ -150,7 +152,7 @@ pub enum VmErr {
 pub type Result<T> = std::result::Result<T, VmErr>;
 
 impl VM {
-    pub fn new(mem: Memory) -> Self {
+    pub fn new(mem: Memory, jit: bool) -> Self {
         VM {
             reg: vec![0; 33],
             mem,
@@ -160,6 +162,7 @@ impl VM {
             inst_cache: InstCache::new(),
             next_bb_hits: 0,
             next_bb_misses: 0,
+            jit,
         }
     }
 
@@ -864,6 +867,19 @@ impl VM {
         self.find_bb()
     }
 
+    fn run_ir(&mut self, _ir: &[IR]) -> Result<()> {
+        todo!();
+    }
+
+    fn run_riscv(&mut self, instrs: &[(Inst, u8)]) -> Result<()> {
+        for (inst, width) in instrs {
+            // debug!("{:08x}: {}", addr, inst);
+            self.step(*inst, *width as u64)?;
+        }
+
+        Ok(())
+    }
+
     fn exec_bb(&mut self, bb: &Rc<RefCell<BasicBlock>>) -> Result<()> {
         let pc = self.pc();
         let mut bb = bb.borrow_mut();
@@ -877,10 +893,32 @@ impl VM {
         }
 
         bb.hits += 1;
-        for (inst, width) in &bb.instrs {
-            // debug!("{:08x}: {}", addr, inst);
-            self.step(*inst, *width as u64)?;
+
+        if self.jit && bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
+            /*
+            debug!("riscv ({} instructions):", bb.instrs.len());
+            for (inst, _width) in &bb.instrs {
+                debug!("    {}", inst);
+            }
+            */
+
+            let ir = renumber(&to_ir(&bb.instrs, true));
+            /*
+            debug!("ir ({} instructions):", ir.len());
+            for inst in &ir {
+                debug!("    {}", inst);
+            }
+            */
+
+            bb.ir = Some(ir);
         }
+
+        if let Some(ir) = &bb.ir {
+            self.run_ir(ir)?;
+        } else {
+            self.run_riscv(&bb.instrs)?;
+        }
+
         Ok(())
     }
 

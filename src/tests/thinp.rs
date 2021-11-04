@@ -13,7 +13,7 @@ use thinp::thin::check::*;
 use thinp::thin::superblock::*;
 
 use crate::fixture::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;

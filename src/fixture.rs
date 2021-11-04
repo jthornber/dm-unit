@@ -1,10 +1,10 @@
 use crate::anymap::*;
-use crate::decode::Reg;
+use crate::emulator::riscv::Reg;
+use crate::emulator::loader::*;
+use crate::emulator::memory::*;
+use crate::emulator::memory::{Addr, PERM_EXEC};
+use crate::emulator::vm::*;
 use crate::guest::*;
-use crate::loader::*;
-use crate::memory::*;
-use crate::memory::{Addr, PERM_EXEC};
-use crate::vm::*;
 
 use anyhow::{anyhow, Result};
 use libc::{c_int, strerror_r};
@@ -40,6 +40,7 @@ pub struct Fixture {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct KernelModule {
     basename: &'static str,
     relative_path: &'static str,
@@ -51,6 +52,10 @@ impl KernelModule {
         module.push(kernel_dir);
         module.push(self.relative_path.to_string());
         module
+    }
+
+    pub fn name(&self) -> String {
+        self.basename.to_string()
     }
 }
 
@@ -85,7 +90,10 @@ pub const RBTREE_MOD: KernelModule = KernelModule {
 };
 
 impl Fixture {
-    pub fn new<P: AsRef<Path> + Clone>(kernel_dir: P, kmodules: &[KernelModule]) -> Result<Self> {
+    pub fn prep_memory<P: AsRef<Path> + Clone>(
+        kernel_dir: P,
+        kmodules: &[KernelModule],
+    ) -> Result<(LoaderInfo, Memory)> {
         let mut modules = Vec::new();
         for km in kmodules {
             modules.push(km.path(kernel_dir.clone()));
@@ -93,9 +101,13 @@ impl Fixture {
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
         let heap_end = Addr(heap_begin.0 + (32 * 1024 * 1024));
-        let mem = Memory::new(heap_begin, heap_end);
-        let mut vm = VM::new(mem);
-        let loader_info = load_modules(&mut vm.mem, &modules[0..])?;
+        let mut mem = Memory::new(heap_begin, heap_end);
+        let loader_info = load_modules(&mut mem, &modules[0..])?;
+        Ok((loader_info, mem))
+    }
+
+    pub fn new(loader_info: LoaderInfo, mem: Memory, jit: bool) -> Result<Self> {
+        let mut vm = VM::new(mem, jit);
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;

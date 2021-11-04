@@ -1,5 +1,5 @@
-use crate::memory::*;
-use crate::memory::{Addr, PERM_READ};
+use crate::emulator::memory::*;
+use crate::emulator::memory::{Addr, PERM_READ};
 
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};

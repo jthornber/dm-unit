@@ -5,7 +5,7 @@ use rand::SeedableRng;
 use std::collections::BTreeMap;
 
 use crate::fixture::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 use crate::stubs::block_device::*;
 use crate::stubs::*;
 use crate::test_runner::*;

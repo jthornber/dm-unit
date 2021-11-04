@@ -8,7 +8,7 @@ use std::path::Path;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
 
-use crate::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
+use crate::emulator::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
 
 //--------------------------
 
@@ -365,6 +365,7 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
 //--------------------------
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct Sym {
     name: String,
     value: u64,
@@ -589,6 +590,7 @@ fn load_sections(mem: &mut Memory, base: Addr, ss: &mut Sections, perms: u8) -> 
     Ok(Addr(base.0 + len))
 }
 
+#[derive(Clone)]
 pub struct LoaderInfo {
     symbols: BTreeMap<String, Addr>,
     sym_rmap: BTreeMap<Addr, String>,

@@ -3,10 +3,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
 
-use crate::decode::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 
 use Reg::*;
 

@@ -5,10 +5,10 @@ use log::*;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
 
-use crate::decode::*;
+use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::memory::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 

@@ -1,5 +1,5 @@
 use crate::fixture::*;
-use crate::memory::*;
+use crate::emulator::memory::*;
 use crate::stats::*;
 use crate::wrappers::space_map::*;
 use crate::stubs::block_manager::*;
