@@ -96,8 +96,8 @@ impl Fixture {
         Ok((loader_info, mem))
     }
 
-    pub fn new(loader_info: LoaderInfo, mem: Memory) -> Result<Self> {
-        let mut vm = VM::new(mem);
+    pub fn new(loader_info: LoaderInfo, mem: Memory, jit: bool) -> Result<Self> {
+        let mut vm = VM::new(mem, jit);
 
         // Setup the stack and heap
         vm.setup_stack(8 * 1024)?;

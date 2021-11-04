@@ -65,6 +65,7 @@ pub struct VM {
     inst_cache: InstCache,
     next_bb_hits: u64,
     next_bb_misses: u64,
+    jit: bool,
 }
 
 impl Drop for VM {
@@ -151,7 +152,7 @@ pub enum VmErr {
 pub type Result<T> = std::result::Result<T, VmErr>;
 
 impl VM {
-    pub fn new(mem: Memory) -> Self {
+    pub fn new(mem: Memory, jit: bool) -> Self {
         VM {
             reg: vec![0; 33],
             mem,
@@ -161,6 +162,7 @@ impl VM {
             inst_cache: InstCache::new(),
             next_bb_hits: 0,
             next_bb_misses: 0,
+            jit,
         }
     }
 
@@ -892,7 +894,7 @@ impl VM {
 
         bb.hits += 1;
 
-        if bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
+        if self.jit && bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
             /*
             debug!("riscv ({} instructions):", bb.instrs.len());
             for (inst, _width) in &bb.instrs {
@@ -915,13 +917,6 @@ impl VM {
             self.run_ir(ir)?;
         } else {
             self.run_riscv(&bb.instrs)?;
-            /*
-            // FIXME: factor out
-            for (inst, width) in &bb.instrs {
-                // debug!("{:08x}: {}", addr, inst);
-                self.step(*inst, *width as u64)?;
-            }
-            */
         }
 
         Ok(())

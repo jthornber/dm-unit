@@ -6,8 +6,8 @@ use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
 use dm_unit::tests::cache;
 use dm_unit::tests::space_map_disk;
-use dm_unit::tests::thinp;
 use dm_unit::tests::space_map_metadata;
+use dm_unit::tests::thinp;
 
 use anyhow::Result;
 use clap::{App, Arg};
@@ -23,7 +23,7 @@ fn register_tests(runner: &mut TestRunner) -> Result<()> {
     space_map_disk::register_tests(runner)?;
     space_map_metadata::register_tests(runner)?;
     thinp::register_tests(runner)?;
-    
+
     Ok(())
 }
 
@@ -43,16 +43,21 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::with_name("JOBS")
-            .short("j")
-            .help("Number of tests to run concurrently.")
-            .required(false)
-            .value_name("JOBS"),
+                .short("j")
+                .help("Number of tests to run concurrently.")
+                .required(false)
+                .value_name("JOBS"),
         )
         .arg(
             Arg::with_name("FILTER")
                 .short("t")
                 .help("regex filter to select which tests to run")
                 .value_name("FILTER"),
+        )
+        .arg(
+            Arg::with_name("JIT")
+                .long("jit")
+                .help("Turn on the experimental jit compiler"),
         );
 
     let matches = parser.get_matches();
@@ -66,8 +71,15 @@ fn main() -> Result<()> {
     }
 
     if let Some(job_str) = matches.value_of("JOBS") {
-        let jobs = job_str.to_string().parse::<usize>().expect("couldn't parse jobs");
+        let jobs = job_str
+            .to_string()
+            .parse::<usize>()
+            .expect("couldn't parse jobs");
         runner.set_jobs(jobs);
+    }
+
+    if matches.is_present("JIT") {
+        runner.set_jit();
     }
 
     register_tests(&mut runner)?;

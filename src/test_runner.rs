@@ -192,6 +192,7 @@ pub struct TestRunner<'a> {
     filter_fn: Box<dyn Fn(&str) -> bool + 'a>,
     tests: BTreeMap<String, Test>,
     jobs: usize,
+    jit: bool,
 }
 
 /// Wraps a test so we can run it in a thread.
@@ -213,6 +214,7 @@ impl<'a> TestRunner<'a> {
             filter_fn,
             tests: BTreeMap::new(),
             jobs: 1,
+            jit: false,
         })
     }
 
@@ -222,6 +224,10 @@ impl<'a> TestRunner<'a> {
 
     pub fn set_jobs(&mut self, jobs: usize) {
         self.jobs = jobs;
+    }
+
+    pub fn set_jit(&mut self) {
+        self.jit = true;
     }
 
     pub fn get_kernel_dir(&self) -> &Path {
@@ -267,9 +273,10 @@ impl<'a> TestRunner<'a> {
                     let results = results.clone();
                     let loader_info = loader_info.clone();
                     let mem = mem.snapshot();
+                    let jit = self.jit;
 
                     pool.execute(move || {
-                        match Fixture::new(loader_info, mem) {
+                        match Fixture::new(loader_info, mem, jit) {
                             Ok(fix) => {
                                 let res = run_test(fix, t);
 
