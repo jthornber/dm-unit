@@ -1,4 +1,4 @@
-use crate::emulator::decode::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::emulator::memory::*;

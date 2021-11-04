@@ -1,4 +1,4 @@
-use crate::emulator::decode::*;
+use crate::emulator::riscv::*;
 use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::stubs::block_device::*;

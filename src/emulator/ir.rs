@@ -2,7 +2,7 @@ use log::*;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::emulator::decode::{self, *};
+use crate::emulator::riscv::{self, *};
 use crate::emulator::memory::*;
 
 /// The intermediate representation is vey similar to riscv, except:
@@ -17,7 +17,7 @@ use crate::emulator::memory::*;
 /// - No need for atomics, we only have one core.
 
 #[derive(Clone, Copy, Debug, Eq)]
-pub struct Reg(u32, Option<decode::Reg>);
+pub struct Reg(u32, Option<riscv::Reg>);
 
 impl PartialOrd for Reg {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -324,7 +324,7 @@ impl std::fmt::Display for IR {
 struct Builder {
     buffer: Vec<IR>,
     current_reg: u32,
-    guest_regs: BTreeMap<decode::Reg, Reg>,
+    guest_regs: BTreeMap<riscv::Reg, Reg>,
 }
 
 impl Default for Builder {
@@ -349,7 +349,7 @@ impl Builder {
     //     let rs = self.ref_greg(rs);
     // Since rs could be rd, and so you'll end up with something like: t59 <- t59 + 0x0.
     // Instead call def_greg() after getting any references you need to build the instruction.
-    fn def_greg(&mut self, greg: &decode::Reg) -> Reg {
+    fn def_greg(&mut self, greg: &riscv::Reg) -> Reg {
         let reg = Reg(self.current_reg, Some(*greg));
         self.current_reg += 1;
         self.guest_regs.insert(*greg, reg);
@@ -357,20 +357,20 @@ impl Builder {
     }
 
     /// Returns the IR register that contains the guest reg
-    fn ref_greg(&self, greg: &decode::Reg) -> Reg {
+    fn ref_greg(&self, greg: &riscv::Reg) -> Reg {
         self.guest_regs.get(greg).unwrap().clone()
     }
 
     /// Call this when you want to mutate the value of a guest register.
     /// It returns (old, new)
-    fn mut_greg(&mut self, greg: &decode::Reg) -> (Reg, Reg) {
+    fn mut_greg(&mut self, greg: &riscv::Reg) -> (Reg, Reg) {
         let mut new = self.next_reg();
         new.1 = Some(*greg);
         let old = self.guest_regs.get(greg).unwrap().clone();
 
         // We don't insert the new reg for zero, since it
         // shouldn't change.
-        if *greg != decode::Reg::Zero {
+        if *greg != riscv::Reg::Zero {
             self.guest_regs.insert(*greg, new);
         }
         (old, new)
@@ -396,7 +396,7 @@ impl Builder {
 
     /// Pushes instructions to increment the program counter
     fn inc_pc(&mut self, delta: i32) {
-        let (old, new) = self.mut_greg(&decode::Reg::PC);
+        let (old, new) = self.mut_greg(&riscv::Reg::PC);
         self.assign(
             new,
             RValue::Imm {
@@ -411,15 +411,15 @@ impl Builder {
     // if rs1 <op> rs2 { pc += offset } else { pc += width }
     fn branch(
         &mut self,
-        rs1: &decode::Reg,
-        rs2: &decode::Reg,
+        rs1: &riscv::Reg,
+        rs2: &riscv::Reg,
         offset: &i32,
         op: TestOp,
         width: i32,
     ) {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
-        let (old_pc, new_pc) = self.mut_greg(&decode::Reg::PC);
+        let (old_pc, new_pc) = self.mut_greg(&riscv::Reg::PC);
 
         // FIXME: double check that this only gets executed if the branch
         // is taken.
@@ -446,8 +446,8 @@ impl Builder {
 
     fn load<F: FnOnce(Reg) -> RValue>(
         &mut self,
-        rd: &decode::Reg,
-        rs: &decode::Reg,
+        rd: &riscv::Reg,
+        rs: &riscv::Reg,
         imm: &i32,
         len: usize,
         func: F,
@@ -471,8 +471,8 @@ impl Builder {
 
     fn store<F: FnOnce(Reg, Reg) -> IR>(
         &mut self,
-        rs1: &decode::Reg,
-        rs2: &decode::Reg,
+        rs1: &riscv::Reg,
+        rs2: &riscv::Reg,
         imm: &i32,
         len: usize,
         func: F,
@@ -496,7 +496,7 @@ impl Builder {
         self.push(func(host_addr, rs2));
     }
 
-    fn xlate_shift(&mut self, rd: &decode::Reg, op: ShiftOp, rs: &decode::Reg, shamt: u8) {
+    fn xlate_shift(&mut self, rd: &riscv::Reg, op: ShiftOp, rs: &riscv::Reg, shamt: u8) {
         let rs = self.ref_greg(rs);
         let rd = self.def_greg(rd);
         self.assign(
@@ -509,13 +509,13 @@ impl Builder {
         );
     }
 
-    fn imm(&mut self, rd: &decode::Reg, op: ImmOp, rs: &decode::Reg, imm: &i32) {
+    fn imm(&mut self, rd: &riscv::Reg, op: ImmOp, rs: &riscv::Reg, imm: &i32) {
         let rs = self.ref_greg(rs);
         let rd = self.def_greg(rd);
         self.assign(rd, RValue::Imm { op, rs, imm: *imm });
     }
 
-    fn bin(&mut self, rd: &decode::Reg, op: BinOp, rs1: &decode::Reg, rs2: &decode::Reg) {
+    fn bin(&mut self, rd: &riscv::Reg, op: BinOp, rs1: &riscv::Reg, rs2: &riscv::Reg) {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let rd = self.def_greg(rd);
@@ -541,7 +541,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
             b.inc_pc(width);
         }
         Inst::Auipc { rd, imm } => {
-            let pc = b.ref_greg(&decode::Reg::PC);
+            let pc = b.ref_greg(&riscv::Reg::PC);
             let rd1 = b.assign_next(Li {
                 imm: (*imm as i64) << 12,
             });
@@ -562,7 +562,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
             todo!();
         }
         Inst::Jalr { rd, rs, imm } => {
-            let (old_pc, new_pc) = b.mut_greg(&decode::Reg::PC);
+            let (old_pc, new_pc) = b.mut_greg(&riscv::Reg::PC);
 
             // Save the return address
             let rd = b.def_greg(rd);
@@ -950,15 +950,15 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
 
 fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
     let live_regs = collect_regs(insts);
-    if live_regs.contains(&decode::Reg::Zero) {
-        let zero = b.def_greg(&decode::Reg::Zero);
+    if live_regs.contains(&riscv::Reg::Zero) {
+        let zero = b.def_greg(&riscv::Reg::Zero);
         b.assign(zero, Li { imm: 0 });
     }
 
     // Load all guest registers, except zero
     let base = b.assign_next(Gbase);
     for greg in &live_regs {
-        if *greg == decode::Reg::Zero {
+        if *greg == riscv::Reg::Zero {
             continue;
         }
 
@@ -978,7 +978,7 @@ fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
 
     // Save all guest registers, except zero
     for greg in &live_regs {
-        if *greg == decode::Reg::Zero {
+        if *greg == riscv::Reg::Zero {
             continue;
         }
         let rs1 = b.assign_next(Imm {

@@ -1,5 +1,5 @@
 use crate::anymap::*;
-use crate::emulator::decode::Reg;
+use crate::emulator::riscv::Reg;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_EXEC};

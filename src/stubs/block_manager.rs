@@ -1,5 +1,5 @@
 use crate::block_manager::*;
-use crate::emulator::decode::Reg;
+use crate::emulator::riscv::Reg;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::emulator::memory::{Addr, PERM_READ, PERM_WRITE};

@@ -6,7 +6,7 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
-use crate::emulator::decode::*;
+use crate::emulator::riscv::*;
 use crate::emulator::ir::*;
 use crate::emulator::memory::*;
 
