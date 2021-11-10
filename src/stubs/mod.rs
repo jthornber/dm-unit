@@ -1,6 +1,8 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
-use crate::emulator::memory::*;
+use crate::guest::*;
+use crate::stubs::block_device::*;
 
 use anyhow::Result;
 use log::*;
@@ -23,6 +25,8 @@ pub fn printk(fix: &mut Fixture) -> Result<()> {
         fix.vm.reg(A3),
         fix.vm.reg(A4)
     );
+
+    // FIXME: should return nr bytes printed
     fix.vm.ret(0);
     Ok(())
 }
@@ -60,7 +64,7 @@ pub fn memcmp(fix: &mut Fixture) -> Result<()> {
     fix.vm.mem.read(s2, &mut b2, PERM_READ)?;
 
     let mut r: i64 = 0;
-    
+
     for i in 0..len {
         if b1[i] < b2[i] {
             r = -1;
@@ -102,7 +106,7 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
         *b = v;
     }
     fix.vm.mem.write(base, &bytes, PERM_WRITE)?;
-    fix.vm.ret(0);
+    fix.vm.ret(base.0);
     Ok(())
 }
 
@@ -129,7 +133,14 @@ pub fn strncpy(fix: &mut Fixture) -> Result<()> {
     fix.vm.mem.write(dest, &buffer, PERM_WRITE)?;
 
     fix.vm.stats.instrs += ((buffer.len() * 3) / 8) as u64;
-    fix.vm.ret(0);
+    fix.vm.ret(dest.0);
+    Ok(())
+}
+
+pub fn i_size_read(fix: &mut Fixture) -> Result<()> {
+    debug!("in stubbed i_size_read");
+    let inode = read_guest::<INode>(&fix.vm.mem, Addr(fix.vm.reg(Reg::A0)))?;
+    fix.vm.ret(inode.nr_sectors);
     Ok(())
 }
 
@@ -182,6 +193,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.at_func("memset", Box::new(memset));
     let _ = fix.at_func("printk", Box::new(printk));
     let _ = fix.at_func("strncpy", Box::new(strncpy));
+    let _ = fix.at_func("i_size_read__", Box::new(i_size_read));
 
     rw_semaphore::rw_sem_stubs(fix)?;
     Ok(())

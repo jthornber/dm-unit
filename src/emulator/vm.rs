@@ -871,10 +871,12 @@ impl VM {
         todo!();
     }
 
-    fn run_riscv(&mut self, instrs: &[(Inst, u8)]) -> Result<()> {
+    fn run_riscv(&mut self, base: u64, instrs: &[(Inst, u8)]) -> Result<()> {
+        let mut addr = base;
         for (inst, width) in instrs {
             // debug!("{:08x}: {}", addr, inst);
             self.step(*inst, *width as u64)?;
+            addr += *width as u64;
         }
 
         Ok(())
@@ -893,30 +895,33 @@ impl VM {
         }
 
         bb.hits += 1;
+        if self.jit {
+            if bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
+                /*
+                debug!("riscv ({} instructions):", bb.instrs.len());
+                for (inst, _width) in &bb.instrs {
+                    debug!("    {}", inst);
+                }
+                */
 
-        if self.jit && bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
-            /*
-            debug!("riscv ({} instructions):", bb.instrs.len());
-            for (inst, _width) in &bb.instrs {
-                debug!("    {}", inst);
+                let ir = renumber(&to_ir(&bb.instrs, true));
+                /*
+                debug!("ir ({} instructions):", ir.len());
+                for inst in &ir {
+                    debug!("    {}", inst);
+                }
+                */
+
+                bb.ir = Some(ir);
             }
-            */
 
-            let ir = renumber(&to_ir(&bb.instrs, true));
-            /*
-            debug!("ir ({} instructions):", ir.len());
-            for inst in &ir {
-                debug!("    {}", inst);
+            if let Some(ir) = &bb.ir {
+                self.run_ir(ir)?;
+            } else {
+                self.run_riscv(bb.begin, &bb.instrs)?;
             }
-            */
-
-            bb.ir = Some(ir);
-        }
-
-        if let Some(ir) = &bb.ir {
-            self.run_ir(ir)?;
         } else {
-            self.run_riscv(&bb.instrs)?;
+            self.run_riscv(bb.begin, &bb.instrs)?;
         }
 
         Ok(())

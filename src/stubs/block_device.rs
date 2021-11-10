@@ -1,6 +1,5 @@
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::*;
 use std::io;
 use std::io::{Read, Write};
 
@@ -83,14 +82,13 @@ impl Guest for BlockDevice {
     }
 }
 
-// FIXME: use auto alloc
+// FIXME: remove in favour of auto_bdev
 pub fn mk_block_device(mem: &mut Memory, dev_node: u32, nr_sectors: u64) -> Result<Addr> {
     let inode = INode {
         nr_sectors,
         ro: false,
     };
     let inode_ptr = alloc_guest::<INode>(mem, &inode, PERM_READ | PERM_WRITE)?;
-    debug!("allocated inode at {:?}", inode_ptr);
     let bdev = BlockDevice {
         inode: inode_ptr,
         dev_node,
@@ -98,5 +96,21 @@ pub fn mk_block_device(mem: &mut Memory, dev_node: u32, nr_sectors: u64) -> Resu
     let bdev_ptr = alloc_guest::<BlockDevice>(mem, &bdev, PERM_READ | PERM_WRITE)?;
     Ok(bdev_ptr)
 }
+
+/*
+pub fn auto_bdev<'a>(fix: &'a mut Fixture, dev_node: u32, nr_sectors: u64) -> Result<(AutoGPtr<'a>, Addr)> {
+    let inode = INode {
+        nr_sectors,
+        ro: false,
+    };
+    let (mut fix, inode_ptr) = auto_guest::<INode>(&mut *fix, &inode, PERM_READ | PERM_WRITE)?;
+    let bdev = BlockDevice {
+        inode: inode_ptr,
+        dev_node,
+    };
+    let (mut fix, bdev_ptr) = auto_guest::<BlockDevice>(&mut *fix, &bdev, PERM_READ | PERM_WRITE)?;
+    Ok((fix, bdev_ptr))
+}
+*/
 
 //-------------------------------

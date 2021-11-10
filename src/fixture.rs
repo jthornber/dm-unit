@@ -1,8 +1,8 @@
 use crate::anymap::*;
-use crate::emulator::riscv::Reg;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_EXEC};
+use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
 
@@ -143,10 +143,10 @@ impl Fixture {
                     // downside is you cannot recurse a particular breakpoint.
 
                     /*
-                                        // This debug is expensive, but useful when bug hunting.
-                                        if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
-                                            debug!("calling stub for {}", global);
-                                        }
+                    // This debug is expensive, but useful when bug hunting.
+                    if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
+                        debug!("calling stub for {}", global);
+                    }
                     */
 
                     if let Some(callback) = self.breakpoints.remove(&loc) {
@@ -161,14 +161,23 @@ impl Fixture {
                     }
                 }
                 Err(VmErr::EBreak) => {
+                    debug!("hit ebreak at {:?}", self.vm.reg(Reg::PC));
                     if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
-                        warn!("unstubbed global called: {}", global);
+                        warn!(
+                            "Unexpected ebreak instruction.  This could be because:\n\
+     A BUG() function has been called.\n\
+     An unstubbed global called ({}).",
+                            global
+                        );
                         return Err(anyhow!("unstubbed global access '{}'", global));
                     } else {
                         return Err(VmErr::EBreak.into());
                     }
                 }
-                err => err?,
+                err => {
+                    debug!("\n{}", self.vm);
+                    err?
+                }
             }
         }
     }
