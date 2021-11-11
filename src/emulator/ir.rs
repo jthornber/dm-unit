@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::emulator::riscv::{self, *};
 use crate::emulator::memory::*;
+use crate::emulator::riscv::{self, *};
 
 /// The intermediate representation is vey similar to riscv, except:
 /// - it uses static single assignment, no registers/infinite registers.
@@ -408,14 +408,7 @@ impl Builder {
 
     // Pushes a sequence of instructions that implement a branch.
     // if rs1 <op> rs2 { pc += offset } else { pc += width }
-    fn branch(
-        &mut self,
-        rs1: &riscv::Reg,
-        rs2: &riscv::Reg,
-        offset: &i32,
-        op: TestOp,
-        width: i32,
-    ) {
+    fn branch(&mut self, rs1: &riscv::Reg, rs2: &riscv::Reg, offset: &i32, op: TestOp, width: i32) {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let (old_pc, new_pc) = self.mut_greg(&riscv::Reg::PC);

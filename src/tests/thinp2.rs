@@ -755,9 +755,15 @@ impl StatsTracker {
         })
     }
 
-    fn checkpoint(&mut self, fix: &mut Fixture) -> Result<()> {
-        let new_stats = tm_stats(&mut *fix, self.tm_ptr)?;
-        let stats = self.baseline.delta(&new_stats);
+    fn begin(&mut self, fix: &mut Fixture) -> Result<()> {
+        self.baseline = tm_stats(&mut *fix, self.tm_ptr)?;
+        self.nr_instructions = fix.vm.stats.instrs;
+        self.iteration += 1;
+        Ok(())
+    }
+
+    fn end(&mut self, fix: &mut Fixture) -> Result<()> {
+        let stats = tm_stats(&mut *fix, self.tm_ptr)?;
         let nr_instructions = fix.vm.stats.instrs;
         write!(
             self.csv,
@@ -769,9 +775,6 @@ impl StatsTracker {
             stats.nr_upgrade,
             stats.nr_write
         )?;
-        self.baseline = new_stats;
-        self.iteration += 1;
-        self.nr_instructions = nr_instructions;
         Ok(())
     }
 }
@@ -1655,7 +1658,7 @@ fn test_btree_insert(fix: &mut Fixture) -> Result<()> {
     stub_io_engine(fix)?;
     // trace_things(fix)?;
 
-    let nr_blocks = 1024;
+    let nr_blocks = 10240;
     let bdev = mk_block_device(&mut fix.vm.mem, 0, nr_blocks * 8)?;
 
     // FIXME: reduce nr_buffers
@@ -1668,17 +1671,21 @@ fn test_btree_insert(fix: &mut Fixture) -> Result<()> {
     let vt_context = Addr(0);
     btree_new(&mut *fix, btree_ptr, vt_ptr, vt_context, tm_ptr)?;
 
-    let mut tracker = StatsTracker::new("thin2-btree-insert.csv", tm_ptr)?;
+    let mut insert_tracker = StatsTracker::new("thin2-btree-insert.csv", tm_ptr)?;
+    let mut commit_tracker = StatsTracker::new("thin2-btree-commit.csv", tm_ptr)?;
 
-    let commit_interval = 1;
-    let count = 20000u64;
+    let commit_interval = 100;
+    let count = 80000u64;
     let mut commit_counter = commit_interval;
     for i in 0..count {
+        insert_tracker.begin(&mut *fix)?;
         btree_insert(&mut *fix, btree_ptr, i, &i)?;
-        tracker.checkpoint(&mut *fix)?;
+        insert_tracker.end(&mut *fix)?;
 
         if commit_counter == 0 {
+            commit_tracker.begin(&mut *fix)?;
             tm_commit(&mut *fix, tm_ptr, Addr(0))?;
+            commit_tracker.end(&mut *fix)?;
             check_no_pending_io(&mut *fix, btree_ptr)?;
             check_btree::<u64>(&mut *fix, btree_ptr)?;
             commit_counter = commit_interval;
@@ -1688,14 +1695,17 @@ fn test_btree_insert(fix: &mut Fixture) -> Result<()> {
     }
 
     if commit_counter != commit_interval {
+        debug!("committing");
+        commit_tracker.begin(&mut *fix)?;
         tm_commit(&mut *fix, tm_ptr, Addr(0))?;
+        commit_tracker.end(&mut *fix)?;
         check_btree::<u64>(&mut *fix, btree_ptr)?;
         check_no_pending_io(&mut *fix, btree_ptr)?;
     }
 
     for i in 0..count {
         let v = btree_lookup::<u64>(&mut *fix, btree_ptr, i)?.unwrap();
-        debug!("v = {}", v);
+        // debug!("v = {}", v);
         ensure!(v == i);
     }
 
