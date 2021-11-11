@@ -717,12 +717,12 @@ fn check_no_pending_io(fix: &mut Fixture, btree_ptr: Addr) -> Result<()> {
 }
 
 fn stub_io_engine(fix: &mut Fixture) -> Result<()> {
-    fix.at_func("io_init", Box::new(io_init))?;
-    fix.at_func("io_exit", Box::new(io_exit))?;
-    fix.at_func("io_nr_blocks", Box::new(io_nr_blocks))?;
-    fix.at_func("io_issue", Box::new(io_issue))?;
-    fix.at_func("io_wait_buffer", Box::new(io_wait_buffer))?;
-    // fix.at_func("io_wait", Box::new(io_wait))?;
+    fix.at_func("io_init", Arc::new(io_init))?;
+    fix.at_func("io_exit", Arc::new(io_exit))?;
+    fix.at_func("io_nr_blocks", Arc::new(io_nr_blocks))?;
+    fix.at_func("io_issue", Arc::new(io_issue))?;
+    fix.at_func("io_wait_buffer", Arc::new(io_wait_buffer))?;
+    // fix.at_func("io_wait", Arc::new(io_wait))?;
     Ok(())
 }
 
@@ -1120,7 +1120,7 @@ where
             *blocked = true;
             Err(anyhow!("in __wait"))
         };
-        fix.at_func("__wait", Box::new(my_wait))?;
+        fix.at_func("__wait", Arc::new(my_wait))?;
     }
 
     ensure!(func(fix).is_err());

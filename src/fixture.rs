@@ -20,7 +20,7 @@ use Reg::*;
 
 //-------------------------------
 
-type FixCallback = Box<dyn Fn(&mut Fixture) -> Result<()>>;
+type FixCallback = Arc<dyn Fn(&mut Fixture) -> Result<()>>;
 
 #[allow(dead_code)]
 pub struct Fixture {
@@ -219,7 +219,7 @@ impl Fixture {
                 Err(anyhow!("call complete, exiting"))
             };
 
-            self.bp_at_addr(exit_addr, Box::new(callback));
+            self.bp_at_addr(exit_addr, Arc::new(callback));
         }
 
         let result = self.run_vm();
@@ -293,7 +293,7 @@ impl Fixture {
             fix.vm.ret(v);
             Ok(())
         };
-        self.at_func(func, Box::new(callback))
+        self.at_func(func, Arc::new(callback))
     }
 
     // FIXME: there's got to be a better way to do this
@@ -352,8 +352,8 @@ impl Fixture {
             }
         };
 
-        self.at_func(func, Box::new(entry_callback))?;
-        self.bp_at_addr(trampoline, Box::new(exit_callback));
+        self.at_func(func, Arc::new(entry_callback))?;
+        self.bp_at_addr(trampoline, Arc::new(exit_callback));
 
         Ok(())
     }

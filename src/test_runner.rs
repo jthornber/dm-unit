@@ -256,19 +256,6 @@ impl<'a> TestRunner<'a> {
                 continue;
             }
 
-/*
-<<<<<<< HEAD
-            let kernel_dir = self.kernel_dir.clone();
-            let results = results.clone();
-            pool.execute(|| {
-                let start = Instant::now();
-                let components = path_components(&p).clone();
-                run_test(p, kernel_dir, t, results);
-                println!("{:?} {:?}", &components, (Instant::now() - start).as_secs());
-            });
-=======
-*/
-
             let mut modules = BTreeSet::new();
             for m in &t.kmodules {
                 modules.insert(m.name());

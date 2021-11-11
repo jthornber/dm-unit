@@ -1,5 +1,5 @@
-use crate::emulator::riscv::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
@@ -7,6 +7,7 @@ use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
+use std::sync::Arc;
 
 use Reg::*;
 
@@ -276,7 +277,7 @@ pub fn dm_cache_load_mappings(fix: &mut Fixture, cmd: Addr) -> Result<Vec<CacheM
         Ok(())
     };
 
-    fix.bp_at_addr(callback_ptr, Box::new(callback));
+    fix.bp_at_addr(callback_ptr, Arc::new(callback));
 
     fix.vm.set_reg(A0, cmd.0);
 

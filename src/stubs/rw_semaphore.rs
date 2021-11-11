@@ -2,11 +2,12 @@ use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
+use std::sync::Arc;
 
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use Reg::*;
 
@@ -118,7 +119,7 @@ fn down_write(fix: &mut Fixture) -> Result<()> {
 
         Ok(1)
     })?;
-    
+
     fix.vm.ret(0);
     Ok(())
 }
@@ -140,11 +141,11 @@ fn up_write(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn rw_sem_stubs(fix: &mut Fixture) -> Result<()> {
-    let _ = fix.at_func("__init_rwsem", Box::new(init_rwsem));
-    let _ = fix.at_func("down_read", Box::new(down_read));
-    let _ = fix.at_func("up_read", Box::new(up_read));
-    let _ = fix.at_func("down_write", Box::new(down_write));
-    let _ = fix.at_func("up_write", Box::new(up_write));
+    let _ = fix.at_func("__init_rwsem", Arc::new(init_rwsem));
+    let _ = fix.at_func("down_read", Arc::new(down_read));
+    let _ = fix.at_func("up_read", Arc::new(up_read));
+    let _ = fix.at_func("down_write", Arc::new(down_write));
+    let _ = fix.at_func("up_write", Arc::new(up_write));
     Ok(())
 }
 
