@@ -14,13 +14,13 @@ use std::ffi::CStr;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use Reg::*;
 
 //-------------------------------
 
-type FixCallback = Arc<dyn Fn(&mut Fixture) -> Result<()>>;
+type FixCallback = Arc<Mutex<dyn Fn(&mut Fixture) -> Result<()>>>;
 
 #[allow(dead_code)]
 pub struct Fixture {
@@ -151,7 +151,9 @@ impl Fixture {
                     */
 
                     if let Some(callback) = self.breakpoints.remove(&loc) {
-                        let r = (*callback)(self);
+                        let inner = callback.lock().unwrap();
+                        let r = (*inner)(self);
+                        drop(inner);
                         self.breakpoints.insert(loc, callback);
                         r?;
                     } else {
@@ -219,7 +221,7 @@ impl Fixture {
                 Err(anyhow!("call complete, exiting"))
             };
 
-            self.bp_at_addr(exit_addr, Arc::new(callback));
+            self.bp_at_addr(exit_addr, Arc::new(Mutex::new(callback)));
         }
 
         let result = self.run_vm();
@@ -293,7 +295,7 @@ impl Fixture {
             fix.vm.ret(v);
             Ok(())
         };
-        self.at_func(func, Arc::new(callback))
+        self.at_func(func, Arc::new(Mutex::new(callback)))
     }
 
     // FIXME: there's got to be a better way to do this
@@ -352,8 +354,8 @@ impl Fixture {
             }
         };
 
-        self.at_func(func, Arc::new(entry_callback))?;
-        self.bp_at_addr(trampoline, Arc::new(exit_callback));
+        self.at_func(func, Arc::new(Mutex::new(entry_callback)))?;
+        self.bp_at_addr(trampoline, Arc::new(Mutex::new(exit_callback)));
 
         Ok(())
     }

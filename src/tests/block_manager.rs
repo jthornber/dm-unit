@@ -7,7 +7,7 @@ use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};
 use libc::ENOMEM;
-use std::sync::Arc;
+use std::sync::{Mutex, Arc};
 
 use Reg::*;
 
@@ -21,7 +21,7 @@ fn kmalloc_nomem(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 fn test_create_nomem(fix: &mut Fixture) -> Result<()> {
-    fix.at_func("__kmalloc", Arc::new(kmalloc_nomem))?;
+    fix.at_func("__kmalloc", Arc::new(Mutex::new(kmalloc_nomem)))?;
     fix.call("dm_block_manager_create")?;
     assert!(fix.vm.reg(A0) as i32 == -ENOMEM);
     Ok(())

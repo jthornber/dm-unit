@@ -7,7 +7,7 @@ use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use Reg::*;
 
@@ -277,7 +277,7 @@ pub fn dm_cache_load_mappings(fix: &mut Fixture, cmd: Addr) -> Result<Vec<CacheM
         Ok(())
     };
 
-    fix.bp_at_addr(callback_ptr, Arc::new(callback));
+    fix.bp_at_addr(callback_ptr, Arc::new(Mutex::new(callback)));
 
     fix.vm.set_reg(A0, cmd.0);
 
