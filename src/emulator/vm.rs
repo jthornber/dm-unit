@@ -1,39 +1,49 @@
 use log::*;
-use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
-use crate::emulator::riscv::*;
 use crate::emulator::ir::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
 
 //-----------------------------
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct InstCache {
-    basic_blocks: BTreeMap<u64, Rc<RefCell<BasicBlock>>>,
+    // FIXME: add in next block cache
+    basic_blocks: Vec<Arc<BasicBlock>>,
+    by_addr: BTreeMap<u64, usize>,
 }
 
 impl InstCache {
     pub fn new() -> Self {
         InstCache {
-            basic_blocks: BTreeMap::new(),
+            basic_blocks: Vec::with_capacity(64),
+            by_addr: BTreeMap::new(),
         }
     }
 
     /// If loc occurs in any other block (eg, jumping back in a loop),
     /// that that block will be truncated.
-    pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Rc<RefCell<BasicBlock>> {
-        let r = Rc::new(RefCell::new(bb));
-        self.basic_blocks.insert(loc, r.clone());
-        r
+    pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Arc<BasicBlock> {
+        let index = self.basic_blocks.len();
+        self.by_addr.insert(loc, index);
+        let bb = Arc::new(bb);
+        self.basic_blocks.push(bb.clone());
+        bb
     }
 
-    pub fn get(&self, loc: u64) -> Option<Rc<RefCell<BasicBlock>>> {
-        self.basic_blocks.get(&loc).cloned()
+    pub fn get(&mut self, loc: u64) -> Option<Arc<BasicBlock>> {
+        match self.by_addr.get(&loc) {
+            None => None,
+            Some(index) => {
+                let bb = self.basic_blocks.get(*index).unwrap();
+                Some(bb.clone())
+            }
+        }
     }
 
     /// Removes any blocks that contain loc (there can be only one).
@@ -52,10 +62,12 @@ pub struct BBStats {
 
 use Reg::*;
 
+#[derive(Clone)]
 pub struct Stats {
     pub instrs: u64,
 }
 
+#[derive(Clone)]
 pub struct VM {
     reg: Vec<u64>,
     pub mem: Memory,
@@ -828,44 +840,45 @@ impl VM {
         Ok(())
     }
 
-    fn find_bb(&mut self) -> Result<Rc<RefCell<BasicBlock>>> {
+    fn find_bb(&mut self) -> Result<Arc<BasicBlock>> {
         let pc = self.pc();
-        let bb = match self.inst_cache.get(pc.0) {
-            None => {
-                let bb = self
-                    .mem
-                    .read_some(pc, PERM_EXEC, |bytes| {
-                        decode_basic_block(pc.0, bytes, 100, &self.breakpoints)
-                            .map_err(VmErr::DecodeError)
-                    })
-                    .map_err(VmErr::BadAccess)?;
 
-                self.inst_cache.insert(pc.0, bb?)
-            }
-            Some(bb) => bb,
-        };
+        let bb = self.inst_cache.get(pc.0);
+        if let Some(bb) = bb {
+            return Ok(bb);
+        }
 
-        Ok(bb)
+        drop(bb);
+
+        let bb = self
+            .mem
+            .read_some(pc, PERM_EXEC, |bytes| {
+                decode_basic_block(pc.0, bytes, 100, &self.breakpoints).map_err(VmErr::DecodeError)
+            })
+            .map_err(VmErr::BadAccess)?;
+
+        Ok(self.inst_cache.insert(pc.0, bb?))
     }
 
-    fn follow_or_find_bb(
-        &mut self,
-        prev_bb: &Option<Rc<RefCell<BasicBlock>>>,
-    ) -> Result<Rc<RefCell<BasicBlock>>> {
+/*
+    fn follow_or_find_bb(&mut self) -> Result<Arc<BasicBlock>> {
         let pc = self.pc();
+
+        /*
         if let Some(prev_bb) = prev_bb {
-            let prev_bb = prev_bb.borrow();
             if let Some(next) = prev_bb.next.upgrade() {
-                if next.borrow().begin == pc.0 {
+                if next.lock().unwrap().begin == pc.0 {
                     self.next_bb_hits += 1;
                     return Ok(next);
                 }
             }
         }
+        */
 
         self.next_bb_misses += 1;
         self.find_bb()
     }
+    */
 
     fn run_ir(&mut self, _ir: &[IR]) -> Result<()> {
         todo!();
@@ -882,9 +895,8 @@ impl VM {
         Ok(())
     }
 
-    fn exec_bb(&mut self, bb: &Rc<RefCell<BasicBlock>>) -> Result<()> {
+    fn exec_bb(&mut self, bb: &BasicBlock) -> Result<()> {
         let pc = self.pc();
-        let mut bb = bb.borrow_mut();
         if bb.breakpoint {
             if self.last_bp.is_none() || self.last_bp.unwrap() != pc {
                 self.last_bp = Some(pc);
@@ -894,6 +906,9 @@ impl VM {
             self.last_bp = None;
         }
 
+        self.run_riscv(bb.begin, &bb.instrs)?;
+
+/*
         bb.hits += 1;
         if self.jit {
             if bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
@@ -922,23 +937,16 @@ impl VM {
             }
         } else {
             self.run_riscv(bb.begin, &bb.instrs)?;
-        }
+        // }
+            */
 
         Ok(())
     }
 
     pub fn run(&mut self) -> Result<()> {
-        let mut prev_bb: Option<Rc<RefCell<BasicBlock>>> = None;
         loop {
-            let bb = self.follow_or_find_bb(&prev_bb)?;
-
-            if let Some(prev_bb) = prev_bb {
-                let mut prev_bb = prev_bb.borrow_mut();
-                prev_bb.next = Rc::downgrade(&bb);
-            }
-
+            let bb = self.find_bb()?;
             self.exec_bb(&bb)?;
-            prev_bb = Some(bb);
         }
     }
 
@@ -955,8 +963,7 @@ impl VM {
     pub fn get_hot_basic_blocks(&self) -> Vec<BBStats> {
         let mut stats = Vec::with_capacity(self.inst_cache.basic_blocks.len());
 
-        for (_, bb) in &self.inst_cache.basic_blocks {
-            let bb = bb.borrow();
+        for bb in &self.inst_cache.basic_blocks {
             stats.push(BBStats {
                 begin: Addr(bb.begin),
                 end: Addr(bb.end),
@@ -969,14 +976,18 @@ impl VM {
     }
 
     pub fn get_bb_stats(&self, ptr: Addr) -> Option<BBStats> {
-        self.inst_cache.basic_blocks.get(&ptr.0).map(|bb| {
-            let bb = bb.borrow();
-            BBStats {
+        None
+
+            /*
+        self.inst_cache
+            .basic_blocks
+            .get_mut(ptr.0 as usize)
+            .map(|bb| BBStats {
                 begin: Addr(bb.begin),
                 end: Addr(bb.end),
                 hits: bb.hits,
-            }
-        })
+            })
+            */
     }
 }
 

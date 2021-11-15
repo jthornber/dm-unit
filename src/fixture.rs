@@ -23,6 +23,7 @@ use Reg::*;
 type FixCallback = Arc<Mutex<dyn Fn(&mut Fixture) -> Result<()>>>;
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct Fixture {
     pub vm: VM,
 

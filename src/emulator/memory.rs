@@ -210,20 +210,22 @@ fn copy_mmaps(mmaps: &RBTree<MMapAdapter>) -> RBTree<MMapAdapter> {
     ret
 }
 
+impl Clone for Memory {
+    fn clone(&self) -> Self {
+        Memory {
+            mmaps: copy_mmaps(&self.mmaps),
+            heap: self.heap.clone(),
+            allocations: self.allocations.clone(),
+        }
+    }
+}
+
 impl Memory {
     pub fn new(heap_begin: Addr, heap_end: Addr) -> Self {
         Memory {
             mmaps: RBTree::new(MMapAdapter::new()),
             heap: Heap::new(heap_begin, heap_end),
             allocations: BTreeMap::new(),
-        }
-    }
-
-    pub fn snapshot(&self) -> Self {
-        Memory {
-            mmaps: copy_mmaps(&self.mmaps),
-            heap: self.heap.clone(),
-            allocations: self.allocations.clone(),
         }
     }
 

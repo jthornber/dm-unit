@@ -272,7 +272,7 @@ impl<'a> TestRunner<'a> {
                 Ok((loader_info, mem)) => {
                     let results = results.clone();
                     let loader_info = loader_info.clone();
-                    let mem = mem.snapshot();
+                    let mem = mem.clone();
                     let jit = self.jit;
 
                     pool.execute(move || {

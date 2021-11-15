@@ -1,10 +1,10 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use log::*;
-use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Cursor;
 use std::rc::Weak;
+use std::sync::Mutex;
 
 use crate::emulator::ir::IR;
 
@@ -1444,10 +1444,6 @@ pub struct BasicBlock {
 
     pub instrs: Vec<(Inst, u8)>,
     pub ir: Option<Vec<IR>>,
-
-    // The bb that was executed after this one, might save
-    // a lookup in the bb cache.
-    pub next: Weak<RefCell<BasicBlock>>,
 }
 
 /// Decodes a basic block.  Returns an error if it can't decode at least one instruction.
@@ -1508,7 +1504,6 @@ pub fn decode_basic_block(
         breakpoint: is_bp,
         instrs,
         ir: None,
-        next: Weak::new(),
     })
 }
 
