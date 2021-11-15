@@ -40,6 +40,8 @@ pub struct Fixture {
     pub contexts: AnyMap<Addr>,
 }
 
+unsafe impl Send for Fixture {}
+
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct KernelModule {
@@ -226,7 +228,7 @@ impl Fixture {
         }
 
         let result = self.run_vm();
-        self.vm.mem.unmap(exit_addr)?;
+        self.vm.mem.free(exit_addr)?;
         match result {
             Ok(_) => {
                 // Not sure how we can get here
