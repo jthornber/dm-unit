@@ -1,10 +1,9 @@
-use intrusive_collections::intrusive_adapter;
-use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
 use log::*;
 use std::cell::{Ref, RefCell, RefMut};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{Bound, BTreeMap, BTreeSet};
 use std::fmt;
 use std::result;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::primitive::Primitive;
@@ -161,34 +160,12 @@ impl MMap {
     }
 }
 
-struct MMapNode {
-    link: RBTreeLink,
-    mmap: RefCell<MMap>,
-}
-
-impl MMapNode {
-    fn new(mm: MMap) -> Self {
-        MMapNode {
-            link: RBTreeLink::new(),
-            mmap: RefCell::new(mm),
-        }
-    }
-}
-
-intrusive_adapter!(MMapAdapter = Box<MMapNode>: MMapNode { link: RBTreeLink });
-impl<'a> KeyAdapter<'a> for MMapAdapter {
-    type Key = u64;
-    fn get_key(&self, node: &'a MMapNode) -> u64 {
-        node.mmap.borrow().begin
-    }
-}
-
 //-------------------------------------
 
 /// Manages memory for the vm.  Tracks permissions at the byte level.
 /// Checks memory has been initialised before it's read.
 pub struct Memory {
-    mmaps: RBTree<MMapAdapter>,
+    mmaps: BTreeMap<u64, Arc<MMap>>,
 
     // We always want a heap, so I'm embedding it in the mmu.
     heap: Heap,
@@ -197,23 +174,10 @@ pub struct Memory {
     allocations: BTreeMap<u64, (u64, usize)>,
 }
 
-fn copy_mmaps(mmaps: &RBTree<MMapAdapter>) -> RBTree<MMapAdapter> {
-    let mut cur = mmaps.front();
-    let mut ret = RBTree::new(MMapAdapter::new());
-
-    while let Some(ops) = cur.get() {
-        let mm = ops.mmap.borrow();
-        ret.insert(Box::new(MMapNode::new((*mm).clone())));
-        cur.move_next();
-    }
-
-    ret
-}
-
 impl Clone for Memory {
     fn clone(&self) -> Self {
         Memory {
-            mmaps: copy_mmaps(&self.mmaps),
+            mmaps: self.mmaps.clone(),
             heap: self.heap.clone(),
             allocations: self.allocations.clone(),
         }
@@ -223,10 +187,14 @@ impl Clone for Memory {
 impl Memory {
     pub fn new(heap_begin: Addr, heap_end: Addr) -> Self {
         Memory {
-            mmaps: RBTree::new(MMapAdapter::new()),
+            mmaps: BTreeMap::new(),
             heap: Heap::new(heap_begin, heap_end),
             allocations: BTreeMap::new(),
         }
+    }
+
+    pub fn heap_start(&self) -> Addr {
+        Addr(self.heap.base)
     }
 
     /*
@@ -260,23 +228,22 @@ impl Memory {
     */
 
     fn insert_mm(&mut self, mm: MMap) {
-        self.mmaps.insert(Box::new(MMapNode::new(mm)));
+        self.mmaps.insert(mm.begin, Arc::new(mm));
     }
 
     /// Remove an mmapped area.
     pub fn unmap(&mut self, begin: Addr) -> Result<Vec<u8>> {
-        let mut cur = self.mmaps.find_mut(&begin.0);
+        match self.mmaps.remove(&begin.0) {
+            None =>
+            Err(MemErr::BadFree(begin)),
+            Some(mut mmap) => {
+                let mut bytes = Vec::new();
 
-        if cur.is_null() {
-            Err(MemErr::BadFree(begin))
-        } else {
-            let mut bytes = Vec::new();
-
-            let mut mm = cur.get().unwrap().mmap.borrow_mut();
-            std::mem::swap(&mut mm.bytes, &mut bytes);
-            drop(mm);
-            cur.remove();
-            Ok(bytes)
+                let mut mm = Arc::make_mut(&mut mmap);
+                std::mem::swap(&mut mm.bytes, &mut bytes);
+                drop(mm);
+                Ok(bytes)
+            }
         }
     }
 
@@ -306,45 +273,42 @@ impl Memory {
 
     /// Gets the mmap that contains the given range or returns an error.  Assumes
     /// a single mmap covers the whole range.
-    fn get_mmap(&self, begin: u64, end: u64, perms: u8) -> Result<Ref<MMap>> {
-        let cursor = self.mmaps.upper_bound(Bound::Included(&begin));
+    fn get_mmap(&self, begin: u64, end: u64, perms: u8) -> Result<&MMap> {
+        match self.mmaps.range((Bound::Unbounded, Bound::Included(begin))).next_back() {
+            None => {
+                Err(MemErr::UnmappedRegion(Addr(begin), perms))
+            },
+            Some(mm) => {
+                // begin and end must be within the region
+                let mm = mm.1;
+                if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
+                    return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+                }
 
-        if cursor.is_null() {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+                mm.check_perms(begin, perms)?;
+                Ok(&mm)
+            }
         }
-
-        let mm = cursor.get().unwrap().mmap.borrow();
-
-        // begin and end must be within the region
-        if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-        }
-
-        mm.check_perms(begin, perms)?;
-
-        Ok(mm)
     }
 
-    fn get_mut_mmap<F, V>(&mut self, begin: u64, end: u64, perms: u8, func: F) -> Result<V>
-    where
-        F: FnOnce(RefMut<MMap>) -> Result<V>,
-    {
-        let cursor = self.mmaps.upper_bound_mut(Bound::Included(&begin));
+    fn get_mmap_mut(&mut self, begin: u64, end: u64, perms: u8) -> Result<&mut MMap> {
+        match self.mmaps.range_mut((Bound::Unbounded, Bound::Included(begin))).next_back() {
+            None => {
+                Err(MemErr::UnmappedRegion(Addr(begin), perms))
+            },
+            Some(mut mm) => {
+                // begin and end must be within the region
+                let mm_: &mut Arc<MMap> = &mut mm.1;
+                if (begin < mm_.begin) || (begin >= mm_.end) || (end < mm_.begin) || (end > mm_.end) {
+                    return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+                }
 
-        if cursor.is_null() {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+                mm_.check_perms(begin, perms)?;
+                Ok(Arc::make_mut(mm.1))
+            }
         }
-
-        let mm = cursor.get().unwrap().mmap.borrow_mut();
-
-        // begin and end must be within the region
-        if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-        }
-
-        mm.check_perms(begin, perms)?;
-        func(mm)
     }
+
 
     /// Checks that a memory region is mapped with the particular permissions.
     pub fn check_perms(&self, begin: Addr, end: Addr, perms: u8) -> Result<()> {
@@ -357,7 +321,8 @@ impl Memory {
     pub fn change_perms(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<u8> {
         let begin = begin.0;
         let end = end.0;
-        self.get_mut_mmap(begin, end, 0, |mut mm| mm.change_perms(begin, end, perms))
+        let mm = self.get_mmap_mut(begin, end, 0)?;
+        Ok(mm.change_perms(begin, end, perms)?)
     }
 
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
@@ -392,11 +357,9 @@ impl Memory {
         let begin = begin.0;
         let end = begin + (bytes.len() as u64);
 
-        self.get_mut_mmap(begin, end, perms, |mut mm| {
-            let len = end - begin;
-            mm.write(begin, &bytes[0..(len as usize)], perms)?;
-            Ok(())
-        })
+        let mm = self.get_mmap_mut(begin, end, perms)?;
+        let len = end - begin;
+        Ok(mm.write(begin, &bytes[0..(len as usize)], perms)?)
     }
 
     /// Zeroes a part of a single mmapped region.  Similar to write, but faster.
@@ -404,10 +367,9 @@ impl Memory {
         let begin = begin.0;
         let end = end.0;
 
-        self.get_mut_mmap(begin, end, perms, |mut mm| {
-            mm.zero(begin, end, perms)?;
-            Ok(())
-        })
+        let mm = self.get_mmap_mut(begin, end, perms)?;
+        mm.zero(begin, end, perms)?;
+        Ok(())
     }
 
     /// Clears the 'written' bits for a region.  Used by the heap code when
@@ -416,10 +378,9 @@ impl Memory {
         let begin = begin.0;
         let end = end.0;
 
-        self.get_mut_mmap(begin, end, 0, |mut mm| {
-            mm.forget(begin, end);
-            Ok(())
-        })
+        let mm = self.get_mmap_mut(begin, end, 0)?;
+        mm.forget(begin, end);
+        Ok(())
     }
 
     /// Accesses a primitive.  `perm` checked.
@@ -439,17 +400,15 @@ impl Memory {
 
     pub fn write_out<T: Primitive>(&mut self, v: T, begin: Addr, perms: u8) -> Result<()> {
         let begin = begin.0;
-        self.get_mut_mmap(begin, begin + 1, perms, |mut mm| {
-            let offset = (begin - mm.begin) as usize;
-            let bytes = &mut mm.bytes[offset..];
+        let mm = self.get_mmap_mut(begin, begin + 1, perms)?;
+        let offset = (begin - mm.begin) as usize;
+        let bytes = &mut mm.bytes[offset..];
 
-            if bytes.len() < ::core::mem::size_of::<T>() {
-                return Err(MemErr::BadPerms(Addr(begin), perms));
-            }
+        if bytes.len() < ::core::mem::size_of::<T>() {
+            return Err(MemErr::BadPerms(Addr(begin), perms));
+        }
 
-            unsafe { core::ptr::write_unaligned(bytes.as_ptr() as *mut T, v) };
-            Ok(())
-        })?;
+        unsafe { core::ptr::write_unaligned(bytes.as_ptr() as *mut T, v) };
         Ok(())
     }
 
