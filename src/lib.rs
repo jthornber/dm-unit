@@ -15,6 +15,7 @@ pub mod emulator;
 pub mod fixture;
 pub mod guest;
 pub mod primitive;
+pub mod snapshot;
 pub mod stats;
 pub mod stubs;
 pub mod test_runner;

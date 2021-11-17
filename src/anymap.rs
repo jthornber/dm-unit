@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
+use crate::snapshot::Snapshot;
+
 //-------------------------------
 
 // All borrowed from the egui library.
@@ -10,7 +12,7 @@ use std::hash::Hash;
 /// A cloneable Any
 struct AnyEntry {
     value: Box<dyn Any + 'static>,
-    clone_fn: fn(&Box<dyn Any + 'static>) -> Box<dyn Any + 'static>,
+    snap_fn: fn(&Box<dyn Any + 'static>) -> Box<dyn Any + 'static>,
 }
 
 impl fmt::Debug for AnyEntry {
@@ -21,26 +23,35 @@ impl fmt::Debug for AnyEntry {
     }
 }
 
-impl Clone for AnyEntry {
-    fn clone(&self) -> Self {
+impl Snapshot for AnyEntry {
+    fn snapshot(&self) -> Self {
         AnyEntry {
-            value: (self.clone_fn)(&self.value),
-            clone_fn: self.clone_fn,
+            value: (self.snap_fn)(&self.value),
+            snap_fn: self.snap_fn,
         }
     }
 }
 
-pub trait AnyMapTrait: 'static + Any + Clone {}
+impl Clone for AnyEntry {
+    fn clone(&self) -> Self {
+        AnyEntry {
+            value: (self.snap_fn)(&self.value),
+            snap_fn: self.snap_fn,
+        }
+    }
+}
 
-impl<T: 'static + Any + Clone> AnyMapTrait for T {}
+pub trait AnyMapTrait: 'static + Any + Snapshot {}
+
+impl<T: 'static + Any + Snapshot> AnyMapTrait for T {}
 
 impl AnyEntry {
     pub fn new<T: AnyMapTrait>(t: T) -> Self {
         AnyEntry {
             value: Box::new(t),
-            clone_fn: |x| {
+            snap_fn: |x| {
                 let x = x.downcast_ref::<T>().unwrap();
-                Box::new(x.clone())
+                Box::new(x.snapshot())
             },
         }
     }

@@ -3,17 +3,21 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use libc::{ENODATA, ENOSPC};
 use log::*;
 use nom::{number::complete::*, IResult};
+use rand::prelude::*;
+use rand::SeedableRng;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use thinp::pdata::unpack::*;
+use threadpool::ThreadPool;
 
 use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
+use crate::snapshot::Snapshot;
 use crate::stubs::block_device::*;
 use crate::stubs::*;
 use crate::test_runner::*;
@@ -557,10 +561,17 @@ fn buffer_data(fix: &mut Fixture, buf_ptr: Addr) -> Result<Addr> {
 
 //-------------------------------
 
+#[derive(Clone)]
 struct FakeIoEngine {
     nr_blocks: usize,
     data: BTreeMap<u64, Vec<u8>>,
     pending: BTreeMap<Addr, u64>,
+}
+
+impl Snapshot for FakeIoEngine {
+    fn snapshot(&self) -> Self {
+        self.clone()
+    }
 }
 
 impl FakeIoEngine {
@@ -1694,6 +1705,25 @@ fn test_btree_insert(fix: &mut Fixture) -> Result<()> {
         }
     }
 
+    // FIXME: remove this
+    {
+        // Quick check that fixture snapshots are working
+        let mut fix2 = fix.clone();
+        let new_key = 12347890;
+        fix2.vm.reset_block_hash();
+        btree_insert(&mut fix2, btree_ptr, new_key, &17)?;
+        ensure!(btree_lookup::<u64>(&mut *fix, btree_ptr, new_key)?.is_none());
+        ensure!(btree_lookup::<u64>(&mut fix2, btree_ptr, new_key)?.is_some());
+
+        debug!("block hash: {:?}", fix2.vm.block_hash);
+
+        let mut fix2 = fix.clone();
+        // let new_key = 12347890; // Similar to previous key, seeing if block hash is the same
+        fix2.vm.reset_block_hash();
+        btree_insert(&mut fix2, btree_ptr, new_key, &17)?;
+        debug!("block hash: {:?}", fix2.vm.block_hash);
+    }
+
     if commit_counter != commit_interval {
         debug!("committing");
         commit_tracker.begin(&mut *fix)?;
@@ -1708,6 +1738,85 @@ fn test_btree_insert(fix: &mut Fixture) -> Result<()> {
         // debug!("v = {}", v);
         ensure!(v == i);
     }
+
+    Ok(())
+}
+
+//-------------------------------
+
+enum FuzzAction {
+    Insert(u64),
+}
+
+fn fuzz_insert_(fix: Fixture, seed: u64, btree_ptr: Addr) -> Result<()> {
+    let mut children: BTreeMap<u32, Vec<u64>> = BTreeMap::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    for _ in 0..1000 {
+        let mut fix2 = fix.clone();
+        let new_key = rng.gen_range(0..1000);
+        fix2.vm.reset_block_hash();
+        btree_insert(&mut fix2, btree_ptr, new_key, &17)?;
+
+        children
+            .entry(fix2.vm.block_hash)
+            .or_insert(vec![new_key]);
+    }
+
+    debug!("found {} unique paths", children.len());
+
+/*
+    for v in children.values() {
+        debug!("key {:?}", v.0);
+    }
+    */
+
+    Ok(())
+}
+
+fn fuzz_insert(fix: Fixture, seed: u64, btree_ptr: Addr) {
+    let _ = fuzz_insert_(fix, seed, btree_ptr);
+}
+
+fn test_fuzz(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    riw_globals(fix)?;
+    stub_io_engine(fix)?;
+    // trace_things(fix)?;
+
+    let nr_blocks = 10240;
+    let bdev = mk_block_device(&mut fix.vm.mem, 0, nr_blocks * 8)?;
+
+    // FIXME: reduce nr_buffers
+    let (mut fix, tm_ptr) = auto_tm(&mut *fix, bdev, nr_blocks)?;
+
+    let vt = ValueType::<u64>::new(8, Addr(0), Addr(0), Addr(0));
+
+    let (mut fix, vt_ptr) = auto_guest(&mut *fix, &vt, PERM_READ | PERM_WRITE)?;
+    let (mut fix, btree_ptr) = auto_alloc(&mut *fix, BTree::<u64>::guest_len())?;
+    let vt_context = Addr(0);
+    btree_new(&mut *fix, btree_ptr, vt_ptr, vt_context, tm_ptr)?;
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    // Maps block hash to key that was inserted
+    let mut children: BTreeMap<u32, (Vec<u64>, Fixture)> = BTreeMap::new();
+
+    for i in 0..400u64 {
+        btree_insert(&mut *fix, btree_ptr, i, &17)?;
+    }
+
+    let nr_jobs = 128;
+    let nr_threads = 128;
+    let pool = ThreadPool::new(nr_threads);
+
+    for _ in 0..nr_jobs {
+        let fix: Fixture = (*fix).clone();
+        let seed = rng.gen_range(0..1000000);
+        pool.execute(move || {
+            fuzz_insert(fix, seed, btree_ptr);
+        });
+    }
+
+    pool.join();
 
     Ok(())
 }
@@ -1787,6 +1896,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             "btree/",
             test!("new", test_btree_new)
             test!("insert", test_btree_insert)
+            test!("fuzz", test_fuzz)
         }
     }
 

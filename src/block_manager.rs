@@ -2,6 +2,7 @@ use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::emulator::memory::*;
+use crate::snapshot::Snapshot;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -19,6 +20,7 @@ use thinp::io_engine::{IoEngine, BLOCK_SIZE};
 //-------------------------------
 
 #[allow(dead_code)]
+#[derive(Clone)]
 struct Validator {
     name: Addr,
     prepare: Addr,
@@ -49,6 +51,7 @@ impl Guest for Validator {
 
 //-------------------------------
 
+#[derive(Clone)]
 pub struct GBlock {
     pub bm_ptr: Addr,
     pub loc: u64,
@@ -111,6 +114,7 @@ pub enum Lock {
     },
 }
 
+#[derive(Clone)]
 pub struct BMInner {
     bm_ptr: Addr,
     nr_blocks: u64,
@@ -702,6 +706,15 @@ impl BMInner {
 
 pub struct BlockManager {
     inner: Mutex<BMInner>,
+}
+
+impl Snapshot for BlockManager {
+    fn snapshot(&self) -> Self {
+        let inner = self.inner.lock().unwrap();
+        BlockManager {
+            inner: Mutex::new(inner.clone()),
+        }
+    }
 }
 
 impl BlockManager {

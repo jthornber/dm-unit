@@ -2,6 +2,7 @@ use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
+use crate::snapshot::Snapshot;
 
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -244,6 +245,12 @@ pub struct CacheMapping {
     pub oblock: u64,
     pub dirty: bool,
     pub hint: Option<u32>,
+}
+
+impl Snapshot for CacheMapping {
+    fn snapshot(&self) -> Self {
+        self.clone()
+    }
 }
 
 pub fn dm_cache_load_mappings(fix: &mut Fixture, cmd: Addr) -> Result<Vec<CacheMapping>> {

@@ -78,6 +78,10 @@ pub struct VM {
     next_bb_hits: u64,
     next_bb_misses: u64,
     jit: bool,
+
+    // This hash gets updated with the address of every basic block
+    // executed.
+    pub block_hash: u32,
 }
 
 impl Drop for VM {
@@ -85,7 +89,7 @@ impl Drop for VM {
         let hits = self.next_bb_hits as f64;
         let total = (self.next_bb_misses + self.next_bb_hits) as f64;
         let percent = (hits * 100.0) / total;
-        debug!("next bb hits {:.0}%", percent);
+        // debug!("next bb hits {:.0}%", percent);
     }
 }
 
@@ -175,7 +179,12 @@ impl VM {
             next_bb_hits: 0,
             next_bb_misses: 0,
             jit,
+            block_hash: 0,
         }
+    }
+
+    pub fn reset_block_hash(&mut self) {
+        self.block_hash = 0;
     }
 
     pub fn setup_stack(&mut self, size: u64) -> Result<()> {
@@ -847,7 +856,6 @@ impl VM {
         if let Some(bb) = bb {
             return Ok(bb);
         }
-
         drop(bb);
 
         let bb = self
@@ -859,26 +867,6 @@ impl VM {
 
         Ok(self.inst_cache.insert(pc.0, bb?))
     }
-
-/*
-    fn follow_or_find_bb(&mut self) -> Result<Arc<BasicBlock>> {
-        let pc = self.pc();
-
-        /*
-        if let Some(prev_bb) = prev_bb {
-            if let Some(next) = prev_bb.next.upgrade() {
-                if next.lock().unwrap().begin == pc.0 {
-                    self.next_bb_hits += 1;
-                    return Ok(next);
-                }
-            }
-        }
-        */
-
-        self.next_bb_misses += 1;
-        self.find_bb()
-    }
-    */
 
     fn run_ir(&mut self, _ir: &[IR]) -> Result<()> {
         todo!();
@@ -908,7 +896,7 @@ impl VM {
 
         self.run_riscv(bb.begin, &bb.instrs)?;
 
-/*
+        /*
         bb.hits += 1;
         if self.jit {
             if bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
@@ -943,9 +931,21 @@ impl VM {
         Ok(())
     }
 
+    pub fn track_bb(&mut self, addr: u64) {
+        // I only want to track basic blocks that are in the kernel text
+        // segment.  We ignore the trampolines on the heap for example.
+        if addr < self.mem.heap_start().0 {
+            // debug!("bb 0x{:x}", addr);
+            use std::mem::transmute;
+            let bytes: [u8; 8] = unsafe { transmute(addr.to_le()) };
+            self.block_hash = crc32c::crc32c_append(self.block_hash, &bytes);
+        }
+    }
+
     pub fn run(&mut self) -> Result<()> {
         loop {
             let bb = self.find_bb()?;
+            self.track_bb(bb.begin);
             self.exec_bb(&bb)?;
         }
     }
@@ -967,7 +967,7 @@ impl VM {
             stats.push(BBStats {
                 begin: Addr(bb.begin),
                 end: Addr(bb.end),
-                hits: bb.hits,
+                hits: 0,
             });
         }
 
@@ -978,7 +978,7 @@ impl VM {
     pub fn get_bb_stats(&self, ptr: Addr) -> Option<BBStats> {
         None
 
-            /*
+        /*
         self.inst_cache
             .basic_blocks
             .get_mut(ptr.0 as usize)
