@@ -564,7 +564,7 @@ fn buffer_data(fix: &mut Fixture, buf_ptr: Addr) -> Result<Addr> {
 #[derive(Clone)]
 struct FakeIoEngine {
     nr_blocks: usize,
-    data: BTreeMap<u64, Vec<u8>>,
+    data: BTreeMap<u64, Arc<Vec<u8>>>,
     pending: BTreeMap<Addr, u64>,
 }
 
@@ -659,14 +659,22 @@ fn exec_io(fix: &mut Fixture, engine: &mut FakeIoEngine, buf_ptr: Addr, io_dir: 
     match io_dir {
         0 => {
             // Read
-            let on_disk = engine.data.entry(loc).or_insert_with(|| vec![0u8; 4096]);
+            let on_disk = engine
+                .data
+                .entry(loc)
+                .or_insert_with(|| Arc::new(vec![0u8; 4096]));
             fix.vm.mem.write(data, on_disk, PERM_READ | PERM_WRITE)?;
             Ok(())
         }
         1 => {
             // Write
-            let on_disk = engine.data.entry(loc).or_insert_with(|| vec![0u8; 4096]);
-            fix.vm.mem.read(data, on_disk, PERM_READ | PERM_WRITE)?;
+            let on_disk = engine
+                .data
+                .entry(loc)
+                .or_insert_with(|| Arc::new(vec![0u8; 4096]));
+            fix.vm
+                .mem
+                .read(data, &mut Arc::make_mut(on_disk), PERM_READ | PERM_WRITE)?;
             Ok(())
         }
         _ => {
@@ -1059,7 +1067,7 @@ fn check_node<V: Unpack>(
     let data = engine.data.get(&loc).unwrap();
 
     let mut zeroes = true;
-    for b in data {
+    for b in data.iter() {
         if *b != 0 {
             zeroes = false;
         }
@@ -1757,14 +1765,12 @@ fn fuzz_insert_(fix: Fixture, seed: u64, btree_ptr: Addr) -> Result<()> {
         fix2.vm.reset_block_hash();
         btree_insert(&mut fix2, btree_ptr, new_key, &17)?;
 
-        children
-            .entry(fix2.vm.block_hash)
-            .or_insert(vec![new_key]);
+        children.entry(fix2.vm.block_hash).or_insert(vec![new_key]);
     }
 
     debug!("found {} unique paths", children.len());
 
-/*
+    /*
     for v in children.values() {
         debug!("key {:?}", v.0);
     }
@@ -1805,7 +1811,7 @@ fn test_fuzz(fix: &mut Fixture) -> Result<()> {
     }
 
     let nr_jobs = 128;
-    let nr_threads = 128;
+    let nr_threads = 32;
     let pool = ThreadPool::new(nr_threads);
 
     for _ in 0..nr_jobs {
