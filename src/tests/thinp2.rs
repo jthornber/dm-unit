@@ -1780,7 +1780,9 @@ fn fuzz_insert_(fix: Fixture, seed: u64, btree_ptr: Addr) -> Result<()> {
 }
 
 fn fuzz_insert(fix: Fixture, seed: u64, btree_ptr: Addr) {
-    let _ = fuzz_insert_(fix, seed, btree_ptr);
+    if let Err(e) = fuzz_insert_(fix, seed, btree_ptr) {
+        debug!("BANG: {:?}", e);
+    }
 }
 
 fn test_fuzz(fix: &mut Fixture) -> Result<()> {
@@ -1806,10 +1808,12 @@ fn test_fuzz(fix: &mut Fixture) -> Result<()> {
     // Maps block hash to key that was inserted
     let mut children: BTreeMap<u32, (Vec<u64>, Fixture)> = BTreeMap::new();
 
+    debug!("building intial tree");
     for i in 0..400u64 {
         btree_insert(&mut *fix, btree_ptr, i, &17)?;
     }
 
+    debug!("spawning fuzz threads");
     let nr_jobs = 128;
     let nr_threads = 32;
     let pool = ThreadPool::new(nr_threads);
@@ -1822,6 +1826,7 @@ fn test_fuzz(fix: &mut Fixture) -> Result<()> {
         });
     }
 
+    debug!("waiting for fuzz threads");
     pool.join();
 
     Ok(())

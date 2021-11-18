@@ -2,7 +2,7 @@ use log::*;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 
 use crate::emulator::ir::*;
@@ -13,7 +13,6 @@ use crate::emulator::riscv::*;
 
 #[derive(Clone, Default)]
 pub struct InstCache {
-    // FIXME: add in next block cache
     basic_blocks: Vec<Arc<BasicBlock>>,
     by_addr: BTreeMap<u64, usize>,
 }
@@ -36,7 +35,7 @@ impl InstCache {
         bb
     }
 
-    pub fn get(&mut self, loc: u64) -> Option<Arc<BasicBlock>> {
+    pub fn get(&self, loc: u64) -> Option<Arc<BasicBlock>> {
         match self.by_addr.get(&loc) {
             None => None,
             Some(index) => {
@@ -47,7 +46,9 @@ impl InstCache {
     }
 
     /// Removes any blocks that contain loc (there can be only one).
-    pub fn invalidate(&mut self, _loc: u64) {}
+    /// FIXME: we do need this
+    pub fn invalidate(&mut self, _loc: u64) {
+    }
 }
 
 //-----------------------------
@@ -74,7 +75,7 @@ pub struct VM {
     breakpoints: BTreeSet<u64>,
     last_bp: Option<Addr>,
     pub stats: Stats,
-    inst_cache: InstCache,
+    inst_cache: Arc<RwLock<InstCache>>,
     next_bb_hits: u64,
     next_bb_misses: u64,
     jit: bool,
@@ -175,7 +176,7 @@ impl VM {
             breakpoints: BTreeSet::new(),
             last_bp: None,
             stats: Stats { instrs: 0 },
-            inst_cache: InstCache::new(),
+            inst_cache: Arc::new(RwLock::new(InstCache::new())),
             next_bb_hits: 0,
             next_bb_misses: 0,
             jit,
@@ -852,20 +853,37 @@ impl VM {
     fn find_bb(&mut self) -> Result<Arc<BasicBlock>> {
         let pc = self.pc();
 
-        let bb = self.inst_cache.get(pc.0);
-        if let Some(bb) = bb {
-            return Ok(bb);
+        // We don't want to cache instructions that are on the heap.
+        // These are just breakpoint trampolines.
+        if pc.0 > self.mem.heap_start().0 {
+            let bb = self
+                .mem
+                .read_some(pc, PERM_EXEC, |bytes| {
+                    decode_basic_block(pc.0, bytes, 100, &self.breakpoints)
+                        .map_err(VmErr::DecodeError)
+                })
+                .map_err(VmErr::BadAccess)??;
+            Ok(Arc::new(bb))
+        } else {
+            let inst_cache = self.inst_cache.read().unwrap();
+            let bb = inst_cache.get(pc.0);
+            if let Some(bb) = bb {
+                return Ok(bb);
+            }
+            drop(bb);
+            drop(inst_cache);
+
+            let bb = self
+                .mem
+                .read_some(pc, PERM_EXEC, |bytes| {
+                    decode_basic_block(pc.0, bytes, 100, &self.breakpoints)
+                        .map_err(VmErr::DecodeError)
+                })
+                .map_err(VmErr::BadAccess)?;
+
+            let mut inst_cache = self.inst_cache.write().unwrap();
+            Ok(inst_cache.insert(pc.0, bb?))
         }
-        drop(bb);
-
-        let bb = self
-            .mem
-            .read_some(pc, PERM_EXEC, |bytes| {
-                decode_basic_block(pc.0, bytes, 100, &self.breakpoints).map_err(VmErr::DecodeError)
-            })
-            .map_err(VmErr::BadAccess)?;
-
-        Ok(self.inst_cache.insert(pc.0, bb?))
     }
 
     fn run_ir(&mut self, _ir: &[IR]) -> Result<()> {
@@ -952,18 +970,22 @@ impl VM {
 
     pub fn add_breakpoint(&mut self, loc: Addr) {
         self.breakpoints.insert(loc.0);
-        self.inst_cache.invalidate(loc.0);
+
+        let mut inst_cache = self.inst_cache.write().unwrap();
+        inst_cache.invalidate(loc.0);
     }
 
     pub fn rm_breakpoint(&mut self, loc: Addr) -> bool {
-        self.inst_cache.invalidate(loc.0);
+        let mut inst_cache = self.inst_cache.write().unwrap();
+        inst_cache.invalidate(loc.0);
         self.breakpoints.remove(&loc.0)
     }
 
     pub fn get_hot_basic_blocks(&self) -> Vec<BBStats> {
-        let mut stats = Vec::with_capacity(self.inst_cache.basic_blocks.len());
+        let inst_cache = self.inst_cache.read().unwrap();
+        let mut stats = Vec::with_capacity(inst_cache.basic_blocks.len());
 
-        for bb in &self.inst_cache.basic_blocks {
+        for bb in &inst_cache.basic_blocks {
             stats.push(BBStats {
                 begin: Addr(bb.begin),
                 end: Addr(bb.end),
