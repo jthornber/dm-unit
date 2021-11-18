@@ -1765,7 +1765,11 @@ fn fuzz_insert_(fix: Fixture, seed: u64, btree_ptr: Addr) -> Result<()> {
         fix2.vm.reset_block_hash();
         btree_insert(&mut fix2, btree_ptr, new_key, &17)?;
 
-        children.entry(fix2.vm.block_hash).or_insert(vec![new_key]);
+        if children.get(&fix2.vm.block_hash).is_none() {
+            // only check the btree if we hit a new code path
+            check_btree::<u64>(&mut fix2, btree_ptr)?;
+            children.insert(fix2.vm.block_hash, vec![new_key]);
+        }
     }
 
     debug!("found {} unique paths", children.len());
