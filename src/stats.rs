@@ -7,6 +7,7 @@ use crate::block_manager::*;
 
 //-------------------------------
 
+#[derive(Clone)]
 pub struct Stats {
     pub instrs: u64,
     pub read_locks: u64,

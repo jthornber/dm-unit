@@ -128,7 +128,7 @@ pub struct BMInner {
 
 impl Drop for BMInner {
     fn drop(&mut self) {
-        debug!("{} prepares", self.nr_prepares);
+        // debug!("{} prepares", self.nr_prepares);
     }
 }
 

@@ -5,7 +5,7 @@ use log::*;
 use nom::{number::complete::*, IResult};
 use rand::prelude::*;
 use rand::SeedableRng;
-use std::collections::BTreeMap;
+use std::collections::{BTreeSet, BTreeMap};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
@@ -1112,7 +1112,7 @@ fn check_btree<V: Unpack>(fix: &mut Fixture, btree_ptr: Addr) -> Result<()> {
         .clone();
     let engine = engine.lock().unwrap();
 
-    check_node::<V>(&*engine, root, None);
+    check_node::<V>(&*engine, root, None)?;
     Ok(())
 }
 
@@ -1752,18 +1752,16 @@ fn test_btree_insert(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-enum FuzzAction {
-    Insert(u64),
-}
-
 fn fuzz_insert_(fix: Fixture, seed: u64, btree_ptr: Addr) -> Result<()> {
     let mut children: BTreeMap<u32, Vec<u64>> = BTreeMap::new();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
     for _ in 0..1000 {
         let mut fix2 = fix.clone();
-        let new_key = rng.gen_range(0..1000);
+        let new_key = rng.gen_range(0..1000000);
         fix2.vm.reset_block_hash();
         btree_insert(&mut fix2, btree_ptr, new_key, &17)?;
+
+        // debug!("unique blocks: {}", fix2.vm.unique_blocks.len());
 
         if children.get(&fix2.vm.block_hash).is_none() {
             // only check the btree if we hit a new code path
@@ -1812,18 +1810,37 @@ fn test_fuzz(fix: &mut Fixture) -> Result<()> {
     // Maps block hash to key that was inserted
     let mut children: BTreeMap<u32, (Vec<u64>, Fixture)> = BTreeMap::new();
 
+    let mut unique_blocks: BTreeSet<u64> = BTreeSet::new();
+    let mut fix_at_start = fix.clone();
+
     debug!("building intial tree");
-    for i in 0..400u64 {
-        btree_insert(&mut *fix, btree_ptr, i, &17)?;
+    let mut keys = Vec::new();
+    let mut interesting = Vec::new();
+    for i in 0..10000u64 {
+        let new_key = rng.gen_range(0..1000000);
+        fix.vm.reset_block_hash();
+        btree_insert(&mut *fix, btree_ptr, new_key, &17)?;
+        if !fix.vm.unique_blocks.is_subset(&unique_blocks) {
+            // We've found an interesting tree
+            debug!("insert {} is interesting", i);
+            unique_blocks.append(&mut fix.vm.unique_blocks.clone());
+            interesting.push(keys.clone());
+        }
+        keys.push(new_key);
     }
 
     debug!("spawning fuzz threads");
-    let nr_jobs = 128;
-    let nr_threads = 32;
+    let nr_jobs = interesting.len();
+    let nr_threads = 24;
     let pool = ThreadPool::new(nr_threads);
 
-    for _ in 0..nr_jobs {
-        let fix: Fixture = (*fix).clone();
+    for j in 0..nr_jobs {
+        let mut fix: Fixture = fix_at_start.clone();
+
+	for k in &interesting[j] {
+            btree_insert(&mut fix, btree_ptr, *k, &17)?;
+	}
+
         let seed = rng.gen_range(0..1000000);
         pool.execute(move || {
             fuzz_insert(fix, seed, btree_ptr);

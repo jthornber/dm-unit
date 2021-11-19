@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use Reg::*;
-use crate::snapshot::*;
 
 //-------------------------------
 

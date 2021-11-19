@@ -2,7 +2,7 @@ use log::*;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
 use crate::emulator::ir::*;
@@ -83,14 +83,17 @@ pub struct VM {
     // This hash gets updated with the address of every basic block
     // executed.
     pub block_hash: u32,
+    pub unique_blocks: BTreeSet<u64>,
 }
 
 impl Drop for VM {
     fn drop(&mut self) {
+        /*
         let hits = self.next_bb_hits as f64;
         let total = (self.next_bb_misses + self.next_bb_hits) as f64;
         let percent = (hits * 100.0) / total;
-        // debug!("next bb hits {:.0}%", percent);
+        debug!("next bb hits {:.0}%", percent);
+        */
     }
 }
 
@@ -181,11 +184,13 @@ impl VM {
             next_bb_misses: 0,
             jit,
             block_hash: 0,
+            unique_blocks: BTreeSet::new(),
         }
     }
 
     pub fn reset_block_hash(&mut self) {
         self.block_hash = 0;
+        self.unique_blocks.clear();
     }
 
     pub fn setup_stack(&mut self, size: u64) -> Result<()> {
@@ -890,12 +895,12 @@ impl VM {
         todo!();
     }
 
-    fn run_riscv(&mut self, base: u64, instrs: &[(Inst, u8)]) -> Result<()> {
-        let mut addr = base;
+    fn run_riscv(&mut self, _base: u64, instrs: &[(Inst, u8)]) -> Result<()> {
+        // let mut addr = base;
         for (inst, width) in instrs {
             // debug!("{:08x}: {}", addr, inst);
             self.step(*inst, *width as u64)?;
-            addr += *width as u64;
+            // addr += *width as u64;
         }
 
         Ok(())
@@ -957,6 +962,7 @@ impl VM {
             use std::mem::transmute;
             let bytes: [u8; 8] = unsafe { transmute(addr.to_le()) };
             self.block_hash = crc32c::crc32c_append(self.block_hash, &bytes);
+            self.unique_blocks.insert(addr);
         }
     }
 

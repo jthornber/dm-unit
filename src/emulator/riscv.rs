@@ -3,8 +3,6 @@ use log::*;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Cursor;
-use std::rc::Weak;
-use std::sync::Mutex;
 
 use crate::emulator::ir::IR;
 

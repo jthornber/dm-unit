@@ -14,6 +14,7 @@ use Reg::*;
 
 //-------------------------------
 
+#[derive(Clone)]
 pub struct BTreeValueType<G: Guest> {
     pub context: Addr,
     pub inc_fn: Addr,
@@ -58,6 +59,7 @@ impl<G: Guest> Guest for BTreeValueType<G> {
     }
 }
 
+#[derive(Clone)]
 pub struct BTreeInfo<G: Guest> {
     pub tm: Addr,
     pub levels: u32,

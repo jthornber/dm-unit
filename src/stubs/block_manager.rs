@@ -19,7 +19,7 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
     let bdev_ptr = Addr(fix.vm.reg(A0));
     let bdev = read_guest::<BlockDevice>(&fix.vm.mem, bdev_ptr)?;
 
-    debug!("inode address: {:?}", bdev.inode);
+    // debug!("inode address: {:?}", bdev.inode);
     let inode = read_guest::<INode>(&fix.vm.mem, bdev.inode)?;
     let block_size = fix.vm.reg(A1);
     let _max_held_per_thread = fix.vm.reg(A2);

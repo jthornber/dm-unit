@@ -1,10 +1,10 @@
 use crate::block_manager::*;
+use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 use crate::stats::*;
-use crate::stubs::*;
 use crate::stubs::block_manager::*;
+use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::btree::*;
@@ -16,7 +16,7 @@ use log::*;
 use nom::{number::complete::*, IResult};
 use rand::prelude::*;
 use rand::SeedableRng;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
@@ -28,6 +28,7 @@ use thinp::pdata::btree::*;
 use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
+use threadpool::ThreadPool;
 
 //-------------------------------
 
@@ -316,8 +317,8 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
 }
 
 #[allow(dead_code)]
-struct BTreeTest<'a> {
-    fix: &'a mut Fixture,
+#[derive(Clone)]
+struct BTreeTest {
     bm: Addr,
     tm: Addr,
     sm: Addr,
@@ -327,8 +328,8 @@ struct BTreeTest<'a> {
     baseline: Stats,
 }
 
-impl<'a> BTreeTest<'a> {
-    fn new(fix: &'a mut Fixture) -> Result<Self> {
+impl BTreeTest {
+    fn new(fix: &mut Fixture) -> Result<Self> {
         let bm = dm_bm_create(fix, 1024)?;
         let (tm, sm) = dm_tm_create(fix, bm, 0)?;
 
@@ -353,7 +354,6 @@ impl<'a> BTreeTest<'a> {
         };
 
         Ok(BTreeTest {
-            fix,
             bm,
             tm,
             sm,
@@ -364,55 +364,62 @@ impl<'a> BTreeTest<'a> {
         })
     }
 
-    fn begin(&mut self) -> Result<()> {
+    fn begin(&mut self, fix: &mut Fixture) -> Result<()> {
         if self.sb.is_some() {
             return Err(anyhow!("transaction already begun"));
         }
 
-        self.sb = Some(dm_bm_write_lock_zero(self.fix, self.bm, 0, Addr(0))?);
+        self.sb = Some(dm_bm_write_lock_zero(fix, self.bm, 0, Addr(0))?);
         Ok(())
     }
 
-    fn insert(&mut self, key: u64) -> Result<()> {
+    fn insert(&mut self, fix: &mut Fixture, key: u64) -> Result<()> {
         let ks = vec![key];
         let v = Value64(key_to_value(key));
-        self.root = dm_btree_insert(self.fix, &self.info, self.root, &ks, &v)?;
+        self.root = dm_btree_insert(fix, &self.info, self.root, &ks, &v)?;
         Ok(())
     }
 
-    fn lookup(&mut self, key: u64) -> Result<()> {
+    fn remove(&mut self, fix: &mut Fixture, key: u64) -> Result<()> {
+        let ks = vec![key];
+        let v = Value64(key_to_value(key));
+        self.root = dm_btree_remove(fix, &self.info, self.root, &ks)?;
+        Ok(())
+    }
+
+    fn lookup(&mut self, fix: &mut Fixture, key: u64) -> Result<()> {
         let keys = vec![key];
-        let v = dm_btree_lookup(self.fix, &self.info, self.root, &keys)?;
+        let v = dm_btree_lookup(fix, &self.info, self.root, &keys)?;
         ensure!(v == Value64(key_to_value(key)));
         Ok(())
     }
 
     // This uses Rust code, rather than doing look ups via the kernel
     // code.
-    fn check_keys_present(&self, keys: &[u64]) -> Result<()> {
-        let bm = get_bm(self.fix, self.bm);
+    fn check_keys_present(&self, fix: &mut Fixture, keys: &[u64]) -> Result<()> {
+        let bm = get_bm(fix, self.bm);
         check_keys_present(&bm, self.root, keys)
     }
 
-    fn commit(&mut self) -> Result<()> {
-        dm_tm_pre_commit(self.fix, self.tm)?;
-        dm_tm_commit(self.fix, self.tm, self.sb.unwrap())?;
+    fn commit(&mut self, fix: &mut Fixture) -> Result<()> {
+        dm_tm_pre_commit(fix, self.tm)?;
+        dm_tm_commit(fix, self.tm, self.sb.unwrap())?;
         self.sb = None;
         Ok(())
     }
 
-    fn stats_start(&mut self) {
-        let bm = get_bm(self.fix, self.bm);
-        self.baseline = Stats::collect_stats(self.fix, &bm);
+    fn stats_start(&mut self, fix: &mut Fixture) {
+        let bm = get_bm(fix, self.bm);
+        self.baseline = Stats::collect_stats(fix, &bm);
     }
 
-    fn stats_report(&self, desc: &str, count: u64) -> Result<()> {
-        let bm = get_bm(self.fix, self.bm);
-        let delta = self.baseline.delta(self.fix, &bm);
+    fn stats_report(&self, fix: &mut Fixture, desc: &str, count: u64) -> Result<()> {
+        let bm = get_bm(fix, self.bm);
+        let delta = self.baseline.delta(fix, &bm);
         info!(
             "{}: residency = {}, instrs = {}, read_locks = {:.1}, write_locks = {:.1}",
             desc,
-            self.residency()?,
+            self.residency(fix)?,
             delta.instrs / count,
             delta.read_locks as f64 / count as f64,
             delta.write_locks as f64 / count as f64
@@ -420,19 +427,17 @@ impl<'a> BTreeTest<'a> {
         Ok(())
     }
 
-    fn residency(&self) -> Result<usize> {
-        let bm = get_bm(self.fix, self.bm);
+    fn residency(&self, fix: &mut Fixture) -> Result<usize> {
+        let bm = get_bm(fix, self.bm);
         calc_residency::<Value64>(&bm, self.root)
     }
-}
 
-impl<'a> Drop for BTreeTest<'a> {
-    fn drop(&mut self) {
+    fn cleanup(&mut self, fix: &mut Fixture) {
         if let Some(sb) = self.sb {
-            dm_bm_unlock(self.fix, sb).expect("unlock superblock");
+            dm_bm_unlock(fix, sb).expect("unlock superblock");
         }
-        dm_tm_destroy(self.fix, self.tm).expect("destroy tm");
-        dm_bm_destroy(self.fix, self.bm).expect("destroy bm");
+        dm_tm_destroy(fix, self.tm).expect("destroy tm");
+        dm_bm_destroy(fix, self.bm).expect("destroy bm");
     }
 }
 
@@ -451,39 +456,39 @@ fn do_insert_test_(
     // First pass inserts, subsequent passes overwrite
     let mut commit_counter = commit_interval;
     for pass in 0..pass_count {
-        bt.stats_start();
-        bt.begin()?;
+        bt.stats_start(fix);
+        bt.begin(fix)?;
         for k in keys {
-            bt.insert(*k)?;
+            bt.insert(fix, *k)?;
 
             if commit_counter == 0 {
-                bt.commit()?;
-                bt.begin()?;
+                bt.commit(fix)?;
+                bt.begin(fix)?;
                 commit_counter = commit_interval;
             }
             commit_counter -= 1;
         }
-        bt.commit()?;
+        bt.commit(fix)?;
 
-        let residency = bt.residency()?;
+        let residency = bt.residency(fix)?;
         if residency < target_residency {
             return Err(anyhow!("Residency is too low ({}%)", residency));
         }
 
         let desc = if pass == 0 { "insert" } else { "overwrite" };
-        bt.stats_report(desc, keys.len() as u64)?;
+        bt.stats_report(fix, desc, keys.len() as u64)?;
     }
 
     // Lookup
-    bt.begin()?;
-    bt.stats_start();
+    bt.begin(fix)?;
+    bt.stats_start(fix);
     for k in keys {
-        bt.lookup(*k)?;
+        bt.lookup(fix, *k)?;
     }
-    bt.stats_report("lookup", keys.len() as u64)?;
-    bt.commit()?;
+    bt.stats_report(fix, "lookup", keys.len() as u64)?;
+    bt.commit(fix)?;
 
-    bt.check_keys_present(&keys)?;
+    bt.check_keys_present(fix, &keys)?;
 
     Ok(())
 }
@@ -795,13 +800,126 @@ fn test_redistribute3_right_only(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-/*
-fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
+fn fuzz_insert_(mut fix: Fixture, seed: u64, keys: Vec<u64>) -> Result<()> {
+    let mut children: BTreeMap<u32, Vec<u64>> = BTreeMap::new();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+
+    let mut bt = BTreeTest::new(&mut fix)?;
+    bt.begin(&mut fix)?;
+    for k in &keys {
+        bt.insert(&mut fix, *k)?
+    }
+    bt.commit(&mut fix)?;
+
+    for _ in 0..1000 {
+        let mut fix2 = fix.clone();
+        let mut bt = bt.clone();
+
+        let new_key = rng.gen_range(0..1000000);
+        fix2.vm.reset_block_hash();
+        bt.begin(&mut fix2)?;
+        bt.insert(&mut fix2, new_key)?;
+        let mut keys = keys.clone();
+        keys.push(new_key);
+        bt.commit(&mut fix2)?;
+
+        if children.get(&fix2.vm.block_hash).is_none() {
+            // only check the btree if we hit a new code path
+            bt.check_keys_present(&mut fix2, &keys)?;
+            children.insert(fix2.vm.block_hash, vec![new_key]);
+        }
+    }
+
+    debug!("found {} unique paths", children.len());
+    Ok(())
+}
+
+fn fuzz_insert(fix: Fixture, seed: u64, keys: Vec<u64>) {
+    if let Err(e) = fuzz_insert_(fix, seed, keys) {
+        debug!("BANG: {:?}", e);
+    }
+}
+
+fn search_for_interesting(
+    fix: &mut Fixture,
+    keys: &[u64],
+    interesting: &mut Vec<Vec<u64>>,
+) -> Result<()> {
+    let mut unique_blocks: BTreeSet<u64> = BTreeSet::new();
+    let mut bt = BTreeTest::new(fix)?;
+    bt.begin(fix)?;
+    for (i, k) in keys.iter().enumerate() {
+        fix.vm.reset_block_hash();
+        bt.insert(fix, *k)?;
+
+        if !fix.vm.unique_blocks.is_subset(&unique_blocks) {
+            // We've found an interesting tree
+            debug!("insert {} is interesting", i);
+            unique_blocks.append(&mut fix.vm.unique_blocks.clone());
+            interesting.push(keys[0..i].to_vec());
+        }
+    }
+    bt.commit(fix)?;
+    Ok(())
+}
+
+fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
+    const COUNT: u64 = 100000;
     standard_globals(fix)?;
+
+    let mut original_fix = fix.clone();
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    // First pass inserts, subsequent passes overwrite
+    let mut interesting: Vec<Vec<u64>> = Vec::new();
+
+    debug!("hunting interesting with random inserts");
+    let mut keys: Vec<u64> = Vec::new();
+    for _ in 0..COUNT {
+        keys.push(rng.gen_range(0..1000000));
+    }
+    search_for_interesting(fix, &keys[0..], &mut interesting)?;
+
+    debug!("hunting interesting with ascending inserts");
+    let mut fix = original_fix.clone();
+    let mut keys: Vec<u64> = Vec::new();
+    for i in 0..COUNT {
+        keys.push(i);
+    }
+    search_for_interesting(&mut fix, &keys[0..], &mut interesting)?;
+
+    debug!("hunting interesting with descending inserts");
+    let mut fix = original_fix.clone();
+    let mut keys: Vec<u64> = Vec::new();
+    for i in 0..COUNT {
+        keys.push(COUNT - i);
+    }
+    search_for_interesting(&mut fix, &keys[0..], &mut interesting)?;
+
+    debug!(
+        "spawning fuzz threads for {} interesting cases",
+        interesting.len()
+    );
+    let nr_jobs = interesting.len();
+    let nr_threads = 8;
+    let pool = ThreadPool::new(nr_threads);
+
+    for j in 0..nr_jobs {
+        let mut fix: Fixture = original_fix.clone();
+
+        let keys = interesting[j].clone();
+        let seed = rng.gen_range(0..1000000);
+        pool.execute(move || {
+            fuzz_insert(fix, seed, keys);
+        });
+    }
+
+    debug!("waiting for fuzz threads");
+    pool.join();
 
     Ok(())
 }
-*/
 
 //-------------------------------
 
@@ -855,6 +973,11 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("left-only", test_redistribute3_left_only)
             test!("right-below-target", test_redistribute3_right_below_target)
             test!("right-only", test_redistribute3_right_only)
+        }
+
+        test_section! {
+            "fuzz/",
+            test!("insert", test_fuzz_insert)
         }
     };
 
