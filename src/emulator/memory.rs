@@ -1,6 +1,7 @@
 use log::*;
-use std::collections::{Bound, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, Bound};
 use std::fmt;
+use std::ops::Deref;
 use std::result;
 use std::sync::Arc;
 use thiserror::Error;
@@ -192,6 +193,19 @@ impl Memory {
         }
     }
 
+    pub fn deep_copy(&self) -> Self {
+        let mut mmaps = BTreeMap::new();
+        for (k, v) in &self.mmaps {
+            mmaps.insert(*k, Arc::new(v.deref().clone()));
+        }
+
+        Memory {
+            mmaps,
+            heap: self.heap.clone(),
+            allocations: self.allocations.clone(),
+        }
+    }
+
     pub fn heap_start(&self) -> Addr {
         Addr(self.heap.base)
     }
@@ -233,8 +247,7 @@ impl Memory {
     /// Remove an mmapped area.
     pub fn unmap(&mut self, begin: Addr) -> Result<Vec<u8>> {
         match self.mmaps.remove(&begin.0) {
-            None =>
-            Err(MemErr::BadFree(begin)),
+            None => Err(MemErr::BadFree(begin)),
             Some(mut mmap) => {
                 let mut bytes = Vec::new();
 
@@ -273,10 +286,12 @@ impl Memory {
     /// Gets the mmap that contains the given range or returns an error.  Assumes
     /// a single mmap covers the whole range.
     fn get_mmap(&self, begin: u64, end: u64, perms: u8) -> Result<&MMap> {
-        match self.mmaps.range((Bound::Unbounded, Bound::Included(begin))).next_back() {
-            None => {
-                Err(MemErr::UnmappedRegion(Addr(begin), perms))
-            },
+        match self
+            .mmaps
+            .range((Bound::Unbounded, Bound::Included(begin)))
+            .next_back()
+        {
+            None => Err(MemErr::UnmappedRegion(Addr(begin), perms)),
             Some(mm) => {
                 // begin and end must be within the region
                 let mm = mm.1;
@@ -291,14 +306,17 @@ impl Memory {
     }
 
     fn get_mmap_mut(&mut self, begin: u64, end: u64, perms: u8) -> Result<&mut MMap> {
-        match self.mmaps.range_mut((Bound::Unbounded, Bound::Included(begin))).next_back() {
-            None => {
-                Err(MemErr::UnmappedRegion(Addr(begin), perms))
-            },
+        match self
+            .mmaps
+            .range_mut((Bound::Unbounded, Bound::Included(begin)))
+            .next_back()
+        {
+            None => Err(MemErr::UnmappedRegion(Addr(begin), perms)),
             Some(mut mm) => {
                 // begin and end must be within the region
                 let mm_: &mut Arc<MMap> = &mut mm.1;
-                if (begin < mm_.begin) || (begin >= mm_.end) || (end < mm_.begin) || (end > mm_.end) {
+                if (begin < mm_.begin) || (begin >= mm_.end) || (end < mm_.begin) || (end > mm_.end)
+                {
                     return Err(MemErr::UnmappedRegion(Addr(begin), perms));
                 }
 
@@ -307,7 +325,6 @@ impl Memory {
             }
         }
     }
-
 
     /// Checks that a memory region is mapped with the particular permissions.
     pub fn check_perms(&self, begin: Addr, end: Addr, perms: u8) -> Result<()> {

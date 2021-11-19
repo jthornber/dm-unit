@@ -125,6 +125,16 @@ impl Fixture {
         })
     }
 
+    pub fn deep_copy(&self) -> Self {
+        Fixture {
+            vm: self.vm.deep_copy(),
+            loader_info: self.loader_info.clone(),
+            breakpoints: self.breakpoints.clone(),
+            trace_indent: self.trace_indent,
+            contexts: self.contexts.clone(),
+        }
+    }
+
     fn lookup_fn(&self, func: &str) -> Result<Addr> {
         if let Some(addr) = self.loader_info.get_sym(func) {
             Ok(addr)

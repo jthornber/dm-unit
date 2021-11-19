@@ -20,6 +20,7 @@ gimli = "0.23"
 intrusive-collections = "0.9"
 instant = { version = "0.1", features = [ "now" ] }
 libc = "0.2.82"
+lockfree = "0.5.1"
 log = "0.4"
 nom = "6.0.1"
 num_cpus = "1.13"

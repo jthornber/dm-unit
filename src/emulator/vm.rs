@@ -1,8 +1,10 @@
+use lockfree::map::Map;
 use log::*;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::ops::Deref;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use crate::emulator::ir::*;
@@ -11,27 +13,73 @@ use crate::emulator::riscv::*;
 
 //-----------------------------
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct InstCache {
-    basic_blocks: Vec<Arc<BasicBlock>>,
-    by_addr: BTreeMap<u64, usize>,
+    next_index: Mutex<u64>,
+    basic_blocks: Map<u64, Arc<BasicBlock>>,
+    by_addr: Map<u64, u64>,
+}
+
+impl Clone for InstCache {
+    fn clone(&self) -> Self {
+        let next_index = Mutex::new(*self.next_index.lock().unwrap());
+
+        let mut basic_blocks = Map::new();
+        for item in &self.basic_blocks {
+            basic_blocks.insert(*item.key(), item.val().clone());
+        }
+        let mut by_addr = Map::new();
+        for item in &self.by_addr {
+            by_addr.insert(*item.key(), *item.val());
+        }
+
+        InstCache {
+            next_index,
+            basic_blocks,
+            by_addr,
+        }
+    }
 }
 
 impl InstCache {
     pub fn new() -> Self {
         InstCache {
-            basic_blocks: Vec::with_capacity(64),
-            by_addr: BTreeMap::new(),
+            next_index: Mutex::new(0),
+            basic_blocks: Map::new(),
+            by_addr: Map::new(),
+        }
+    }
+
+    pub fn deep_copy(&self) -> Self {
+        let next_index = Mutex::new(*self.next_index.lock().unwrap());
+
+        let mut basic_blocks = Map::new();
+        for item in &self.basic_blocks {
+            basic_blocks.insert(*item.key(), Arc::new((*item.val()).deref().clone()));
+        }
+        let mut by_addr = Map::new();
+        for item in &self.by_addr {
+            by_addr.insert(*item.key(), *item.val());
+        }
+
+        InstCache {
+            next_index,
+            basic_blocks,
+            by_addr,
         }
     }
 
     /// If loc occurs in any other block (eg, jumping back in a loop),
     /// that that block will be truncated.
-    pub fn insert(&mut self, loc: u64, bb: BasicBlock) -> Arc<BasicBlock> {
-        let index = self.basic_blocks.len();
+    pub fn insert(&self, loc: u64, bb: BasicBlock) -> Arc<BasicBlock> {
+        let mut next_index = self.next_index.lock().unwrap();
+        let index = *next_index;
+        *next_index = index + 1;
+        drop(next_index);
+
         self.by_addr.insert(loc, index);
         let bb = Arc::new(bb);
-        self.basic_blocks.push(bb.clone());
+        self.basic_blocks.insert(index, bb.clone());
         bb
     }
 
@@ -39,16 +87,15 @@ impl InstCache {
         match self.by_addr.get(&loc) {
             None => None,
             Some(index) => {
-                let bb = self.basic_blocks.get(*index).unwrap();
-                Some(bb.clone())
+                let bb = self.basic_blocks.get(&index.1).unwrap();
+                Some(bb.val().clone())
             }
         }
     }
 
     /// Removes any blocks that contain loc (there can be only one).
     /// FIXME: we do need this
-    pub fn invalidate(&mut self, _loc: u64) {
-    }
+    pub fn invalidate(&self, _loc: u64) {}
 }
 
 //-----------------------------
@@ -75,7 +122,7 @@ pub struct VM {
     breakpoints: BTreeSet<u64>,
     last_bp: Option<Addr>,
     pub stats: Stats,
-    inst_cache: Arc<RwLock<InstCache>>,
+    inst_cache: Arc<InstCache>,
     next_bb_hits: u64,
     next_bb_misses: u64,
     jit: bool,
@@ -179,12 +226,28 @@ impl VM {
             breakpoints: BTreeSet::new(),
             last_bp: None,
             stats: Stats { instrs: 0 },
-            inst_cache: Arc::new(RwLock::new(InstCache::new())),
+            inst_cache: Arc::new(InstCache::new()),
             next_bb_hits: 0,
             next_bb_misses: 0,
             jit,
             block_hash: 0,
             unique_blocks: BTreeSet::new(),
+        }
+    }
+
+    pub fn deep_copy(&self) -> Self {
+        VM {
+            reg: self.reg.clone(),
+            mem: self.mem.deep_copy(),
+            breakpoints: self.breakpoints.clone(),
+            last_bp: self.last_bp.clone(),
+            stats: self.stats.clone(),
+            inst_cache: Arc::new(self.inst_cache.deep_copy()),
+            next_bb_hits: self.next_bb_hits.clone(),
+            next_bb_misses: self.next_bb_misses.clone(),
+            jit: self.jit.clone(),
+            block_hash: self.block_hash.clone(),
+            unique_blocks: self.unique_blocks.clone(),
         }
     }
 
@@ -870,13 +933,10 @@ impl VM {
                 .map_err(VmErr::BadAccess)??;
             Ok(Arc::new(bb))
         } else {
-            let inst_cache = self.inst_cache.read().unwrap();
-            let bb = inst_cache.get(pc.0);
+            let bb = self.inst_cache.get(pc.0);
             if let Some(bb) = bb {
                 return Ok(bb);
             }
-            drop(bb);
-            drop(inst_cache);
 
             let bb = self
                 .mem
@@ -886,8 +946,7 @@ impl VM {
                 })
                 .map_err(VmErr::BadAccess)?;
 
-            let mut inst_cache = self.inst_cache.write().unwrap();
-            Ok(inst_cache.insert(pc.0, bb?))
+            Ok(self.inst_cache.insert(pc.0, bb?))
         }
     }
 
@@ -976,31 +1035,31 @@ impl VM {
 
     pub fn add_breakpoint(&mut self, loc: Addr) {
         self.breakpoints.insert(loc.0);
-
-        let mut inst_cache = self.inst_cache.write().unwrap();
-        inst_cache.invalidate(loc.0);
+        self.inst_cache.invalidate(loc.0);
     }
 
     pub fn rm_breakpoint(&mut self, loc: Addr) -> bool {
-        let mut inst_cache = self.inst_cache.write().unwrap();
-        inst_cache.invalidate(loc.0);
+        self.inst_cache.invalidate(loc.0);
         self.breakpoints.remove(&loc.0)
     }
 
     pub fn get_hot_basic_blocks(&self) -> Vec<BBStats> {
-        let inst_cache = self.inst_cache.read().unwrap();
-        let mut stats = Vec::with_capacity(inst_cache.basic_blocks.len());
+        todo!();
 
-        for bb in &inst_cache.basic_blocks {
+        /*
+        let mut stats = Vec::with_capacity(self.inst_cache.basic_blocks.len());
+
+        for bb in &self.inst_cache.basic_blocks {
             stats.push(BBStats {
-                begin: Addr(bb.begin),
-                end: Addr(bb.end),
+                begin: Addr(bb.val().begin),
+                end: Addr(bb.val().end),
                 hits: 0,
             });
         }
 
         stats.sort_by_key(|bbs| Reverse(bbs.hits));
         stats
+            */
     }
 
     pub fn get_bb_stats(&self, ptr: Addr) -> Option<BBStats> {

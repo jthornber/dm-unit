@@ -1,15 +1,3 @@
-use crate::block_manager::*;
-use crate::emulator::memory::*;
-use crate::fixture::*;
-use crate::guest::*;
-use crate::stats::*;
-use crate::stubs::block_manager::*;
-use crate::stubs::*;
-use crate::test_runner::*;
-use crate::wrappers::block_manager::*;
-use crate::wrappers::btree::*;
-use crate::wrappers::transaction_manager::*;
-
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
@@ -22,6 +10,7 @@ use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
@@ -29,6 +18,18 @@ use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
 use threadpool::ThreadPool;
+
+use crate::block_manager::*;
+use crate::emulator::memory::*;
+use crate::fixture::*;
+use crate::guest::*;
+use crate::stats::*;
+use crate::stubs::block_manager::*;
+use crate::stubs::*;
+use crate::test_runner::*;
+use crate::wrappers::block_manager::*;
+use crate::wrappers::btree::*;
+use crate::wrappers::transaction_manager::*;
 
 //-------------------------------
 
@@ -863,6 +864,14 @@ fn search_for_interesting(
     Ok(())
 }
 
+fn get_nr_threads() -> Result<usize> {
+    let n = match std::env::var_os("FUZZ_THREADS") {
+        None => num_cpus::get(),
+        Some(str) => std::str::FromStr::from_str(str.to_str().unwrap())?,
+    };
+    Ok(n)
+}
+
 fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
     const COUNT: u64 = 100000;
     standard_globals(fix)?;
@@ -881,6 +890,7 @@ fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
     }
     search_for_interesting(fix, &keys[0..], &mut interesting)?;
 
+    /*
     debug!("hunting interesting with ascending inserts");
     let mut fix = original_fix.clone();
     let mut keys: Vec<u64> = Vec::new();
@@ -896,17 +906,19 @@ fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
         keys.push(COUNT - i);
     }
     search_for_interesting(&mut fix, &keys[0..], &mut interesting)?;
+    */
 
     debug!(
         "spawning fuzz threads for {} interesting cases",
         interesting.len()
     );
     let nr_jobs = interesting.len();
-    let nr_threads = 8;
+    let nr_threads = get_nr_threads()?;
     let pool = ThreadPool::new(nr_threads);
 
+    let now = Instant::now();
     for j in 0..nr_jobs {
-        let mut fix: Fixture = original_fix.clone();
+        let mut fix: Fixture = original_fix.deep_copy();
 
         let keys = interesting[j].clone();
         let seed = rng.gen_range(0..1000000);
@@ -917,6 +929,8 @@ fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
 
     debug!("waiting for fuzz threads");
     pool.join();
+
+    debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
 
     Ok(())
 }
