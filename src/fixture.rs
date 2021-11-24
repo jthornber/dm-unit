@@ -6,7 +6,7 @@ use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Context};
 use libc::{c_int, strerror_r};
 use log::*;
 use std::collections::BTreeMap;
@@ -165,7 +165,7 @@ impl Fixture {
 
                     if let Some(callback) = self.breakpoints.remove(&loc) {
                         let inner = callback.lock().unwrap();
-                        let r = (*inner)(self);
+                        let mut r = (*inner)(self).with_context(|| format!("{}", self.vm));
                         drop(inner);
                         self.breakpoints.insert(loc, callback);
                         r?;

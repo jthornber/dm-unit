@@ -1,8 +1,8 @@
 use crate::block_manager::*;
+use crate::emulator::memory::{Addr, PERM_READ, PERM_WRITE};
 use crate::emulator::riscv::Reg;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::{Addr, PERM_READ, PERM_WRITE};
 use crate::stubs::block_device::*;
 
 use anyhow::{anyhow, Result};
@@ -65,7 +65,10 @@ pub fn bm_nr_blocks(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn get_bm(fix: &Fixture, bm_ptr: Addr) -> Arc<BlockManager> {
-    fix.contexts.get::<Arc<BlockManager>>(&bm_ptr).unwrap().clone()
+    fix.contexts
+        .get::<Arc<BlockManager>>(&bm_ptr)
+        .unwrap()
+        .clone()
 }
 
 pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
@@ -93,9 +96,21 @@ fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
     let guest_addr = if zero {
-        bm.write_lock_zero(&mut fix.vm.mem, loc, v_ptr)?
+        match bm.write_lock_zero(&mut fix.vm.mem, loc, v_ptr) {
+            Err(e) => {
+                fix.vm.ret(-1i32 as u64);
+                return Ok(());
+            }
+            Ok(v) => v,
+        }
     } else {
-        bm.write_lock(&mut fix.vm.mem, loc, v_ptr)?
+        match bm.write_lock(&mut fix.vm.mem, loc, v_ptr) {
+            Err(e) => {
+                fix.vm.ret(-1i32 as u64);
+                return Ok(());
+            }
+            Ok(v) => v,
+        }
     };
 
     // fill out result ptr

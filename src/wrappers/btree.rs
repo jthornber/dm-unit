@@ -155,6 +155,33 @@ pub fn dm_btree_insert<G: Guest>(
     Ok(new_root)
 }
 
+pub fn dm_btree_insert_with_errno<G: Guest>(
+    fix: &mut Fixture,
+    info: &BTreeInfo<G>,
+    root: u64,
+    keys: &[u64],
+    v: &G,
+) -> Result<(i32, Option<u64>)> {
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
+    let (mut fix, guest_keys) = auto_keys(&mut *fix, keys)?;
+    let (mut fix, guest_value) = auto_guest(&mut *fix, v, PERM_READ | PERM_WRITE)?;
+    let (mut fix, new_root) = auto_alloc(&mut *fix, 8)?;
+
+    fix.vm.set_reg(A0, info_ptr.0);
+    fix.vm.set_reg(A1, root);
+    fix.vm.set_reg(A2, guest_keys.0);
+    fix.vm.set_reg(A3, guest_value.0);
+    fix.vm.set_reg(A4, new_root.0);
+
+    fix.call("dm_btree_insert")?;
+    let r = fix.vm.reg(A0) as i64 as i32;
+    if r != 0 {
+        Ok((r, None))
+    } else {
+        let new_root = fix.vm.mem.read_into::<u64>(new_root, PERM_READ)?;
+        Ok((0, Some(new_root)))
+    }
+}
 pub fn dm_btree_insert_notify<G: Guest>(
     fix: &mut Fixture,
     info: &BTreeInfo<G>,

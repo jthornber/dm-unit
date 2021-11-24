@@ -9,9 +9,11 @@ use std::io;
 use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use thinp::io_engine::BLOCK_SIZE;
+use thinp::checksum;
+use thinp::io_engine::{IoEngine, BLOCK_SIZE};
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
 use thinp::pdata::btree_builder::*;
@@ -58,7 +60,7 @@ impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
 
 /*
 #[allow(dead_code)]
-fn check_btree(root: u64) -> Result<()> {
+fn check_btree(root: u64) -> Result<()>? {
     let walker = BTreeWalker::new(get_bm()?, false);
     let visitor = NoopVisitor {};
     let mut path = Vec::new();
@@ -120,6 +122,68 @@ pub fn calc_residency<V: Unpack>(bm: &Arc<BlockManager>, root: u64) -> Result<us
     let percent = (nr_entries * 100) / (max_entries * nr_leaves);
 
     Ok(percent)
+}
+
+//-------------------------------
+
+#[derive(Debug, Default)]
+struct NodeInfo {
+    internal_nodes: BTreeMap<u64, KeyRange>,
+    leaf_nodes: BTreeMap<u64, KeyRange>,
+}
+
+struct NodeDiscovery {
+    engine: Arc<dyn IoEngine + Send + Sync>,
+    info: NodeInfo,
+}
+
+impl NodeDiscovery {
+    fn new(engine: Arc<dyn IoEngine + Send + Sync>) -> Self {
+        NodeDiscovery {
+            engine,
+            info: NodeInfo::default(),
+        }
+    }
+
+    fn walk_node<V: Unpack>(&mut self, kr: &KeyRange, loc: u64, is_root: bool) -> Result<()> {
+        let b = self.engine.read(loc)?;
+        let bt = checksum::metadata_block_type(b.get_data());
+        if bt != checksum::BT::NODE {
+            return Err(anyhow!("bad checksum"));
+        }
+
+        let path = vec![];
+        let node = unpack_node::<V>(&path, &b.get_data(), false, is_root)?;
+
+        match node {
+            Node::Internal { keys, values, .. } => {
+                let krs = split_key_ranges(&path, kr, &keys)?;
+                self.info.internal_nodes.insert(loc, kr.clone());
+
+                for (i, v) in values.iter().enumerate() {
+                    self.walk_node::<V>(&krs[i], *v, false)?;
+                }
+                Ok(())
+            }
+            Node::Leaf { .. } => {
+                self.info.leaf_nodes.insert(loc, kr.clone());
+                Ok(())
+            }
+        }
+    }
+}
+
+fn discover_nodes<V: Unpack>(
+    engine: Arc<dyn IoEngine + Send + Sync>,
+    root: u64,
+) -> Result<NodeInfo> {
+    let mut nd = NodeDiscovery::new(engine);
+    let kr = KeyRange {
+        start: None,
+        end: None,
+    };
+    nd.walk_node::<V>(&kr, root, true)?;
+    Ok(nd.info)
 }
 
 //-------------------------------
@@ -378,6 +442,20 @@ impl BTreeTest {
         let ks = vec![key];
         let v = Value64(key_to_value(key));
         self.root = dm_btree_insert(fix, &self.info, self.root, &ks, &v)?;
+        Ok(())
+    }
+
+    // We call this when fuzzing, it's fine for the dm_btree_insert
+    // call to fail.  So we don't return an error in this case.  But we
+    // do propogate any failure from the vm itself, such as an invalid
+    // memory access.
+    fn insert_fuzz(&mut self, fix: &mut Fixture, key: u64) -> Result<()> {
+        let ks = vec![key];
+        let v = Value64(key_to_value(key));
+        let (errno, mroot) = dm_btree_insert_with_errno(fix, &self.info, self.root, &ks, &v)?;
+        if let Some(root) = mroot {
+            self.root = root;
+        }
         Ok(())
     }
 
@@ -812,7 +890,13 @@ fn fuzz_insert_(mut fix: Fixture, seed: u64, keys: Vec<u64>) -> Result<()> {
     }
     bt.commit(&mut fix)?;
 
-    for _ in 0..1000 {
+    let mut probes = 10000;
+    for i in 0..probes {
+        if i > 100 && i > children.len() * 10 {
+            probes = i;
+            break;
+        }
+
         let mut fix2 = fix.clone();
         let mut bt = bt.clone();
 
@@ -831,7 +915,7 @@ fn fuzz_insert_(mut fix: Fixture, seed: u64, keys: Vec<u64>) -> Result<()> {
         }
     }
 
-    debug!("found {} unique paths", children.len());
+    debug!("found {} unique paths, {} probes", children.len(), probes);
     Ok(())
 }
 
@@ -850,12 +934,14 @@ fn search_for_interesting(
     let mut bt = BTreeTest::new(fix)?;
     bt.begin(fix)?;
     for (i, k) in keys.iter().enumerate() {
+        let old_instrs = fix.vm.stats.instrs;
         fix.vm.reset_block_hash();
         bt.insert(fix, *k)?;
+        let instrs = fix.vm.stats.instrs - old_instrs;
 
         if !fix.vm.unique_blocks.is_subset(&unique_blocks) {
             // We've found an interesting tree
-            debug!("insert {} is interesting", i);
+            debug!("insert {} is interesting, {} instructions", i, instrs);
             unique_blocks.append(&mut fix.vm.unique_blocks.clone());
             interesting.push(keys[0..i].to_vec());
         }
@@ -890,37 +976,16 @@ fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
     }
     search_for_interesting(fix, &keys[0..], &mut interesting)?;
 
-    /*
-    debug!("hunting interesting with ascending inserts");
-    let mut fix = original_fix.clone();
-    let mut keys: Vec<u64> = Vec::new();
-    for i in 0..COUNT {
-        keys.push(i);
-    }
-    search_for_interesting(&mut fix, &keys[0..], &mut interesting)?;
-
-    debug!("hunting interesting with descending inserts");
-    let mut fix = original_fix.clone();
-    let mut keys: Vec<u64> = Vec::new();
-    for i in 0..COUNT {
-        keys.push(COUNT - i);
-    }
-    search_for_interesting(&mut fix, &keys[0..], &mut interesting)?;
-    */
-
     debug!(
         "spawning fuzz threads for {} interesting cases",
         interesting.len()
     );
-    let nr_jobs = interesting.len();
     let nr_threads = get_nr_threads()?;
     let pool = ThreadPool::new(nr_threads);
-
     let now = Instant::now();
-    for j in 0..nr_jobs {
-        let mut fix: Fixture = original_fix.deep_copy();
 
-        let keys = interesting[j].clone();
+    for keys in interesting {
+        let mut fix: Fixture = original_fix.deep_copy();
         let seed = rng.gen_range(0..1000000);
         pool.execute(move || {
             fuzz_insert(fix, seed, keys);
@@ -931,6 +996,212 @@ fn test_fuzz_insert(fix: &mut Fixture) -> Result<()> {
     pool.join();
 
     debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn fuzz_remove_(mut fix: Fixture, mut bt: BTreeTest, seed: u64, mut keys: Vec<u64>) -> Result<()> {
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+
+    // Shuffle the keys so we remove in a random order
+    keys.shuffle(&mut rng);
+
+    let mut count = 0;
+    for k in keys {
+        bt.begin(&mut fix)?;
+        bt.remove(&mut fix, k)?;
+        bt.commit(&mut fix)?;
+
+        // bt.check_keys_present(&mut fix2, &keys)?;
+        //
+        count += 1;
+
+        if count % 1000 == 0 {
+            debug!("removed {}", count);
+        }
+    }
+
+    Ok(())
+}
+
+fn fuzz_remove(fix: Fixture, bt: BTreeTest, seed: u64, keys: Vec<u64>) {
+    if let Err(e) = fuzz_remove_(fix, bt, seed, keys) {
+        debug!("BANG: {:?}", e);
+    }
+}
+
+fn test_fuzz_remove(fix: &mut Fixture) -> Result<()> {
+    const COUNT: u64 = 10000;
+    standard_globals(fix)?;
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut keyset = BTreeSet::new();
+    let mut keys: Vec<u64> = Vec::new();
+    while keyset.len() < COUNT as usize {
+        let k = rng.gen_range(0..1000000);
+        if !keyset.contains(&k) {
+            keys.push(k);
+            keyset.insert(k);
+        }
+    }
+
+    debug!("building initial btree");
+    let mut bt = BTreeTest::new(fix)?;
+    bt.begin(fix)?;
+    for k in &keys {
+        bt.insert(fix, *k)?;
+    }
+    bt.commit(fix)?;
+
+    let mut initial_fix = fix.clone();
+    let mut initial_bt = bt.clone();
+
+    // let nr_threads = get_nr_threads()?;
+    // let nr_jobs = 64;
+    let nr_threads = 1;
+    let nr_jobs = 1;
+    let pool = ThreadPool::new(nr_threads);
+    let now = Instant::now();
+
+    debug!(
+        "spawning {} fuzz jobs across {} threads.",
+        nr_jobs, nr_threads
+    );
+
+    for _ in 0..nr_jobs {
+        let mut fix: Fixture = initial_fix.deep_copy();
+        let mut bt: BTreeTest = initial_bt.clone();
+        let keys = keys.clone();
+        let seed = rng.gen_range(0..1000000);
+        pool.execute(move || {
+            fuzz_remove(fix, bt, seed, keys);
+        });
+    }
+
+    debug!("waiting for fuzz threads");
+    pool.join();
+
+    debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn key_from_range(kr: &KeyRange, rng: &mut dyn RngCore) -> u64 {
+    match (kr.start, kr.end) {
+        (None, None) => 0,
+        (None, Some(nr)) => rng.gen_range(0..nr),
+        (Some(nr), None) => rng.gen_range(nr..(nr + 1000)),
+        (Some(b), Some(e)) => rng.gen_range(b..e),
+    }
+}
+
+fn fuzz_insert_damaged(
+    mut fix: Fixture,
+    bt: BTreeTest,
+    seed: u64,
+    loc: u64,
+    kr: &KeyRange,
+    tx: Sender<anyhow::Error>,
+) {
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    let mut probes = 10;
+    let _ = fix.stub("printk", 0); // disable printk
+
+    for i in 0..probes {
+        let mut fix2 = fix.clone();
+        let mut bt = bt.clone();
+
+        let mut bm = get_bm(&mut fix2, bt.bm);
+        let engine: Arc<dyn IoEngine + Send + Sync> = bm;
+        let block = engine.read(loc).expect("couldn't read block");
+
+        for _ in 0..100 {
+            let byte = rng.gen_range(0..BLOCK_SIZE);
+            let val = rng.gen_range(0..=255);
+            block.get_data()[byte] = val;
+        }
+
+        engine.write(&block).expect("couldn't write block");
+
+        for _ in 0..100 {
+            let k = key_from_range(kr, &mut rng);
+            if let Err(e) = bt.insert_fuzz(&mut fix2, k) {
+                // FIXME: send details of the damage too
+                tx.send(e).unwrap();
+            }
+        }
+    }
+}
+
+// Build a btree, damage a node (but correct checksum), try some inserts
+// near the damaged node.
+
+fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
+    const COUNT: u64 = 100000;
+    standard_globals(fix)?;
+
+    debug!("building initial tree");
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut bt = BTreeTest::new(fix)?;
+    bt.begin(fix)?;
+    for i in 0..COUNT {
+        if i % 10000 == 0 {
+            debug!("inserted {} keys", i);
+        }
+        let k = rng.gen_range(0..1000000);
+        bt.insert(fix, k)?;
+    }
+    debug!("inserted {} keys", COUNT);
+    bt.commit(fix)?;
+
+    debug!("building list of nodes");
+    let mut info = discover_nodes::<Value64>(get_bm(fix, bt.bm), bt.root)?;
+
+    // let nr_jobs = nodes.len();
+    let nr_threads = 1; // get_nr_threads()?;
+    let pool = ThreadPool::new(nr_threads);
+    let now = Instant::now();
+
+    let (tx, rx) = channel();
+
+    for (loc, kr) in info.internal_nodes {
+        let mut fix: Fixture = fix.deep_copy();
+        let seed = rng.gen_range(0..1000000);
+        let bt = bt.clone();
+        let tx = tx.clone();
+        pool.execute(move || {
+            fuzz_insert_damaged(fix, bt, seed, loc, &kr, tx);
+        });
+    }
+
+    /*
+        for (loc, kr) in info.leaf_nodes {
+            let mut fix: Fixture = fix.deep_copy();
+            let seed = rng.gen_range(0..1000000);
+            let bt = bt.clone();
+            pool.execute(move || {
+                fuzz_insert_damaged(fix, bt, seed, loc, &kr);
+            });
+        }
+    */
+
+    drop(tx);
+
+    let mut nr_failures = 0;
+    while let Ok(v) = rx.recv() {
+        debug!("received: {:?}", v);
+        nr_failures += 1;
+    }
+    pool.join();
+
+    debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
+    debug!("{} failures", nr_failures);
 
     Ok(())
 }
@@ -992,6 +1263,8 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test_section! {
             "fuzz/",
             test!("insert", test_fuzz_insert)
+            test!("remove", test_fuzz_remove)
+            test!("insert-damaged", test_fuzz_insert_damaged)
         }
     };
 
