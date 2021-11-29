@@ -1,13 +1,13 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 use crate::snapshot::Snapshot;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Seek;
@@ -119,6 +119,7 @@ pub struct BMInner {
     bm_ptr: Addr,
     nr_blocks: u64,
     locks: BTreeMap<u64, Lock>,
+    dirty: BTreeSet<u64>,
 
     pub nr_read_locks: u64,
     pub nr_write_locks: u64,
@@ -126,11 +127,13 @@ pub struct BMInner {
     pub nr_disk_reads: u64,
 }
 
+/*
 impl Drop for BMInner {
     fn drop(&mut self) {
         // debug!("{} prepares", self.nr_prepares);
     }
 }
+*/
 
 impl BMInner {
     fn new(nr_blocks: u64, bm_ptr: Addr) -> Self {
@@ -138,10 +141,11 @@ impl BMInner {
             bm_ptr,
             nr_blocks,
             locks: BTreeMap::new(),
+            dirty: BTreeSet::new(),
             nr_read_locks: 0,
             nr_write_locks: 0,
             nr_prepares: 0,
-            nr_disk_reads:  0,
+            nr_disk_reads: 0,
         }
     }
 
@@ -208,6 +212,7 @@ impl BMInner {
             }) => {
                 // Already read locked, just increment the reference count,
                 // and return the previous guest ptr.
+                // FIXME: check the validators match
                 self.locks.insert(
                     loc,
                     Lock::Read {
@@ -251,10 +256,15 @@ impl BMInner {
             }) => {
                 let data = mem.alloc_aligned(data, PERM_READ, 4096)?;
 
-                // FIXME: run validator->check()
+                // FIXME: check validators match
+                // FIXME: run validator->check() if !resident
 
                 // Create guest ptr.
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -284,7 +294,11 @@ impl BMInner {
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)?;
 
                 // Create guest ptr.
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -356,7 +370,11 @@ impl BMInner {
 
                 // Create guest ptr.
                 let data = mem.alloc_aligned(data, PERM_READ | PERM_WRITE, 4096)?;
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -388,7 +406,11 @@ impl BMInner {
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)?;
 
                 // Create guest ptr.
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -439,6 +461,7 @@ impl BMInner {
                     fix.vm
                         .mem
                         .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)?;
+                    self.dirty.insert(gb.loc);
                     self.locks.insert(
                         gb.loc,
                         Lock::Dirty {
@@ -469,6 +492,7 @@ impl BMInner {
                 fix.vm
                     .mem
                     .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)?;
+                self.dirty.insert(gb.loc);
                 self.locks.insert(
                     gb.loc,
                     Lock::Dirty {
@@ -513,6 +537,7 @@ impl BMInner {
                 // we deliberately don't count the cpu cost of this copy since
                 // it wouldn't be incurred with bufio.
                 let data_copy = data.clone();
+                self.dirty.remove(&gb.loc);
                 self.locks.insert(
                     gb.loc,
                     Lock::Clean {
@@ -541,12 +566,12 @@ impl BMInner {
     }
 
     fn flush(&mut self, fix: &mut Fixture) -> Result<()> {
-        let mut locks = BTreeMap::new();
-        std::mem::swap(&mut locks, &mut self.locks);
+        let mut dirty = BTreeSet::new();
+        std::mem::swap(&mut dirty, &mut self.dirty);
 
         // Call prep on all dirty, unlocked blocks
-        for (loc, entry) in locks {
-            match entry {
+        for loc in dirty {
+            match self.locks.remove(&loc).unwrap() {
                 Lock::Dirty {
                     validator,
                     guest_ptr,
@@ -572,7 +597,7 @@ impl BMInner {
                     );
                 }
                 _ => {
-                    self.locks.insert(loc, entry);
+                    return Err(anyhow!("can't happen"));
                 }
             }
         }
@@ -636,7 +661,7 @@ impl BMInner {
 
     //----------------------------------------------
     // These are the io engine methods, except they
-    // take a mut self and return anyhow errors.
+    // take a mut self.
     //----------------------------------------------
 
     fn read(&mut self, b: u64) -> io::Result<io_engine::Block> {

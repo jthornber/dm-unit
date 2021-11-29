@@ -1,5 +1,7 @@
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crossbeam::thread;
+use crossbeam::utils::CachePadded;
 use log::*;
 use nom::{number::complete::*, IResult};
 use rand::prelude::*;
@@ -8,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -19,7 +22,7 @@ use thinp::pdata::btree::*;
 use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
-use threadpool::ThreadPool;
+use threadpool::ThreadPool; // FIXME: remove
 
 use crate::block_manager::*;
 use crate::emulator::memory::*;
@@ -1008,27 +1011,25 @@ fn fuzz_remove_(mut fix: Fixture, mut bt: BTreeTest, seed: u64, mut keys: Vec<u6
     // Shuffle the keys so we remove in a random order
     keys.shuffle(&mut rng);
 
-    let mut count = 0;
-    for k in keys {
+    for (i, k) in keys.iter().enumerate() {
+        let old_instrs = fix.vm.stats.instrs;
         bt.begin(&mut fix)?;
-        bt.remove(&mut fix, k)?;
+        bt.remove(&mut fix, *k)?;
         bt.commit(&mut fix)?;
 
-        // bt.check_keys_present(&mut fix2, &keys)?;
-        //
-        count += 1;
+        bt.check_keys_present(&mut fix, &keys[i + 1..])?;
 
-        if count % 1000 == 0 {
-            debug!("removed {}", count);
+        if i % 1000 == 0 {
+            debug!("removed {}", i);
         }
     }
 
     Ok(())
 }
 
-fn fuzz_remove(fix: Fixture, bt: BTreeTest, seed: u64, keys: Vec<u64>) {
+fn fuzz_remove(fix: Fixture, bt: BTreeTest, seed: u64, keys: Vec<u64>, tx: Sender<anyhow::Error>) {
     if let Err(e) = fuzz_remove_(fix, bt, seed, keys) {
-        debug!("BANG: {:?}", e);
+        tx.send(e).unwrap();
     }
 }
 
@@ -1059,10 +1060,9 @@ fn test_fuzz_remove(fix: &mut Fixture) -> Result<()> {
     let mut initial_fix = fix.clone();
     let mut initial_bt = bt.clone();
 
-    // let nr_threads = get_nr_threads()?;
-    // let nr_jobs = 64;
-    let nr_threads = 1;
-    let nr_jobs = 1;
+    let nr_threads = get_nr_threads()?;
+    let nr_jobs = 64;
+
     let pool = ThreadPool::new(nr_threads);
     let now = Instant::now();
 
@@ -1071,22 +1071,38 @@ fn test_fuzz_remove(fix: &mut Fixture) -> Result<()> {
         nr_jobs, nr_threads
     );
 
+    let (tx, rx) = channel();
+
     for _ in 0..nr_jobs {
         let mut fix: Fixture = initial_fix.deep_copy();
         let mut bt: BTreeTest = initial_bt.clone();
+        let tx = tx.clone();
         let keys = keys.clone();
         let seed = rng.gen_range(0..1000000);
         pool.execute(move || {
-            fuzz_remove(fix, bt, seed, keys);
+            fuzz_remove(fix, bt, seed, keys, tx);
         });
     }
+    drop(tx);
+
+    let mut nr_failures = 0;
+    while let Ok(v) = rx.recv() {
+        debug!("received: {:?}", v);
+        nr_failures += 1;
+    }
+    drop(rx);
 
     debug!("waiting for fuzz threads");
     pool.join();
 
     debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
 
-    Ok(())
+    if nr_failures != 0 {
+        warn!("There were {} failures", nr_failures);
+        Err(anyhow!("fuzz failures"))
+    } else {
+        Ok(())
+    }
 }
 
 //-------------------------------
@@ -1208,6 +1224,64 @@ fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+struct Counter(u64);
+
+impl Default for Counter {
+    fn default() -> Self {
+        Counter(0)
+    }
+}
+
+impl Counter {
+    fn inc(&mut self) {
+        self.0 += 1;
+    }
+}
+
+const COUNTER: u64 = 100000000;
+
+fn fuzz_mutex(m: &Mutex<Counter>) {
+    for i in 0..COUNTER {
+        let mut c = m.lock().unwrap();
+        c.inc();
+    }
+}
+
+// Testing how _different_ Mutexes scale across different threads
+fn test_fuzz_mutex(fix: &mut Fixture) -> Result<()> {
+    let nr_threads = get_nr_threads()?;
+    let spread = 7;
+
+    let mut ms: Vec<Mutex<Counter>> = Vec::new();
+    for i in 0..(nr_threads * spread) {
+        ms.push(Mutex::new(Counter::default()));
+    }
+
+    let now = Instant::now();
+    thread::scope(|s| {
+        for tid in 0..nr_threads {
+            let m = &ms[tid * spread];
+            s.spawn(|_| {
+                fuzz_mutex(m);
+            });
+        }
+    })
+    .unwrap();
+
+    debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
+
+    /*
+    for m in ms {
+        let c = m.lock().unwrap();
+        assert!(c.0 == COUNTER);
+    }
+    */
+
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let kmodules = vec![PDATA_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
@@ -1265,6 +1339,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("insert", test_fuzz_insert)
             test!("remove", test_fuzz_remove)
             test!("insert-damaged", test_fuzz_insert_damaged)
+            test!("mutex", test_fuzz_mutex)
         }
     };
 

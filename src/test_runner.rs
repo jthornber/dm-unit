@@ -275,27 +275,6 @@ impl<'a> TestRunner<'a> {
                     let mem = mem.clone();
                     let jit = self.jit;
 
-/*
-                    pool.execute(move || {
-                        match Fixture::new(loader_info, mem, jit) {
-                            Ok(fix) => {
-                                let res = run_test(fix, t);
-
-                                // FIXME: common code
-                                let mut results = results.lock().unwrap();
-                                results.insert(p.clone(), res);
-                                drop(results);
-                            }
-                            Err(e) => {
-                                // FIXME: common code
-                                let mut results = results.lock().unwrap();
-                                results.insert(p.clone(), Err(e));
-                                drop(results);
-                            }
-                        }
-                    });
-                    */
-
                     match Fixture::new(loader_info, mem, jit) {
                         Ok(fix) => {
                             pool.execute(move || {
