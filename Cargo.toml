@@ -34,7 +34,6 @@ tempfile = "3.2"
 threadpool = "1.0"
 # thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", branch = "main" }
 thinp = { path = "../thinp-for-dmunit" }
-
 thiserror = "1.0"
 
 [profile.release]

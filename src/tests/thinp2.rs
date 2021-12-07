@@ -984,6 +984,7 @@ fn unpack_header(data: &[u8]) -> Result<Header> {
     Ok(hdr)
 }
 
+#[allow(dead_code)]
 enum Node<V: Unpack> {
     Internal {
         header: Header,

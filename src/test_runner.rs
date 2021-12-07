@@ -5,12 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::{prelude::*, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 
-use crate::fixture::*;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 
 //-------------------------------
 
@@ -292,12 +293,11 @@ impl<'a> TestRunner<'a> {
                             drop(results);
                         }
                     }
-
                 }
-                Err(_) => {
+                Err(r) => {
                     // FIXME: common code
                     let mut results = results.lock().unwrap();
-                    results.insert(p.clone(), Err(anyhow!("unable to load kernel modules")));
+                    results.insert(p.clone(), Err(anyhow!(r.to_string()))); // anyhow!("unable to load kernel modules")));
                     drop(results);
                 }
             }

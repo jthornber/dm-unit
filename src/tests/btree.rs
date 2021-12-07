@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crossbeam::thread;
 use crossbeam::utils::CachePadded;
@@ -1126,7 +1126,7 @@ fn fuzz_insert_damaged(
 ) {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
     let mut probes = 10;
-    let _ = fix.stub("printk", 0); // disable printk
+    // let _ = fix.stub("printk", 0); // disable printk
 
     for i in 0..probes {
         let mut fix2 = fix.clone();
@@ -1136,17 +1136,25 @@ fn fuzz_insert_damaged(
         let engine: Arc<dyn IoEngine + Send + Sync> = bm;
         let block = engine.read(loc).expect("couldn't read block");
 
-        for _ in 0..100 {
+        // Damage the node at loc
+        for _ in 0..64 {
             let byte = rng.gen_range(0..BLOCK_SIZE);
             let val = rng.gen_range(0..=255);
             block.get_data()[byte] = val;
         }
+        checksum::write_checksum(&mut block.get_data(), checksum::BT::NODE)
+            .expect("writing checksum failed");
 
         engine.write(&block).expect("couldn't write block");
 
         for _ in 0..100 {
             let k = key_from_range(kr, &mut rng);
-            if let Err(e) = bt.insert_fuzz(&mut fix2, k) {
+            // bt.insert_fuzz(&mut fix2, k).expect("bang");
+
+            if let Err(e) = bt
+                .insert_fuzz(&mut fix2, k)
+                .with_context(|| format!("fuzzing block {}", loc))
+            {
                 // FIXME: send details of the damage too
                 tx.send(e).unwrap();
             }
@@ -1160,6 +1168,7 @@ fn fuzz_insert_damaged(
 fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
     const COUNT: u64 = 100000;
     standard_globals(fix)?;
+    // enable_traces(fix);
 
     debug!("building initial tree");
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
@@ -1196,16 +1205,15 @@ fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
         });
     }
 
-    /*
-        for (loc, kr) in info.leaf_nodes {
-            let mut fix: Fixture = fix.deep_copy();
-            let seed = rng.gen_range(0..1000000);
-            let bt = bt.clone();
-            pool.execute(move || {
-                fuzz_insert_damaged(fix, bt, seed, loc, &kr);
-            });
-        }
-    */
+    for (loc, kr) in info.leaf_nodes {
+        let mut fix: Fixture = fix.deep_copy();
+        let seed = rng.gen_range(0..1000000);
+        let bt = bt.clone();
+        let tx = tx.clone();
+        pool.execute(move || {
+            fuzz_insert_damaged(fix, bt, seed, loc, &kr, tx);
+        });
+    }
 
     drop(tx);
 
@@ -1218,6 +1226,8 @@ fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
 
     debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
     debug!("{} failures", nr_failures);
+
+    ensure!(nr_failures == 0);
 
     Ok(())
 }

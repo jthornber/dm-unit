@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Result};
 use elf::types::*;
+use gimli::read::Dwarf;
 use log::*;
 use nom::{number::complete::*, IResult};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
 
 use crate::emulator::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
@@ -218,7 +220,7 @@ fn relocate(
     rtype: RelocationType,
     location: Addr,
     sym: Addr,
-    _addend: u64,
+    addend: Addr,
 ) -> Result<()> {
     use RelocationType::*;
 
@@ -327,7 +329,7 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
                 rloc.rtype,
                 location,
                 Addr(sym_addr + rloc.addend),
-                rloc.addend,
+                Addr(rloc.addend),
             )?;
         }
         CompoundRel::Pair(hi_rloc, lo_rloc) => {
@@ -348,14 +350,20 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
                 hi_rloc.rtype,
                 hi_location,
                 Addr(sym_addr + hi_rloc.addend),
-                hi_rloc.addend,
+                Addr(sym_addr.wrapping_add(hi_rloc.addend)),
             )?;
 
             // Do the lo12 relocation
             let offset = addr_offset(Addr(sym_addr + hi_rloc.addend), hi_location);
             let hi20 = ((offset + 0x800) as u32 as u64) & 0xfffff000;
             let lo12 = (offset as u32 as u64).wrapping_sub(hi20);
-            relocate(mem, lo_rloc.rtype, lo_location, Addr(lo12), lo_rloc.addend)?;
+            relocate(
+                mem,
+                lo_rloc.rtype,
+                lo_location,
+                Addr(lo12),
+                Addr(lo_rloc.addend),
+            )?;
         }
     }
 
@@ -386,6 +394,7 @@ struct Module {
     text_sections: Sections,
     rw_sections: Sections,
     ro_sections: Sections,
+    debug_sections: Sections,
     relocations: Vec<CompoundRel>,
 }
 
@@ -441,10 +450,11 @@ fn filter_syms(syms: &[Rc<RefCell<Sym>>]) -> (Syms, Syms, Syms) {
 }
 
 // Returns (text, rw, ro, rel)
-fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sections) {
+fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sections, Sections) {
     let mut text_sections = Vec::new();
     let mut rw_sections = Vec::new();
     let mut ro_sections = Vec::new();
+    let mut debug_sections = Vec::new();
     let mut rel_sections = Vec::new();
 
     for section in sections {
@@ -471,12 +481,20 @@ fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sectio
             text_sections.push(section.clone());
         } else if has_flag(flags, SHF_WRITE) {
             rw_sections.push(section.clone());
+        } else if !has_flag(flags, SHF_ALLOC) {
+            debug_sections.push(section.clone());
         } else {
             ro_sections.push(section.clone());
         }
     }
 
-    (text_sections, rw_sections, ro_sections, rel_sections)
+    (
+        text_sections,
+        rw_sections,
+        ro_sections,
+        debug_sections,
+        rel_sections,
+    )
 }
 
 fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
@@ -492,7 +510,8 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
 
     let syms = xlate_syms(syms, &sections);
     let (refs, defs, internal) = filter_syms(&syms[0..]);
-    let (text_sections, rw_sections, ro_sections, rel_sections) = filter_sections(&sections);
+    let (text_sections, rw_sections, ro_sections, debug_sections, rel_sections) =
+        filter_sections(&sections);
 
     // FIXME: factor out
     let mut relocations = Vec::new();
@@ -528,6 +547,7 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
         text_sections,
         rw_sections,
         ro_sections,
+        debug_sections,
 
         relocations,
     })
@@ -594,16 +614,21 @@ fn load_sections(mem: &mut Memory, base: Addr, ss: &mut Sections, perms: u8) -> 
 pub struct LoaderInfo {
     symbols: BTreeMap<String, Addr>,
     sym_rmap: BTreeMap<Addr, String>,
+    pub debug_info: Arc<Dwarf<Vec<u8>>>,
 }
 
 impl LoaderInfo {
-    fn new(symbols: BTreeMap<String, Addr>) -> Self {
+    fn new(symbols: BTreeMap<String, Addr>, debug_info: Dwarf<Vec<u8>>) -> Self {
         let mut sym_rmap = BTreeMap::new();
         for (k, v) in &symbols {
             sym_rmap.insert(*v, k.clone());
         }
 
-        LoaderInfo { symbols, sym_rmap }
+        LoaderInfo {
+            symbols,
+            sym_rmap,
+            debug_info: Arc::new(debug_info),
+        }
     }
 
     pub fn get_sym(&self, name: &str) -> Option<Addr> {
@@ -615,6 +640,98 @@ impl LoaderInfo {
     }
 }
 
+// Once we've executed all the relocations we unmap the debug
+// info, since the guest has no need for it, and build a Dwarf
+// object that can be used to retrieve line info, stack traces etc.
+fn extract_debug_info(mem: &mut Memory, debug_sections: &Sections) -> Result<Dwarf<Vec<u8>>> {
+    let mut sections = BTreeMap::new();
+    for s in debug_sections {
+        let s = s.borrow();
+        let data = mem.unmap(Addr(s.shdr.addr))?;
+        sections.insert(s.shdr.name.clone(), data);
+    }
+
+    let loader = move |section_id| -> Result<Vec<u8>> {
+        use gimli::SectionId::*;
+
+        let data = match section_id {
+            DebugAbbrev => sections
+                .remove(&".debug_abbrev".to_string())
+                .unwrap_or(vec![]),
+            DebugAddr => {
+                vec![]
+            }
+            DebugAranges => {
+                debug!("trying to read aranges");
+                sections
+                    .remove(&".debug_aranges".to_string())
+                    .unwrap_or(vec![])
+            }
+            DebugFrame => sections
+                .remove(&".debug_frame".to_string())
+                .unwrap_or(vec![]),
+            EhFrame => {
+                vec![]
+            }
+            EhFrameHdr => {
+                vec![]
+            }
+            DebugInfo => sections
+                .remove(&".debug_info".to_string())
+                .unwrap_or(vec![]),
+            DebugLine => sections
+                .remove(&".debug_line".to_string())
+                .unwrap_or(vec![]),
+            DebugLineStr => {
+                vec![]
+            }
+            DebugLoc => sections.remove(&".debug_loc".to_string()).unwrap_or(vec![]),
+            DebugLocLists => {
+                vec![]
+            }
+            DebugMacinfo => {
+                vec![]
+            }
+            DebugMacro => {
+                vec![]
+            }
+            DebugPubNames => {
+                vec![]
+            }
+            DebugPubTypes => {
+                vec![]
+            }
+            DebugRanges => sections
+                .remove(&".debug_ranges".to_string())
+                .unwrap_or(vec![]),
+            DebugRngLists => {
+                vec![]
+            }
+            DebugStr => sections.remove(&".debug_str".to_string()).unwrap_or(vec![]),
+            DebugStrOffsets => {
+                vec![]
+            }
+            DebugTypes => {
+                vec![]
+            }
+            _ => {
+                todo!();
+            }
+        };
+        debug!(
+            "read debug section {:?} of {} bytes",
+            section_id,
+            data.len()
+        );
+
+        Ok(data)
+    };
+
+    let dwarf = Dwarf::load(loader)?;
+
+    Ok(dwarf)
+}
+
 fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     // Layout of module in memory:
     //    [text] [ro-data] [w-data]
@@ -622,7 +739,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     // Each of these segments is page aligned (vm doesn't need this since
     // we have per byte permissions).  'bases' is a map from section name to
     // base address.  This get's filled in as individual sections are mapped.
-    let space = 1024 * 1024;
+    let space = 16 * 1024 * 1024;
     let text_base = Addr(space);
     debug!("loading text sections starting at {:?}", text_base);
     load_sections(mem, text_base, &mut module.text_sections, PERM_EXEC)?;
@@ -695,6 +812,8 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         exec_relocation(mem, r)?;
     }
 
+    let debug_info = extract_debug_info(mem, &module.debug_sections)?;
+
     // build globals symbol table
     let mut symtable = BTreeMap::new();
     for s in &module.refs {
@@ -721,7 +840,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
-    Ok(LoaderInfo::new(symtable))
+    Ok(LoaderInfo::new(symtable, debug_info))
 }
 
 /// Links all the modules needed for a test into a single 'super' module.
@@ -740,7 +859,14 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
     };
 
     let ld_cmd = format!("{}ld", cross_compile);
-    let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output.to_str().unwrap()];
+    let mut args = vec![
+        "-r",
+        "-melf64lriscv",
+        "-T",
+        "misc/module.lds",
+        "-o",
+        output.to_str().unwrap(),
+    ];
     for p in paths {
         args.push(p.as_ref().to_str().unwrap());
     }

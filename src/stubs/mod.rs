@@ -19,12 +19,13 @@ use Reg::*;
 pub fn printk(fix: &mut Fixture) -> Result<()> {
     let msg = fix.vm.mem.read_string(Addr(fix.vm.reg(A0)))?;
     info!(
-        "printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x})",
+        "printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x})",
         &msg[2..],
         fix.vm.reg(A1),
         fix.vm.reg(A2),
         fix.vm.reg(A3),
-        fix.vm.reg(A4)
+        fix.vm.reg(A4),
+        fix.vm.reg(A5),
     );
 
     // FIXME: should return nr bytes printed
