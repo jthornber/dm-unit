@@ -1,7 +1,6 @@
 use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_READ};
 
-use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Cursor, Read, Write};
@@ -9,7 +8,6 @@ use std::io::{Cursor, Read, Write};
 //-------------------------------
 
 // FIXME: use read_some rather than copying all the time
-
 
 // Guest types must always consume the same amount of contiguous guest
 // memory.
@@ -37,7 +35,7 @@ pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
     let mut bytes = vec![0; len];
     mem.read(ptr, &mut bytes, PERM_READ)?;
     let mut r = Cursor::new(&bytes);
-    let v = G::unpack(&mut r, ptr)?;
+    let v = G::unpack(&mut r, ptr).unwrap();
     Ok(v)
 }
 
@@ -45,7 +43,7 @@ pub fn read_guest<G: Guest>(mem: &Memory, ptr: Addr) -> Result<G> {
 pub fn write_guest<G: Guest>(mem: &mut Memory, ptr: Addr, v: &G) -> Result<()> {
     let mut bytes = vec![0; G::guest_len()];
     let mut w = Cursor::new(&mut bytes);
-    v.pack(&mut w, ptr)?;
+    v.pack(&mut w, ptr).unwrap();
     mem.write(ptr, &bytes, 0)?;
     Ok(())
 }

@@ -1,15 +1,15 @@
+use anyhow::{anyhow, Result};
+use crc32c::crc32c;
+use log::*;
+use std::sync::Arc;
+use thinp::io_engine::*;
+
 use crate::block_manager::*;
 use crate::emulator::memory::{Addr, PERM_READ, PERM_WRITE};
 use crate::emulator::riscv::Reg;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::stubs::block_device::*;
-
-use anyhow::{anyhow, Result};
-use crc32c::crc32c;
-use log::*;
-use std::sync::Arc;
-use thinp::io_engine::*;
 
 use Reg::*;
 
@@ -71,21 +71,55 @@ pub fn get_bm(fix: &Fixture, bm_ptr: Addr) -> Arc<BlockManager> {
         .clone()
 }
 
+// Return -EINVAL in the vm.
+fn ret_einval<T>(fix: &mut Fixture) -> Result<Option<T>> {
+    fix.vm.ret(-libc::EINVAL as i64 as u64);
+    Ok(None)
+}
+
+// Selects which errors get propogated as a Result, and which just
+// set the errno.
+fn select_errors<F, T>(fix: &mut Fixture, op: F) -> Result<Option<T>>
+where
+    F: FnOnce(&mut Fixture) -> std::result::Result<T, BMError>,
+{
+    use BMError::*;
+
+    match op(fix) {
+        Err(BadArg(_)) => ret_einval(fix),
+        Err(ValidatorMismatch) => ret_einval(fix),
+        Err(ValidatorCheckFailed) => ret_einval(fix),
+        Err(ValidatorPrepFailed) => ret_einval(fix),
+        Err(BlockOutOfBounds(_)) => ret_einval(fix),
+        Err(BadLock(_)) => ret_einval(fix),
+
+        // All the rest remain as results
+        e @ Err(_) => {e?; Ok(None)},
+
+        Ok(v) => Ok(Some(v))
+    }
+}
+
 pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
     let bm_ptr = Addr(fix.vm.reg(A0));
     let loc = fix.vm.reg(A1);
     let v_ptr = Addr(fix.vm.reg(A2));
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
-    let guest_ptr = bm.read_lock(&mut fix.vm.mem, loc, v_ptr)?;
 
-    // fill out result ptr
-    fix.vm
-        .mem
-        .write_out::<u64>(guest_ptr.0, Addr(result_ptr), PERM_WRITE)?;
+    let guest_ptr = select_errors(fix, move |fix| {
+        bm.read_lock(fix, loc, v_ptr)
+    })?;
 
-    // return success
-    fix.vm.ret(0);
+    if let Some(guest_ptr) = guest_ptr {
+        // fill out result ptr
+        fix.vm
+            .mem
+            .write_out::<u64>(guest_ptr.0, Addr(result_ptr), PERM_WRITE)?;
+
+        // return success
+        fix.vm.ret(0);
+    }
     Ok(())
 }
 
@@ -96,7 +130,7 @@ fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
     let guest_addr = if zero {
-        match bm.write_lock_zero(&mut fix.vm.mem, loc, v_ptr) {
+        match bm.write_lock_zero(fix, loc, v_ptr) {
             Err(e) => {
                 fix.vm.ret(-1i32 as u64);
                 return Ok(());
@@ -104,7 +138,7 @@ fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
             Ok(v) => v,
         }
     } else {
-        match bm.write_lock(&mut fix.vm.mem, loc, v_ptr) {
+        match bm.write_lock(fix, loc, v_ptr) {
             Err(e) => {
                 fix.vm.ret(-1i32 as u64);
                 return Ok(());

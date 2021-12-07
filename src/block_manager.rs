@@ -1,10 +1,3 @@
-use crate::emulator::memory::*;
-use crate::emulator::riscv::*;
-use crate::fixture::*;
-use crate::guest::*;
-use crate::snapshot::Snapshot;
-
-use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,6 +9,55 @@ use std::path::Path;
 use std::sync::Mutex;
 use thinp::io_engine;
 use thinp::io_engine::{IoEngine, BLOCK_SIZE};
+use thiserror::Error;
+
+use crate::emulator::memory;
+use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
+use crate::emulator::vm::*;
+use crate::fixture::*;
+use crate::guest::*;
+use crate::snapshot::Snapshot;
+
+//-------------------------------
+
+// We need to be able to differentiate between a serious error, such
+// as bad memory access, and something that the client code can handle,
+// such as index out of bounds.
+#[derive(Error, Debug)]
+pub enum BMError {
+    #[error("memory error")]
+    MemErr(memory::MemErr),
+
+    #[error("bad arg")]
+    BadArg(String),
+
+    #[error("validator mismatch")]
+    ValidatorMismatch,
+
+    #[error("validator check failed")]
+    ValidatorCheckFailed,
+
+    #[error("validator prep failed")]
+    ValidatorPrepFailed,
+
+    #[error("block out of bounds")]
+    BlockOutOfBounds(u64),
+
+    #[error("vm error")]
+    VMErr,
+
+    #[error("unflushed data")]
+    UnflushedData,
+
+    #[error("bad lock operation")]
+    BadLock(u64),
+
+    #[error("IO error")]
+    IoErr(std::io::Error),
+}
+
+pub type Result<T> = core::result::Result<T, BMError>;
 
 //-------------------------------
 
@@ -109,7 +151,7 @@ pub enum Lock {
     Clean {
         // indicates whether the block is in memory, or just on disk
         resident: bool,
-        validator: Option<Addr>,
+        validator: Addr,
         data: Vec<u8>,
     },
 }
@@ -127,14 +169,6 @@ pub struct BMInner {
     pub nr_disk_reads: u64,
 }
 
-/*
-impl Drop for BMInner {
-    fn drop(&mut self) {
-        // debug!("{} prepares", self.nr_prepares);
-    }
-}
-*/
-
 impl BMInner {
     fn new(nr_blocks: u64, bm_ptr: Addr) -> Self {
         BMInner {
@@ -149,27 +183,60 @@ impl BMInner {
         }
     }
 
-    /*
-        fn v_check(&self, vm: &mut VM, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
-            use Reg::*;
-
-            // Call the prep function in the guest
-            vm.set_reg(A0, v_ptr.0);
-            vm.set_reg(A1, guest_ptr.0);
-            vm.set_reg(A2, 4096);
-
-            let v = read_guest::<Validator>(&vm.mem, v_ptr)?;
-            vm.call_at(v.check)?;
-
-            match fix.vm.reg(A0) as i64 as i32 {
-                r if r < 0 => Err(anyhow!("validator check failed: {}", error_string(-r))),
-                r if r > 0 => Err(anyhow!("validator check failed: {}", r)),
-                _ => Ok(()),
+    fn need_validate(&self, v1: Addr, v2: Addr) -> Result<bool> {
+        match (v1.0, v2.0) {
+            (0, 0) => Ok(false),
+            (0, _) => Ok(true),
+            (l, 0) => {
+                debug!("validator mismatch 0x{:x} -> 0x0", l);
+                Err(BMError::ValidatorMismatch)
+            }
+            (l, r) => {
+                if l != r {
+                    debug!("validator mismatch, 0x{:x} -> 0x{:x}", l, r);
+                    Err(BMError::ValidatorMismatch)
+                } else {
+                    Ok(false)
+                }
             }
         }
-    */
+    }
 
-    fn check_bounds(&self, loc: u64) -> io::Result<()> {
+    fn v_check(&self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
+        use Reg::*;
+
+        if v_ptr.is_null() {
+            return Ok(());
+        }
+
+        // Call the prep function in the guest
+        fix.vm.set_reg(A0, v_ptr.0);
+        fix.vm.set_reg(A1, guest_ptr.0);
+        fix.vm.set_reg(A2, 4096);
+
+        let v = read_guest::<Validator>(&fix.vm.mem, v_ptr).map_err(|e| BMError::MemErr(e))?;
+
+        if v.check.is_null() {
+            return Ok(());
+        }
+        fix.call_at(v.check).map_err(|e| BMError::VMErr)?;
+
+        match fix.vm.reg(A0) as i64 as i32 {
+            // r if r < 0 => Err(anyhow!("validator check failed: {}", error_string(-r))),
+            r if r != 0 => Err(BMError::ValidatorCheckFailed),
+            _ => Ok(()),
+        }
+    }
+
+    fn check_bounds(&self, loc: u64) -> Result<()> {
+        if loc < self.nr_blocks {
+            Ok(())
+        } else {
+            Err(BMError::BlockOutOfBounds(loc))
+        }
+    }
+
+    fn check_bounds_io(&self, loc: u64) -> io::Result<()> {
         if loc < self.nr_blocks {
             Ok(())
         } else {
@@ -192,16 +259,16 @@ impl BMInner {
         fix.vm.set_reg(A1, guest_ptr.0);
         fix.vm.set_reg(A2, 4096);
 
-        let v = read_guest::<Validator>(&fix.vm.mem, v_ptr)?;
+        let v = read_guest::<Validator>(&fix.vm.mem, v_ptr).map_err(|e| BMError::MemErr(e))?;
         if !v.prepare.is_null() {
-            fix.call_at(v.prepare)?;
+            fix.call_at(v.prepare).map_err(|_| BMError::VMErr)?;
         }
 
         self.nr_prepares += 1;
         Ok(())
     }
 
-    fn read_lock(&mut self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
+    fn read_lock(&mut self, fix: &mut Fixture, loc: u64, v_ptr: Addr) -> Result<Addr> {
         self.check_bounds(loc)?;
         match self.locks.remove(&loc) {
             Some(Lock::Read {
@@ -212,7 +279,9 @@ impl BMInner {
             }) => {
                 // Already read locked, just increment the reference count,
                 // and return the previous guest ptr.
-                // FIXME: check the validators match
+                if self.need_validate(validator, v_ptr)? {
+                    self.v_check(fix, guest_ptr, v_ptr)?;
+                }
                 self.locks.insert(
                     loc,
                     Lock::Read {
@@ -227,16 +296,18 @@ impl BMInner {
             }
             Some(l @ Lock::Write { .. }) => {
                 self.locks.insert(loc, l);
-                Err(anyhow!(
-                    "Can't read lock block since it's already write locked"
-                ))
+                Err(BMError::BadLock(loc))
             }
             Some(Lock::Dirty {
                 validator,
                 guest_ptr,
             }) => {
-                let gb = read_guest::<GBlock>(mem, guest_ptr)?;
-                mem.change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), PERM_READ)?;
+                let gb =
+                    read_guest::<GBlock>(&fix.vm.mem, guest_ptr).map_err(|e| BMError::MemErr(e))?;
+                fix.vm
+                    .mem
+                    .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), PERM_READ)
+                    .map_err(|e| BMError::MemErr(e))?;
                 self.locks.insert(
                     loc,
                     Lock::Read {
@@ -251,13 +322,14 @@ impl BMInner {
             }
             Some(Lock::Clean {
                 resident,
-                validator: _maybe_validator,
+                validator,
                 data,
             }) => {
-                let data = mem.alloc_aligned(data, PERM_READ, 4096)?;
-
-                // FIXME: check validators match
-                // FIXME: run validator->check() if !resident
+                let data = fix
+                    .vm
+                    .mem
+                    .alloc_aligned(data, PERM_READ, 4096)
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 // Create guest ptr.
                 let gb = GBlock {
@@ -265,14 +337,19 @@ impl BMInner {
                     loc,
                     data,
                 };
-                let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
+                let guest_ptr = alloc_guest::<GBlock>(&mut fix.vm.mem, &gb, PERM_READ)
+                    .map_err(|e| BMError::MemErr(e))?;
+
+                if self.need_validate(validator, v_ptr)? {
+                    self.v_check(fix, guest_ptr, v_ptr)?;
+                }
 
                 // insert lock
                 self.locks.insert(
                     loc,
                     Lock::Read {
                         dirty: false,
-                        validator: v_ptr, // FIXME: check compatible with maybe_validator
+                        validator: v_ptr,
                         count: 1,
                         guest_ptr,
                     },
@@ -288,10 +365,14 @@ impl BMInner {
                 // happen with the superblock, where we take all zeroes
                 // to mean we want to format it.
                 if loc != 0 {
-                    return Err(anyhow!("request to read an uninitialised block: {}", loc));
+                    return Err(BMError::BadLock(loc));
                 }
 
-                let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)?;
+                let data = fix
+                    .vm
+                    .mem
+                    .alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 // Create guest ptr.
                 let gb = GBlock {
@@ -299,7 +380,8 @@ impl BMInner {
                     loc,
                     data,
                 };
-                let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
+                let guest_ptr = alloc_guest::<GBlock>(&mut fix.vm.mem, &gb, PERM_READ)
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 // insert lock
                 self.locks.insert(
@@ -317,35 +399,46 @@ impl BMInner {
         }
     }
 
-    fn write_lock_(&mut self, mem: &mut Memory, loc: u64, v_ptr: Addr, zero: bool) -> Result<Addr> {
+    fn write_lock_(
+        &mut self,
+        fix: &mut Fixture,
+        loc: u64,
+        v_ptr: Addr,
+        zero: bool,
+    ) -> Result<Addr> {
         self.check_bounds(loc)?;
         match self.locks.remove(&loc) {
             Some(l @ Lock::Read { .. }) => {
                 self.locks.insert(loc, l);
-                Err(anyhow!(
-                    "Can't write lock block since it's already read locked"
-                ))
+                Err(BMError::BlockOutOfBounds(loc))
             }
             Some(l @ Lock::Write { .. }) => {
                 self.locks.insert(loc, l);
-                Err(anyhow!(
-                    "Can't write lock block since it's already write locked"
-                ))
+                Err(BMError::BadLock(loc))
             }
             Some(Lock::Dirty {
                 validator,
                 guest_ptr,
             }) => {
-                // FIXME: check validator and v_ptr are compatible
-                let gb = read_guest::<GBlock>(mem, guest_ptr)?;
-                mem.change_perms(
-                    gb.data,
-                    Addr(gb.data.0 + BLOCK_SIZE as u64),
-                    PERM_READ | PERM_WRITE,
-                )?;
+                if self.need_validate(validator, v_ptr)? {
+                    self.v_check(fix, guest_ptr, v_ptr)?;
+                }
+                let gb = read_guest::<GBlock>(&mut fix.vm.mem, guest_ptr)
+                    .map_err(|e| BMError::MemErr(e))?;
+                fix.vm
+                    .mem
+                    .change_perms(
+                        gb.data,
+                        Addr(gb.data.0 + BLOCK_SIZE as u64),
+                        PERM_READ | PERM_WRITE,
+                    )
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 if zero {
-                    mem.zero(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), PERM_WRITE)?;
+                    fix.vm
+                        .mem
+                        .zero(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), PERM_WRITE)
+                        .map_err(|e| BMError::MemErr(e))?;
                 }
                 self.locks.insert(
                     loc,
@@ -369,13 +462,18 @@ impl BMInner {
                 }
 
                 // Create guest ptr.
-                let data = mem.alloc_aligned(data, PERM_READ | PERM_WRITE, 4096)?;
+                let data = fix
+                    .vm
+                    .mem
+                    .alloc_aligned(data, PERM_READ | PERM_WRITE, 4096)
+                    .map_err(|e| BMError::MemErr(e))?;
                 let gb = GBlock {
                     bm_ptr: self.bm_ptr,
                     loc,
                     data,
                 };
-                let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
+                let guest_ptr = alloc_guest::<GBlock>(&mut fix.vm.mem, &gb, PERM_READ)
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 // insert lock
                 // FIXME: check validator and maybe_validator are compatible
@@ -395,15 +493,16 @@ impl BMInner {
             None => {
                 // This block has never been touched, so the zero flag must be set.
                 if !zero {
-                    return Err(anyhow!(
-                        "request to write an uninitialised block without zero flag: {}",
-                        loc
-                    ));
+                    return Err(BMError::BadLock(loc));
                 }
 
                 // This block has never been touched, so we'll initialise
                 // with zeroes.
-                let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)?;
+                let data = fix
+                    .vm
+                    .mem
+                    .alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 // Create guest ptr.
                 let gb = GBlock {
@@ -411,7 +510,8 @@ impl BMInner {
                     loc,
                     data,
                 };
-                let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
+                let guest_ptr = alloc_guest::<GBlock>(&mut fix.vm.mem, &gb, PERM_READ)
+                    .map_err(|e| BMError::MemErr(e))?;
 
                 // insert lock
                 self.locks.insert(
@@ -427,16 +527,16 @@ impl BMInner {
         }
     }
 
-    fn write_lock(&mut self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
-        self.write_lock_(mem, loc, v_ptr, false)
+    fn write_lock(&mut self, fix: &mut Fixture, loc: u64, v_ptr: Addr) -> Result<Addr> {
+        self.write_lock_(fix, loc, v_ptr, false)
     }
 
-    fn write_lock_zero(&mut self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
-        self.write_lock_(mem, loc, v_ptr, true)
+    fn write_lock_zero(&mut self, fix: &mut Fixture, loc: u64, v_ptr: Addr) -> Result<Addr> {
+        self.write_lock_(fix, loc, v_ptr, true)
     }
 
     fn unlock(&mut self, fix: &mut Fixture, gb_ptr: Addr) -> Result<()> {
-        let gb = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)?;
+        let gb = read_guest::<GBlock>(&fix.vm.mem, gb_ptr).map_err(|e| BMError::MemErr(e))?;
         match self.locks.remove(&gb.loc) {
             Some(Lock::Read {
                 dirty,
@@ -460,7 +560,8 @@ impl BMInner {
                     // Remove read/write permissions
                     fix.vm
                         .mem
-                        .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)?;
+                        .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)
+                        .map_err(|e| BMError::MemErr(e))?;
                     self.dirty.insert(gb.loc);
                     self.locks.insert(
                         gb.loc,
@@ -471,13 +572,13 @@ impl BMInner {
                     );
                     Ok(())
                 } else {
-                    let data = fix.vm.mem.free(gb.data)?;
-                    fix.vm.mem.free(gb_ptr)?;
+                    let data = fix.vm.mem.free(gb.data).map_err(|e| BMError::MemErr(e))?;
+                    fix.vm.mem.free(gb_ptr).map_err(|e| BMError::MemErr(e))?;
                     self.locks.insert(
                         gb.loc,
                         Lock::Clean {
                             resident: true,
-                            validator: Some(validator),
+                            validator: validator,
                             data,
                         },
                     );
@@ -491,7 +592,8 @@ impl BMInner {
                 // Remove read/write permissions
                 fix.vm
                     .mem
-                    .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)?;
+                    .change_perms(gb.data, Addr(gb.data.0 + BLOCK_SIZE as u64), 0)
+                    .map_err(|e| BMError::MemErr(e))?;
                 self.dirty.insert(gb.loc);
                 self.locks.insert(
                     gb.loc,
@@ -502,37 +604,43 @@ impl BMInner {
                 );
                 Ok(())
             }
-            Some(Lock::Dirty { .. }) => Err(anyhow!("block {} is not locked", gb.loc)),
-            Some(Lock::Clean { .. }) => Err(anyhow!("block {} is not locked", gb.loc)),
-            None => Err(anyhow!("block {} has never been locked", gb.loc)),
+            Some(Lock::Dirty { .. }) => Err(BMError::BadLock(gb.loc)),
+            Some(Lock::Clean { .. }) => Err(BMError::BadLock(gb.loc)),
+            None => Err(BMError::BadLock(gb.loc)),
         }
     }
 
     fn unlock_move(&mut self, fix: &mut Fixture, gb_ptr: Addr, new_location: u64) -> Result<()> {
-        let loc = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)?.loc;
+        let loc = read_guest::<GBlock>(&fix.vm.mem, gb_ptr)
+            .map_err(|e| BMError::MemErr(e))?
+            .loc;
         self.unlock(fix, gb_ptr)?;
 
         match self.locks.remove(&loc) {
             Some(Lock::Read { .. }) => {
                 // Still held, so we have to create a new buffer and do a memcpy
                 // FIXME: erroring for now, since I don't think this can happen
-                Err(anyhow!("oh ... it can happen"))
+                todo!();
             }
-            Some(Lock::Write { .. }) => Err(anyhow!("block {} is still write locked somehow", loc)),
+            Some(Lock::Write { .. }) => Err(BMError::BadLock(loc)),
             Some(Lock::Dirty {
                 validator,
                 guest_ptr,
             }) => {
                 // flush this block
-                let gb = read_guest::<GBlock>(&fix.vm.mem, guest_ptr)?;
-                fix.vm.mem.change_perms(
-                    gb.data,
-                    Addr(gb.data.0 + BLOCK_SIZE as u64),
-                    PERM_READ | PERM_WRITE,
-                )?;
+                let gb =
+                    read_guest::<GBlock>(&fix.vm.mem, guest_ptr).map_err(|e| BMError::MemErr(e))?;
+                fix.vm
+                    .mem
+                    .change_perms(
+                        gb.data,
+                        Addr(gb.data.0 + BLOCK_SIZE as u64),
+                        PERM_READ | PERM_WRITE,
+                    )
+                    .map_err(|e| BMError::MemErr(e))?;
                 self.v_prep(fix, guest_ptr, validator)?;
 
-                let data = fix.vm.mem.free(gb.data)?;
+                let data = fix.vm.mem.free(gb.data).map_err(|e| BMError::MemErr(e))?;
 
                 // we deliberately don't count the cpu cost of this copy since
                 // it wouldn't be incurred with bufio.
@@ -542,7 +650,7 @@ impl BMInner {
                     gb.loc,
                     Lock::Clean {
                         resident: false,
-                        validator: Some(validator),
+                        validator: validator,
                         data,
                     },
                 );
@@ -550,7 +658,7 @@ impl BMInner {
                     new_location,
                     Lock::Clean {
                         resident: true,
-                        validator: Some(validator),
+                        validator: validator,
                         data: data_copy,
                     },
                 );
@@ -561,7 +669,7 @@ impl BMInner {
                 self.locks.insert(new_location, l);
                 Ok(())
             }
-            None => Err(anyhow!("block {} has never been locked", loc)),
+            None => Err(BMError::BadLock(loc)),
         }
     }
 
@@ -578,26 +686,31 @@ impl BMInner {
                 } => {
                     // We need to make sure the data has write permissions for the prep to
                     // work (it might have been read locked last).
-                    let gb = read_guest::<GBlock>(&fix.vm.mem, guest_ptr)?;
-                    fix.vm.mem.change_perms(
-                        gb.data,
-                        Addr(gb.data.0 + BLOCK_SIZE as u64),
-                        PERM_READ | PERM_WRITE,
-                    )?;
+                    let gb = read_guest::<GBlock>(&fix.vm.mem, guest_ptr)
+                        .map_err(|e| BMError::MemErr(e))?;
+                    fix.vm
+                        .mem
+                        .change_perms(
+                            gb.data,
+                            Addr(gb.data.0 + BLOCK_SIZE as u64),
+                            PERM_READ | PERM_WRITE,
+                        )
+                        .map_err(|e| BMError::MemErr(e))?;
                     self.v_prep(fix, guest_ptr, validator)?;
 
-                    let data = fix.vm.mem.free(gb.data)?;
+                    let data = fix.vm.mem.free(gb.data).map_err(|e| BMError::MemErr(e))?;
                     self.locks.insert(
                         gb.loc,
                         Lock::Clean {
                             resident: true,
-                            validator: Some(validator),
+                            validator: validator,
                             data,
                         },
                     );
                 }
                 _ => {
-                    return Err(anyhow!("can't happen"));
+                    // can't happen
+                    assert!(false);
                 }
             }
         }
@@ -610,22 +723,22 @@ impl BMInner {
             .read(true)
             .write(true)
             .create(true)
-            .open(path)?;
+            .open(path)
+            .map_err(|e| BMError::IoErr(e))?;
         let zeroes = [0u8; 4096];
 
         for b in 0..self.nr_blocks {
-            file.seek(io::SeekFrom::Start(b * BLOCK_SIZE as u64))?;
+            file.seek(io::SeekFrom::Start(b * BLOCK_SIZE as u64))
+                .map_err(|e| BMError::IoErr(e))?;
             match self.locks.get(&b) {
                 Some(Lock::Clean { data, .. }) => {
-                    file.write_all(&data)?;
+                    file.write_all(&data).map_err(|e| BMError::IoErr(e))?;
                 }
                 Some(_) => {
-                    return Err(anyhow!(
-                        "cannot write bm to disk since there's unflushed/locked data"
-                    ));
+                    return Err(BMError::UnflushedData);
                 }
                 None => {
-                    file.write_all(&zeroes)?;
+                    file.write_all(&zeroes).map_err(|e| BMError::IoErr(e))?;
                 }
             }
         }
@@ -665,7 +778,7 @@ impl BMInner {
     //----------------------------------------------
 
     fn read(&mut self, b: u64) -> io::Result<io_engine::Block> {
-        self.check_bounds(b)?;
+        self.check_bounds_io(b)?;
 
         match self.locks.get(&b) {
             Some(Lock::Read { .. }) => Err(io::Error::new(
@@ -694,7 +807,7 @@ impl BMInner {
     }
 
     fn write(&mut self, block: &io_engine::Block) -> io::Result<()> {
-        self.check_bounds(block.loc)?;
+        self.check_bounds_io(block.loc)?;
 
         match self.locks.get_mut(&block.loc) {
             Some(Lock::Read { .. }) => Err(io::Error::new(
@@ -709,8 +822,11 @@ impl BMInner {
                 io::ErrorKind::AddrInUse,
                 "block has not been flushed".to_string(),
             )),
-            Some(Lock::Clean { data, .. }) => {
+            Some(Lock::Clean { data, validator, .. }) => {
                 data.copy_from_slice(&block.get_data());
+
+                // force revalidation
+                *validator = Addr(0);
                 Ok(())
             }
             None => {
@@ -719,7 +835,7 @@ impl BMInner {
                     block.loc,
                     Lock::Clean {
                         resident: true,
-                        validator: None,
+                        validator: Addr(0),
                         data: block.get_data().to_vec(),
                     },
                 );
@@ -754,19 +870,19 @@ impl BlockManager {
         inner.locks.len()
     }
 
-    pub fn read_lock(&self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
+    pub fn read_lock(&self, fix: &mut Fixture, loc: u64, v_ptr: Addr) -> Result<Addr> {
         let mut inner = self.inner.lock().unwrap();
-        inner.read_lock(mem, loc, v_ptr)
+        inner.read_lock(fix, loc, v_ptr)
     }
 
-    pub fn write_lock(&self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
+    pub fn write_lock(&self, fix: &mut Fixture, loc: u64, v_ptr: Addr) -> Result<Addr> {
         let mut inner = self.inner.lock().unwrap();
-        inner.write_lock(mem, loc, v_ptr)
+        inner.write_lock(fix, loc, v_ptr)
     }
 
-    pub fn write_lock_zero(&self, mem: &mut Memory, loc: u64, v_ptr: Addr) -> Result<Addr> {
+    pub fn write_lock_zero(&self, fix: &mut Fixture, loc: u64, v_ptr: Addr) -> Result<Addr> {
         let mut inner = self.inner.lock().unwrap();
-        inner.write_lock_zero(mem, loc, v_ptr)
+        inner.write_lock_zero(fix, loc, v_ptr)
     }
 
     // Returns true if ptr was freed, ie. no further holders of the lock.

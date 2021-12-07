@@ -162,7 +162,7 @@ pub fn dm_cache_metadata_get_stats(fix: &mut Fixture, cmd: Addr) -> Result<Cache
 
     fix.call_with_errno("dm_cache_metadata_get_stats")?;
 
-    read_guest::<CacheStats>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<CacheStats>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_cache_metadata_set_stats(fix: &mut Fixture, cmd: Addr, stats: &CacheStats) -> Result<()> {

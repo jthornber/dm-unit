@@ -180,7 +180,7 @@ pub fn dm_thin_find_block(
     fix.vm.set_reg(A2, if can_issue_io { 1 } else { 0 });
     fix.vm.set_reg(A3, result_ptr.0);
     fix.call_with_errno("dm_thin_find_block")?;
-    read_guest::<LookupResult>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<LookupResult>(&fix.vm.mem, result_ptr)?)
 }
 
 pub struct MappedRangeResult {
@@ -230,7 +230,7 @@ pub fn dm_pool_alloc_data_block(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_alloc_data_block")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_thin_insert_block(
@@ -281,7 +281,7 @@ pub fn dm_thin_get_highest_mapped_block(fix: &mut Fixture, td: Addr) -> Result<u
     fix.vm.set_reg(A0, td.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_thin_get_highest_mapped_block")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_thin_get_mapped_count(fix: &mut Fixture, td: Addr) -> Result<u64> {
@@ -289,7 +289,7 @@ pub fn dm_thin_get_mapped_count(fix: &mut Fixture, td: Addr) -> Result<u64> {
     fix.vm.set_reg(A0, td.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_clone_thin_device")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_pool_get_free_block_count(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
@@ -297,7 +297,7 @@ pub fn dm_pool_get_free_block_count(fix: &mut Fixture, pmd: Addr) -> Result<u64>
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_get_free_block_count")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_pool_get_free_metadata_block_count(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
@@ -305,7 +305,7 @@ pub fn dm_pool_get_free_metadata_block_count(fix: &mut Fixture, pmd: Addr) -> Re
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_get_free_metadata_block_count")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_pool_get_metadata_dev_size(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
@@ -313,7 +313,7 @@ pub fn dm_pool_get_metadata_dev_size(fix: &mut Fixture, pmd: Addr) -> Result<u64
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_get_metadata_dev_size")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_pool_get_data_dev_size(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
@@ -321,7 +321,7 @@ pub fn dm_pool_get_data_dev_size(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
     fix.vm.set_reg(A0, pmd.0);
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_pool_get_data_dev_size")?;
-    read_guest::<u64>(&fix.vm.mem, result_ptr)
+    Ok(read_guest::<u64>(&fix.vm.mem, result_ptr)?)
 }
 
 pub fn dm_pool_block_is_shared(fix: &mut Fixture, pmd: Addr, b: u64) -> Result<bool> {
