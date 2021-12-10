@@ -469,6 +469,16 @@ impl BTreeTest {
         Ok(())
     }
 
+    fn remove_fuzz(&mut self, fix: &mut Fixture, key: u64) -> Result<()> {
+        let ks = vec![key];
+        let v = Value64(key_to_value(key));
+        let (errno, mroot) = dm_btree_remove_with_errno(fix, &self.info, self.root, &ks)?;
+        if let Some(root) = mroot {
+            self.root = root;
+        }
+        Ok(())
+    }
+
     fn lookup(&mut self, fix: &mut Fixture, key: u64) -> Result<()> {
         let keys = vec![key];
         let v = dm_btree_lookup(fix, &self.info, self.root, &keys)?;
@@ -1125,7 +1135,7 @@ fn fuzz_insert_damaged(
     tx: Sender<anyhow::Error>,
 ) {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
-    let mut probes = 10;
+    let mut probes = 40;
     // let _ = fix.stub("printk", 0); // disable printk
 
     for i in 0..probes {
@@ -1155,7 +1165,6 @@ fn fuzz_insert_damaged(
                 .insert_fuzz(&mut fix2, k)
                 .with_context(|| format!("fuzzing block {}", loc))
             {
-                // FIXME: send details of the damage too
                 tx.send(e).unwrap();
             }
         }
@@ -1212,6 +1221,123 @@ fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
         let tx = tx.clone();
         pool.execute(move || {
             fuzz_insert_damaged(fix, bt, seed, loc, &kr, tx);
+        });
+    }
+
+    drop(tx);
+
+    let mut nr_failures = 0;
+    while let Ok(v) = rx.recv() {
+        debug!("received: {:?}", v);
+        nr_failures += 1;
+    }
+    pool.join();
+
+    debug!("fuzz threads took {}", now.elapsed().as_secs_f32());
+    debug!("{} failures", nr_failures);
+
+    ensure!(nr_failures == 0);
+
+    Ok(())
+}
+
+//----------------------------
+
+fn fuzz_remove_damaged(
+    mut fix: Fixture,
+    bt: BTreeTest,
+    seed: u64,
+    loc: u64,
+    kr: &KeyRange,
+    tx: Sender<anyhow::Error>,
+) {
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    let mut probes = 200;
+    // let _ = fix.stub("printk", 0); // disable printk
+
+    for i in 0..probes {
+        let mut fix2 = fix.clone();
+        let mut bt = bt.clone();
+
+        let mut bm = get_bm(&mut fix2, bt.bm);
+        let engine: Arc<dyn IoEngine + Send + Sync> = bm;
+        let block = engine.read(loc).expect("couldn't read block");
+
+        // Damage the node at loc
+        for _ in 0..64 {
+            let byte = rng.gen_range(0..BLOCK_SIZE);
+            let val = rng.gen_range(0..=255);
+            block.get_data()[byte] = val;
+        }
+        checksum::write_checksum(&mut block.get_data(), checksum::BT::NODE)
+            .expect("writing checksum failed");
+
+        engine.write(&block).expect("couldn't write block");
+
+        for _ in 0..100 {
+            let k = key_from_range(kr, &mut rng);
+            // bt.remove_fuzz(&mut fix2, k).expect("bang");
+
+            if let Err(e) = bt
+                .remove_fuzz(&mut fix2, k)
+                .with_context(|| format!("fuzzing block {}", loc))
+            {
+                tx.send(e).unwrap();
+            }
+        }
+    }
+}
+
+// Build a btree, damage a node (but correct checksum), try some inserts
+// near the damaged node.
+
+fn test_fuzz_remove_damaged(fix: &mut Fixture) -> Result<()> {
+    const COUNT: u64 = 100000;
+    standard_globals(fix)?;
+    // enable_traces(fix);
+
+    debug!("building initial tree");
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut bt = BTreeTest::new(fix)?;
+    bt.begin(fix)?;
+    for i in 0..COUNT {
+        if i % 10000 == 0 {
+            debug!("inserted {} keys", i);
+        }
+        let k = rng.gen_range(0..1000000);
+        bt.insert(fix, k)?;
+    }
+    debug!("inserted {} keys", COUNT);
+    bt.commit(fix)?;
+
+    debug!("building list of nodes");
+    let mut info = discover_nodes::<Value64>(get_bm(fix, bt.bm), bt.root)?;
+
+    // let nr_jobs = nodes.len();
+    let nr_threads = get_nr_threads()?;
+    let pool = ThreadPool::new(nr_threads);
+    let now = Instant::now();
+
+    let (tx, rx) = channel();
+
+    for (loc, kr) in info.internal_nodes {
+        let mut fix: Fixture = fix.deep_copy();
+        let seed = rng.gen_range(0..1000000);
+        let bt = bt.clone();
+        let tx = tx.clone();
+        pool.execute(move || {
+            fuzz_insert_damaged(fix, bt, seed, loc, &kr, tx);
+        });
+    }
+
+    for (loc, kr) in info.leaf_nodes {
+        let mut fix: Fixture = fix.deep_copy();
+        let seed = rng.gen_range(0..1000000);
+        let bt = bt.clone();
+        let tx = tx.clone();
+        pool.execute(move || {
+            fuzz_remove_damaged(fix, bt, seed, loc, &kr, tx);
         });
     }
 
@@ -1349,6 +1475,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("insert", test_fuzz_insert)
             test!("remove", test_fuzz_remove)
             test!("insert-damaged", test_fuzz_insert_damaged)
+            test!("remove-damaged", test_fuzz_remove_damaged)
             test!("mutex", test_fuzz_mutex)
         }
     };
