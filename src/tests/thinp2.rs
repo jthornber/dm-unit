@@ -5,7 +5,7 @@ use log::*;
 use nom::{number::complete::*, IResult};
 use rand::prelude::*;
 use rand::SeedableRng;
-use std::collections::{BTreeSet, BTreeMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
@@ -867,6 +867,7 @@ impl<G: Guest> Guest for BTree<G> {
     }
 
     fn pack<W: Write>(&self, w: &mut W, ptr: Addr) -> io::Result<()> {
+        // We need to pack a pointer to the value type
         self.vt.pack(w, ptr)?;
         w.write_u64::<LittleEndian>(self.vt_context.0)?;
         w.write_u64::<LittleEndian>(self.tm.0)?;
@@ -1114,6 +1115,124 @@ fn check_btree<V: Unpack>(fix: &mut Fixture, btree_ptr: Addr) -> Result<()> {
     let engine = engine.lock().unwrap();
 
     check_node::<V>(&*engine, root, None)?;
+    Ok(())
+}
+
+//-------------------------------
+
+struct Extent {
+    alloc_group: u32,
+    offset: u16,
+    len: u16,
+    ref_count: u16,
+}
+
+impl Guest for Extent {
+    fn guest_len() -> usize {
+        12
+    }
+
+    fn pack<W: Write>(&self, w: &mut W, _ptr: Addr) -> io::Result<()> {
+        w.write_u32::<LittleEndian>(self.alloc_group)?;
+        w.write_u16::<LittleEndian>(self.offset)?;
+        w.write_u16::<LittleEndian>(self.len)?;
+        w.write_u16::<LittleEndian>(self.ref_count)?;
+
+        Ok(())
+    }
+
+    fn unpack<R: Read>(r: &mut R, _ptr: Addr) -> io::Result<Self> {
+        let alloc_group = r.read_u32::<LittleEndian>()?;
+        let offset = r.read_u16::<LittleEndian>()?;
+        let len = r.read_u16::<LittleEndian>()?;
+        let ref_count = r.read_u16::<LittleEndian>()?;
+
+        Ok(Self {
+            alloc_group,
+            offset,
+            len,
+            ref_count,
+        })
+    }
+}
+
+struct ExtentTree {
+    next_key: u64,
+    tree: BTree<Extent>,
+}
+
+impl Guest for ExtentTree {
+    fn guest_len() -> usize {
+        40
+    }
+
+    fn pack<W: Write>(&self, w: &mut W, ptr: Addr) -> io::Result<()> {
+        w.write_u64::<LittleEndian>(self.next_key)?;
+        self.tree.pack(w, Addr(ptr.0 + 8))?;
+        Ok(())
+    }
+
+    fn unpack<R: Read>(r: &mut R, ptr: Addr) -> io::Result<Self> {
+        let next_key = r.read_u64::<LittleEndian>()?;
+        let tree = BTree::<Extent>::unpack(r, Addr(ptr.0 + 8))?;
+        Ok(Self { next_key, tree })
+    }
+}
+
+fn et_new(fix: &mut Fixture, tm_ptr: Addr) -> Result<ExtentTree> {
+    let (mut fix, et_ptr) = auto_alloc(fix, ExtentTree::guest_len())?;
+    fix.vm.set_reg(A0, et_ptr.0);
+    fix.vm.set_reg(A1, tm_ptr.0);
+
+    fix.call_with_errno("et_new")?;
+
+    let et = read_guest::<ExtentTree>(&fix.vm.mem, et_ptr)?;
+    Ok(et)
+}
+
+fn et_open(fix: &mut Fixture, tm_ptr: Addr, root: u64) -> Result<ExtentTree> {
+    let (mut fix, et_ptr) = auto_alloc(fix, ExtentTree::guest_len())?;
+    fix.vm.set_reg(A0, et_ptr.0);
+    fix.vm.set_reg(A1, tm_ptr.0);
+    fix.vm.set_reg(A2, root);
+
+    fix.call_with_errno("et_open")?;
+
+    let et = read_guest::<ExtentTree>(&fix.vm.mem, et_ptr)?;
+    Ok(et)
+}
+
+fn et_lookup(fix: &mut Fixture, et_ptr: Addr, key: u64) -> Result<Extent> {
+    let (mut fix, e_ptr) = auto_alloc(fix, Extent::guest_len())?;
+    fix.vm.set_reg(A0, et_ptr.0);
+    fix.vm.set_reg(A1, key);
+    fix.vm.set_reg(A2, e_ptr.0);
+
+    fix.call_with_errno("et_lookup")?;
+
+    let e = read_guest::<Extent>(&fix.vm.mem, e_ptr)?;
+    Ok(e)
+}
+
+fn et_insert(fix: &mut Fixture, et_ptr: Addr, e: &Extent) -> Result<u64> {
+    let (mut fix, e_ptr) = auto_guest(fix, e, PERM_READ)?;
+    let (mut fix, key_ptr) = auto_alloc(&mut fix, 8)?;
+
+    fix.vm.set_reg(A0, et_ptr.0);
+    fix.vm.set_reg(A1, e_ptr.0);
+    fix.vm.set_reg(A2, key_ptr.0);
+
+    fix.call_with_errno("et_insert")?;
+
+    let key = read_guest::<u64>(&fix.vm.mem, key_ptr)?;
+    Ok(key)
+}
+
+fn et_remove(fix: &mut Fixture, et_ptr: Addr, key: u64) -> Result<()> {
+    let (mut fix, key_ptr) = auto_guest(fix, &key, PERM_READ)?;
+    fix.vm.set_reg(A0, et_ptr.0);
+    fix.vm.set_reg(A1, key_ptr.0);
+    fix.call_with_errno("et_remove")?;
     Ok(())
 }
 
@@ -1626,14 +1745,13 @@ fn test_tm_get(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 fn trace_things(fix: &mut Fixture) -> Result<()> {
-    /*
     fix.trace_func("tm_shadow")?;
     fix.trace_func("ss_get")?;
     fix.trace_func("tm_get")?;
-    */
     fix.trace_func("btree_lookup")?;
     fix.trace_func("btree_insert")?;
     fix.trace_func("insert_")?;
+
     /*
     fix.trace_func("riw_down_read")?;
     fix.trace_func("riw_down_intent")?;
@@ -1788,11 +1906,22 @@ fn fuzz_insert(fix: Fixture, seed: u64, btree_ptr: Addr) {
     }
 }
 
+fn is_mapped(fix: &mut Fixture) -> Result<()> {
+    debug!("in is mapped");
+    let ptr = fix.vm.reg(A0);
+    let len = fix.vm.reg(A1);
+    fix.vm
+        .mem
+        .check_perms(Addr(ptr), Addr(ptr + len), PERM_READ | PERM_WRITE)?;
+    Ok(())
+}
+
 fn test_fuzz(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
     riw_globals(fix)?;
     stub_io_engine(fix)?;
     // trace_things(fix)?;
+    // fix.at_func("is_mapped", Arc::new(Mutex::new(is_mapped)))?;
 
     let nr_blocks = 10240;
     let bdev = mk_block_device(&mut fix.vm.mem, 0, nr_blocks * 8)?;
@@ -1836,21 +1965,37 @@ fn test_fuzz(fix: &mut Fixture) -> Result<()> {
     let pool = ThreadPool::new(nr_threads);
 
     for j in 0..nr_jobs {
+        debug!("job {}", j);
         let mut fix: Fixture = fix_at_start.clone();
 
-	for k in &interesting[j] {
+        for k in &interesting[j] {
             btree_insert(&mut fix, btree_ptr, *k, &17)?;
-	}
+        }
 
         let seed = rng.gen_range(0..1000000);
-        pool.execute(move || {
-            fuzz_insert(fix, seed, btree_ptr);
-        });
+        // pool.execute(move || {
+        fuzz_insert(fix, seed, btree_ptr);
+        // });
     }
 
     debug!("waiting for fuzz threads");
     pool.join();
 
+    Ok(())
+}
+
+//-------------------------------
+
+fn test_et_new(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    riw_globals(fix)?;
+    stub_io_engine(fix)?;
+
+    let nr_blocks = 1024;
+    let bdev = mk_block_device(&mut fix.vm.mem, 0, nr_blocks * 8)?;
+    let (mut fix, tm_ptr) = auto_tm(&mut *fix, bdev, nr_blocks)?;
+
+    et_new(&mut fix, tm_ptr)?;
     Ok(())
 }
 
@@ -1930,6 +2075,11 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             test!("new", test_btree_new)
             test!("insert", test_btree_insert)
             test!("fuzz", test_fuzz)
+        }
+
+        test_section! {
+            "extent-tree/",
+            test!("new", test_et_new)
         }
     }
 

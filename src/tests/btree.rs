@@ -1198,7 +1198,7 @@ fn test_fuzz_insert_damaged(fix: &mut Fixture) -> Result<()> {
     let mut info = discover_nodes::<Value64>(get_bm(fix, bt.bm), bt.root)?;
 
     // let nr_jobs = nodes.len();
-    let nr_threads = 1; // get_nr_threads()?;
+    let nr_threads = get_nr_threads()?;
     let pool = ThreadPool::new(nr_threads);
     let now = Instant::now();
 

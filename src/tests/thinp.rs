@@ -226,16 +226,21 @@ fn test_create(fix: &mut Fixture) -> Result<()> {
 
 fn test_create_many_thins(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
+
     let mut t = ThinPool::new(fix, 10240, 64, 102400)?;
     for tid in 0..1000 {
         t.create_thin(fix, tid)?;
     }
 
     t.commit(fix)?;
+    t.check(fix)?;
 
     for tid in 0..1000 {
         t.delete_thin(fix, tid)?;
     }
+
+    t.commit(fix)?;
+    t.check(fix)?;
 
     Ok(())
 }
@@ -251,8 +256,6 @@ fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
         t.create_snap(fix, snap, snap - 1)?;
     }
 
-    // A commit is needed, otherwise delete will not work (not sure why,
-    // or if this is a feature).
     t.commit(fix)?;
 
     for tid in 0..count {
@@ -260,6 +263,7 @@ fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
     }
 
     t.commit(fix)?;
+    t.check(fix)?;
 
     Ok(())
 }
