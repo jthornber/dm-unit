@@ -12,8 +12,8 @@ use thinp::report::*;
 use thinp::thin::check::*;
 use thinp::thin::superblock::*;
 
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;
@@ -140,6 +140,14 @@ impl ThinPool {
 
     fn remove_range(&mut self, fix: &mut Fixture, td: &ThinDev, b: u64, e: u64) -> Result<()> {
         dm_thin_remove_range(fix, td.td, b, e)
+    }
+
+    fn take_msnap(&mut self, fix: &mut Fixture) -> Result<()> {
+        dm_pool_reserve_metadata_snap(fix, self.pmd)
+    }
+
+    fn drop_msnap(&mut self, fix: &mut Fixture) -> Result<()> {
+        dm_pool_release_metadata_snap(fix, self.pmd)
     }
 
     fn free_metadata_blocks(&mut self, fix: &mut Fixture) -> Result<u64> {
@@ -588,6 +596,88 @@ fn test_discard_rolling_snaps(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+const MSNAP_NR_MAPPINGS: u64 = 40000;
+
+fn test_msnap_scenario<F>(fix: &mut Fixture, func: F) -> Result<()>
+where
+    F: FnOnce(&mut Fixture, &mut ThinPool) -> Result<()>,
+{
+    standard_globals(fix)?;
+
+    info!("creating pool");
+    let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
+
+    info!("creating thin");
+    pool.create_thin(fix, 0)?;
+    let td = pool.open_thin(fix, 0)?;
+
+    // Fully provision the thin
+    info!("provisioning thin");
+    for b in 0..MSNAP_NR_MAPPINGS {
+        let data_b = pool.alloc_data_block(fix)?;
+        pool.insert_block(fix, &td, b, data_b)?;
+    }
+    pool.commit(fix)?;
+    pool.close_thin(fix, td)?;
+
+    info!("taking meta snap");
+    pool.take_msnap(fix)?;
+    func(fix, &mut pool)?;
+    pool.commit(fix)?;
+
+    info!("dropping meta snap");
+    pool.drop_msnap(fix)?;
+
+    pool.commit(fix)?;
+    pool.check(fix)?;
+
+    Ok(())
+}
+
+fn test_msnap_noop(fix: &mut Fixture) -> Result<()> {
+    test_msnap_scenario(fix, |fix, pool| {Ok(())})
+}
+
+fn test_msnap_create_thin(fix: &mut Fixture) -> Result<()> {
+    test_msnap_scenario(fix, |fix, pool| {
+        pool.create_thin(fix, 1);
+        let td = pool.open_thin(fix, 1)?;
+
+        info!("provisioning new thin");
+        for b in 0..MSNAP_NR_MAPPINGS {
+            let data_b = pool.alloc_data_block(fix)?;
+            pool.insert_block(fix, &td, b, data_b)?;
+        }
+
+        Ok(())
+    })
+}
+
+fn test_msnap_create_snap(fix: &mut Fixture) -> Result<()> {
+    test_msnap_scenario(fix, |fix, pool| {
+        pool.create_snap(fix, 1, 0)?;
+        let td = pool.open_thin(fix, 1)?;
+
+        info!("overwriting snap");
+        for b in 0..MSNAP_NR_MAPPINGS {
+            let data_b = pool.alloc_data_block(fix)?;
+            pool.insert_block(fix, &td, b, data_b)?;
+        }
+
+        Ok(())
+    })
+}
+
+fn test_msnap_delete_thin(fix: &mut Fixture) -> Result<()> {
+    test_msnap_scenario(fix, |fix, pool| {
+        info!("delete");
+        pool.delete_thin(fix, 0)?;
+        Ok(())
+    })
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let kmodules = vec![PDATA_MOD, THIN_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
@@ -621,6 +711,10 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("snaps/rolling", test_provision_rolling_snaps)
         test!("discard/runs", test_discard_single_thin)
         test!("discard/rolling", test_discard_rolling_snaps)
+        test!("metadata-snap/no-op", test_msnap_noop)
+        test!("metadata-snap/create-thin", test_msnap_create_thin)
+        test!("metadata-snap/snap-thin", test_msnap_create_snap)
+        test!("metadata-snap/delete-thin", test_msnap_delete_thin)
     }
 
     Ok(())
