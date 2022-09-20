@@ -1,0 +1,27 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index fcbb81feb7ad..9e8f4f63230c 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -105,7 +105,6 @@ config RISCV
+ 	select HAVE_PERF_USER_STACK_DUMP
+ 	select HAVE_REGS_AND_STACK_ACCESS_API
+ 	select HAVE_FUNCTION_ARG_ACCESS_API
+-	select HAVE_STACKPROTECTOR
+ 	select HAVE_SYSCALL_TRACEPOINTS
+ 	select HAVE_RSEQ
+ 	select IRQ_DOMAIN
+@@ -543,13 +542,8 @@ config EFI
+ 	  allow the kernel to be booted as an EFI application. This
+ 	  is only useful on systems that have UEFI firmware.
+ 
+-config CC_HAVE_STACKPROTECTOR_TLS
+-	def_bool $(cc-option,-mstack-protector-guard=tls -mstack-protector-guard-reg=tp -mstack-protector-guard-offset=0)
+-
+ config STACKPROTECTOR_PER_TASK
+-	def_bool y
+-	depends on !RANDSTRUCT
+-	depends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_TLS
++	def_bool n
+ 
+ config PHYS_RAM_BASE_FIXED
+ 	bool "Explicitly specified physical RAM address"
