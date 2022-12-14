@@ -31,8 +31,8 @@ pub fn dm_pool_get_block_manager(fix: &mut Fixture, pmd: Addr) -> Result<Addr> {
     let bm_ptr = Addr(fix.vm.mem.read_some(pmd, PERM_READ, |bytes| {
         let mut r = Cursor::new(bytes);
         r.set_position(24);
-        let bm_ptr = r.read_u64::<LittleEndian>().unwrap();
-        bm_ptr
+        
+        r.read_u64::<LittleEndian>().unwrap()
     })?);
     Ok(bm_ptr)
 }
@@ -134,19 +134,13 @@ pub fn dm_thin_dev_id(fix: &mut Fixture, td: Addr) -> Result<ThinId> {
     Ok(fix.vm.reg(A0) as u32)
 }
 
+#[derive(Default)]
 pub struct LookupResult {
     pub block: u64,
     pub shared: bool,
 }
 
-impl Default for LookupResult {
-    fn default() -> Self {
-        LookupResult {
-            block: 0,
-            shared: false,
-        }
-    }
-}
+
 
 impl Guest for LookupResult {
     fn guest_len() -> usize {

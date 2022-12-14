@@ -310,7 +310,7 @@ impl VM {
         self.mem
             .read(src, &mut bytes, PERM_READ)
             .map_err(VmErr::BadAccess)?;
-        self.set_reg(rd, i64::from_le_bytes(bytes) as i64 as u64);
+        self.set_reg(rd, i64::from_le_bytes(bytes) as u64);
 
         // addi sp,sp,8
         self.set_reg(Sp, self.reg(Sp).wrapping_add(8u64));
@@ -491,7 +491,7 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             Sltiu { rd, rs, imm } => {
-                let v = if (self.reg(rs) as u64) < (imm as u64) {
+                let v = if self.reg(rs) < (imm as u64) {
                     1
                 } else {
                     0
@@ -574,7 +574,7 @@ impl VM {
             }
             Slliw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
-                self.set_reg(rd, (rs << shamt) as i32 as i64 as u64);
+                self.set_reg(rd, (rs << shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             Srliw { rd, rs, shamt } => {
@@ -584,7 +584,7 @@ impl VM {
             }
             Sraiw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
-                self.set_reg(rd, ((rs as i32) >> shamt) as i64 as u64);
+                self.set_reg(rd, (rs >> shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             Addw { rd, rs1, rs2 } => {
@@ -635,13 +635,13 @@ impl VM {
             }
             Mulhsu { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64 as u128;
-                let rs2 = self.reg(rs2) as u64 as u128;
+                let rs2 = self.reg(rs2) as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
             Mulhu { rd, rs1, rs2 } => {
-                let rs1 = self.reg(rs1) as u64 as u128;
-                let rs2 = self.reg(rs2) as u64 as u128;
+                let rs1 = self.reg(rs1) as u128;
+                let rs2 = self.reg(rs2) as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
@@ -680,7 +680,7 @@ impl VM {
             Mulw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
-                let v = (rs1 as u32).wrapping_mul(rs2 as u32);
+                let v = rs1.wrapping_mul(rs2);
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -688,7 +688,7 @@ impl VM {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
                 let v = if rs2 == 0 { -1 } else { rs1.wrapping_div(rs2) };
-                self.set_reg(rd, v as i32 as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             Divuw { rd, rs1, rs2 } => {
@@ -706,7 +706,7 @@ impl VM {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
-                self.set_reg(rd, v as i32 as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             Remuw { rd, rs1, rs2 } => {

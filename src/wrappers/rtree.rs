@@ -78,15 +78,13 @@ pub fn dm_rtree_lookup(
     let r = fix.vm.reg(A0) as i64 as i32;
     if r == 0 {
         let value = read_guest(&fix.vm.mem, result_ptr)?;
-        return Ok(Some(value));
+        Ok(Some(value))
     } else if r == -libc::ENODATA {
         return Ok(None);
+    } else if r < 0 {
+        return Err(anyhow!("dm_rtree_lookup() failed: {}", error_string(-r)));
     } else {
-        if r < 0 {
-            return Err(anyhow!("dm_rtree_lookup() failed: {}", error_string(-r)));
-        } else {
-            return Err(anyhow!("dm_rtree_lookup() failed: {}", r));
-        }
+        return Err(anyhow!("dm_rtree_lookup() failed: {}", r));
     }
 }
 
@@ -98,8 +96,8 @@ pub fn dm_rtree_insert(
     value: &Mapping,
 ) -> Result<(u64, u32)> {
     let (mut fix, mapping_ptr) = auto_guest::<Mapping>(&mut *fix, value, PERM_READ | PERM_WRITE)?;
-    let (mut fix, new_root_ptr) = auto_alloc(&mut *fix, 8)?;
-    let (mut fix, nr_inserts_ptr) = auto_alloc(&mut *fix, 4)?;
+    let (mut fix, new_root_ptr) = auto_alloc(&mut fix, 8)?;
+    let (mut fix, nr_inserts_ptr) = auto_alloc(&mut fix, 4)?;
     fix.vm.set_reg(A0, tm.0);
     fix.vm.set_reg(A1, data_sm.0);
     fix.vm.set_reg(A2, root);

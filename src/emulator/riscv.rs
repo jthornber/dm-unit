@@ -397,7 +397,7 @@ impl From<u32> for IType {
         let rd = reg_at(inst, 7);
         let rs = reg_at(inst, 15);
         let imm = (inst as i32) >> 20;
-        let func = ((inst >> 12) & 0b111) as u32;
+        let func = (inst >> 12) & 0b111;
 
         IType { rd, rs, imm, func }
     }

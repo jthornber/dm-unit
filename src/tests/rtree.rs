@@ -22,6 +22,7 @@ use thinp::pdata::unpack::Unpack;
 
 //-------------------------------
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct Header {
     pub block: u64,
@@ -137,21 +138,14 @@ impl Unpack for Node {
 }
 
 #[derive(Debug)]
+#[derive(Default)]
 struct TreeStats {
     nr_internal: u64,
     nr_leaves: u64,
     nr_entries: u64,
 }
 
-impl Default for TreeStats {
-    fn default() -> Self {
-        TreeStats {
-            nr_internal: 0,
-            nr_leaves: 0,
-            nr_entries: 0,
-        }
-    }
-}
+
 
 fn rtree_check(
     engine: &dyn IoEngine,
@@ -221,6 +215,7 @@ fn enable_traces(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 struct RTreeTest<'a> {
     fix: &'a mut Fixture,
     bm: Addr,
@@ -531,7 +526,7 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         .collect();
 
     for m in &mappings {
-        let _nr_inserted = rtree.insert(&m)?;
+        let _nr_inserted = rtree.insert(m)?;
     }
 
     // These mappings should have all been merged into a single
@@ -609,17 +604,17 @@ fn test_insert_random(fix: &mut Fixture) -> Result<()> {
     let mut n = 0;
     let mut total = 0;
     let mut csv = File::create("./rtree.csv")?;
-    write!(csv, "inserts, nr_internal, nr_leaves, nr_entries\n")?;
+    writeln!(csv, "inserts, nr_internal, nr_leaves, nr_entries")?;
     for m in &mappings {
-        let _nr_inserted = rtree.insert(&m)?;
+        let _nr_inserted = rtree.insert(m)?;
         n += 1;
 
         if n == COMMIT_INTERVAL {
             let stats = rtree.check()?;
             total += n;
-            write!(
+            writeln!(
                 csv,
-                "{}, {}, {}, {}\n",
+                "{}, {}, {}, {}",
                 total, stats.nr_internal, stats.nr_leaves, stats.nr_entries
             )?;
             n = 0;
@@ -683,17 +678,17 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     let mut n = 0;
     let mut total = 0;
     let mut csv = File::create("./rtree.csv")?;
-    write!(csv, "inserts, nr_internal, nr_leaves, nr_entries\n")?;
+    writeln!(csv, "inserts, nr_internal, nr_leaves, nr_entries")?;
     for m in &mappings {
-        let _nr_inserted = rtree.insert(&m)?;
+        let _nr_inserted = rtree.insert(m)?;
         n += 1;
 
         if n == COMMIT_INTERVAL {
             let stats = rtree.check()?;
             total += n;
-            write!(
+            writeln!(
                 csv,
-                "{}, {}, {}, {}\n",
+                "{}, {}, {}, {}",
                 total, stats.nr_internal, stats.nr_leaves, stats.nr_entries
             )?;
             n = 0;

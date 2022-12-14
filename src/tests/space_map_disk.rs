@@ -106,7 +106,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
                    Test::new(kmodules.clone(), Box::new(test_inc_cost_)));
     runner.register(
         "/pdata/space-map/disk/wrapping-around",
-        Test::new(kmodules.clone(), Box::new(test_wrapping_around_)),
+        Test::new(kmodules, Box::new(test_wrapping_around_)),
     );
     Ok(())
 }

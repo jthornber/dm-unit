@@ -25,7 +25,6 @@ use std::sync::{Arc, Mutex};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
-use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
 
@@ -217,7 +216,7 @@ impl Unpack for Value64 {
 }
 
 impl Pack for Value64 {
-    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
+    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.0)?;
         Ok(())
     }
@@ -238,7 +237,7 @@ impl Unpack for Value32 {
 }
 
 impl Pack for Value32 {
-    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
+    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> io::Result<()> {
         w.write_u32::<LittleEndian>(self.0)?;
         Ok(())
     }
@@ -483,7 +482,7 @@ fn do_insert_test_(
     bt.stats_report("lookup", keys.len() as u64)?;
     bt.commit()?;
 
-    bt.check_keys_present(&keys)?;
+    bt.check_keys_present(keys)?;
 
     Ok(())
 }
@@ -589,7 +588,7 @@ fn check_node(node: &Node<Value64>, key_begin: u64, nr_entries: usize) -> Result
     if let Node::<Value64>::Leaf { values, .. } = node {
         i = key_begin;
         for value in values.iter() {
-            ensure!((*value).0 == i);
+            ensure!(value.0 == i);
             i += 1;
         }
     }
@@ -712,11 +711,11 @@ fn test_redistribute_2(fix: &mut Fixture, nr_left: usize, nr_right: usize) -> Re
     let target_right = total - target_left;
 
     let (mut fix, left_ptr) = mk_node(fix, 0u64, nr_left)?;
-    let (mut fix, right_ptr) = mk_node(&mut *fix, nr_left as u64, nr_right)?;
-    redistribute2(&mut *fix, left_ptr, right_ptr)?;
+    let (mut fix, right_ptr) = mk_node(&mut fix, nr_left as u64, nr_right)?;
+    redistribute2(&mut fix, left_ptr, right_ptr)?;
 
-    let left = get_node::<Value64>(&mut *fix, left_ptr, true)?;
-    let right = get_node::<Value64>(&mut *fix, right_ptr, true)?;
+    let left = get_node::<Value64>(&mut fix, left_ptr, true)?;
+    let right = get_node::<Value64>(&mut fix, right_ptr, true)?;
     check_node(&left, 0u64, target_left)?;
     check_node(&right, target_left as u64, target_right)?;
 
@@ -759,13 +758,13 @@ fn test_redistribute_3(
     let target_right = total - target_left - target_center;
 
     let (mut fix, left_ptr) = mk_node(fix, 0u64, nr_left)?;
-    let (mut fix, center_ptr) = mk_node(&mut *fix, nr_left as u64, nr_center)?;
-    let (mut fix, right_ptr) = mk_node(&mut *fix, (nr_left + nr_center) as u64, nr_right)?;
-    redistribute3(&mut *fix, left_ptr, center_ptr, right_ptr)?;
+    let (mut fix, center_ptr) = mk_node(&mut fix, nr_left as u64, nr_center)?;
+    let (mut fix, right_ptr) = mk_node(&mut fix, (nr_left + nr_center) as u64, nr_right)?;
+    redistribute3(&mut fix, left_ptr, center_ptr, right_ptr)?;
 
-    let left = get_node::<Value64>(&mut *fix, left_ptr, true)?;
-    let center = get_node::<Value64>(&mut *fix, center_ptr, true)?;
-    let right = get_node::<Value64>(&mut *fix, right_ptr, true)?;
+    let left = get_node::<Value64>(&mut fix, left_ptr, true)?;
+    let center = get_node::<Value64>(&mut fix, center_ptr, true)?;
+    let right = get_node::<Value64>(&mut fix, right_ptr, true)?;
     check_node(&left, 0u64, target_left)?;
     check_node(&center, target_left as u64, target_center)?;
     check_node(&right, (target_left + target_center) as u64, target_right)?;

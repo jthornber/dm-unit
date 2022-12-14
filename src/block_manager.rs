@@ -588,7 +588,7 @@ impl BMInner {
             file.seek(io::SeekFrom::Start(b * BLOCK_SIZE as u64))?;
             match self.locks.get(&b) {
                 Some(Lock::Clean { data, .. }) => {
-                    file.write_all(&data)?;
+                    file.write_all(data)?;
                 }
                 Some(_) => {
                     return Err(anyhow!(
@@ -681,7 +681,7 @@ impl BMInner {
                 "block has not been flushed".to_string(),
             )),
             Some(Lock::Clean { data, .. }) => {
-                data.copy_from_slice(&block.get_data());
+                data.copy_from_slice(block.get_data());
                 Ok(())
             }
             None => {
@@ -803,6 +803,10 @@ impl BlockManager {
 }
 
 impl IoEngine for BlockManager {
+    fn suggest_nr_threads(&self) -> usize {
+        1
+    }
+
     fn get_nr_blocks(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
         inner.nr_blocks

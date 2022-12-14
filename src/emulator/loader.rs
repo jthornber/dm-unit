@@ -607,11 +607,11 @@ impl LoaderInfo {
     }
 
     pub fn get_sym(&self, name: &str) -> Option<Addr> {
-        self.symbols.get(name).map(|a| a.clone())
+        self.symbols.get(name).copied()
     }
 
     pub fn get_rmap(&self, loc: Addr) -> Option<String> {
-        self.sym_rmap.get(&loc).map(|s| s.clone())
+        self.sym_rmap.get(&loc).cloned()
     }
 }
 

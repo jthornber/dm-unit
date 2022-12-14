@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use thinp::io_engine::*;
 use thinp::pdata::btree_walker::*;
-use thinp::pdata::space_map::*;
+use thinp::pdata::space_map::common::{SMRoot, IndexEntry};
 use thinp::pdata::unpack::*;
 use thinp::report::*;
 use thinp::thin::check::*;
@@ -47,10 +47,16 @@ impl ReportInner for DebugReportInner {
         debug!("report sub title: {}", txt);
     }
 
+    fn set_level(&mut self, _level: LogLevel) {}
+
     fn progress(&mut self, _percent: u8) {}
 
-    fn log(&mut self, txt: &str) {
+    fn log(&mut self, txt: &str, _level: LogLevel) {
         debug!("report: {}", txt);
+    }
+
+    fn to_stdout(&mut self, txt: &str) {
+        println!("{}", txt);
     }
 
     fn complete(&mut self) {}
@@ -152,7 +158,7 @@ impl ThinPool {
     fn check(&mut self, fix: &Fixture) -> Result<()> {
         // let report = std::sync::Arc::new(Report::new(Box::new(DebugReportInner {})));
         let report = std::sync::Arc::new(mk_quiet_report());
-        let engine = get_bm(fix, self.bm_ptr).clone();
+        let engine = get_bm(fix, self.bm_ptr);
         let space_maps = check_with_maps(engine, report)?;
         let metadata_sm = space_maps.metadata_sm.lock().unwrap();
         debug!(
@@ -184,7 +190,7 @@ impl ThinPool {
 
     fn show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
         let bm = get_bm(fix, self.bm_ptr);
-        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
+        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr);
         let sb = read_superblock(engine.as_ref(), 0)?;
 
         let mut path = Vec::new();

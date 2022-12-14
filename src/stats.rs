@@ -7,6 +7,7 @@ use crate::block_manager::*;
 
 //-------------------------------
 
+#[derive(Default)]
 pub struct Stats {
     pub instrs: u64,
     pub read_locks: u64,
@@ -14,16 +15,7 @@ pub struct Stats {
     pub disk_reads: u64,
 }
 
-impl Default for Stats {
-    fn default() -> Self {
-        Stats {
-            instrs: 0,
-            read_locks: 0,
-            write_locks: 0,
-            disk_reads: 0,
-        }
-    }
-}
+
 
 impl Stats {
     pub fn collect_stats(fix: &Fixture, bm: &BlockManager) -> Self {
@@ -74,9 +66,9 @@ impl CostTracker {
 
     pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
         let delta = Stats::delta(&self.baseline, fix, bm);
-        write!(
+        writeln!(
             self.csv_out,
-            "{}, {}, {}, {}, {}\n",
+            "{}, {}, {}, {}, {}",
             self.iteration, delta.instrs, delta.read_locks, delta.write_locks, delta.disk_reads
         )?;
         Ok(())
