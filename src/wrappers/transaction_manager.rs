@@ -1,10 +1,8 @@
-use crate::emulator::riscv::*;
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::Reg::*;
+use crate::fixture::*;
 
 use anyhow::Result;
-
-use Reg::*;
 
 //-------------------------------
 

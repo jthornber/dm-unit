@@ -1,6 +1,6 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
-use crate::emulator::memory::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;

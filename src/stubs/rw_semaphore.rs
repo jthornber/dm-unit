@@ -3,10 +3,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
 
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use Reg::*;
 
@@ -118,7 +118,7 @@ fn down_write(fix: &mut Fixture) -> Result<()> {
 
         Ok(1)
     })?;
-    
+
     fix.vm.ret(0);
     Ok(())
 }

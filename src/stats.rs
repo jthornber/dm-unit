@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::prelude::*;
 
-use crate::fixture::*;
 use crate::block_manager::*;
+use crate::fixture::*;
 
 //-------------------------------
 
@@ -14,8 +14,6 @@ pub struct Stats {
     pub write_locks: u64,
     pub disk_reads: u64,
 }
-
-
 
 impl Stats {
     pub fn collect_stats(fix: &Fixture, bm: &BlockManager) -> Self {

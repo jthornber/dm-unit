@@ -1,5 +1,5 @@
-use crate::emulator::riscv::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
@@ -114,8 +114,6 @@ pub struct CacheStats {
     pub write_hits: u32,
     pub write_misses: u32,
 }
-
-
 
 impl Guest for CacheStats {
     fn guest_len() -> usize {

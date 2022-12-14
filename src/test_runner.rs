@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 
-use crate::fixture::*;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 
 //-------------------------------
 

@@ -1,7 +1,7 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};

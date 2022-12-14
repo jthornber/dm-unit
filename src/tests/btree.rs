@@ -1,10 +1,10 @@
 use crate::block_manager::*;
+use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 use crate::stats::*;
-use crate::stubs::*;
 use crate::stubs::block_manager::*;
+use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::btree::*;

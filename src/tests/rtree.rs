@@ -137,15 +137,12 @@ impl Unpack for Node {
     }
 }
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct TreeStats {
     nr_internal: u64,
     nr_leaves: u64,
     nr_entries: u64,
 }
-
-
 
 fn rtree_check(
     engine: &dyn IoEngine,

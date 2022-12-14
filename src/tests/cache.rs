@@ -4,8 +4,8 @@ use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeMap;
 
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 use crate::stubs::block_device::*;
 use crate::stubs::*;
 use crate::test_runner::*;
@@ -109,7 +109,7 @@ fn test_insert_some_mappings(fix: &mut Fixture) -> Result<()> {
         ensure!(v.is_some());
         ensure!(v.unwrap() == &ob);
     }
-    
+
     cache.shutdown(fix)?;
     Ok(())
 }
@@ -135,7 +135,6 @@ fn test_remove_some_mappings(fix: &mut Fixture) -> Result<()> {
         } else {
             remaining.push((*cb, *ob));
         }
-        
     }
     cache.commit(fix, true)?;
 
@@ -157,7 +156,7 @@ fn test_remove_some_mappings(fix: &mut Fixture) -> Result<()> {
         ensure!(v.is_some());
         ensure!(v.unwrap() == &ob);
     }
-    
+
     cache.shutdown(fix)?;
     Ok(())
 }

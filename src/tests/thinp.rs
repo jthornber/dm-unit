@@ -6,14 +6,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use thinp::io_engine::*;
 use thinp::pdata::btree_walker::*;
-use thinp::pdata::space_map::common::{SMRoot, IndexEntry};
+use thinp::pdata::space_map::common::{IndexEntry, SMRoot};
 use thinp::pdata::unpack::*;
 use thinp::report::*;
 use thinp::thin::check::*;
 use thinp::thin::superblock::*;
 
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;

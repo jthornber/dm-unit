@@ -1,5 +1,5 @@
-use crate::emulator::riscv::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::stubs::block_device::*;
 
@@ -15,8 +15,8 @@ pub fn dm_bm_create(fix: &mut Fixture, nr_blocks: u64) -> Result<Addr> {
     let bdev_ptr = mk_block_device(&mut fix.vm.mem, 0, nr_sectors)?;
 
     fix.vm.set_reg(A0, bdev_ptr.0);
-    fix.vm.set_reg(A1, block_size * 512); 	// block size
-    fix.vm.set_reg(A2, 16); 			// max held per thread
+    fix.vm.set_reg(A1, block_size * 512); // block size
+    fix.vm.set_reg(A2, 16); // max held per thread
     fix.call("dm_block_manager_create")?;
     Ok(Addr(fix.vm.reg(A0)))
 }
@@ -44,7 +44,10 @@ fn lock_(fix: &mut Fixture, lock_fn: &str, bm: Addr, b: u64, validator: Addr) ->
     fix.vm.set_reg(A1, b);
     fix.vm.set_reg(A2, validator.0);
 
-    let result = fix.vm.mem.alloc_bytes(vec![0u8; 8], PERM_READ | PERM_WRITE)?;
+    let result = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; 8], PERM_READ | PERM_WRITE)?;
     fix.vm.set_reg(A3, result.0);
 
     fix.call(lock_fn)?;

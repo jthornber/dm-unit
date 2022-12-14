@@ -4,8 +4,8 @@ use log::*;
 use std::io;
 use std::io::{Read, Write};
 
-use crate::guest::*;
 use crate::emulator::memory::*;
+use crate::guest::*;
 
 //-------------------------------
 
@@ -37,7 +37,7 @@ impl Guest for INode {
 
 /*
  * Kernel v5.12-rc8
- 
+
 Assumes SYSFS is enabled.
 struct block_device {
     dev_t                      bd_dev;               /*    28     4 */
