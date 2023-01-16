@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::prelude::*;
 use thinp::io_engine::{IoEngine, BLOCK_SIZE};
+use thinp::pdata::btree_error::{split_key_ranges, KeyRange};
 use thinp::pdata::unpack::Unpack;
 
 //-------------------------------
@@ -144,10 +145,15 @@ struct TreeStats {
     nr_entries: u64,
 }
 
+fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRange>> {
+    let keys: Vec<u64> = entries.iter().map(|m| m.0).collect();
+    split_key_ranges(&[], parent_key, &keys[..]).map_err(|e| e.into())
+}
+
 fn rtree_check(
     engine: &dyn IoEngine,
     root: u64,
-    mut lowest_key: u64,
+    parent_key: &KeyRange,
     stats: &mut TreeStats,
 ) -> Result<()> {
     let b = engine.read(root)?;
@@ -158,21 +164,25 @@ fn rtree_check(
         Node::Internal { header, entries } => {
             stats.nr_internal += 1;
             ensure!(header.block == root);
-            for (key, val) in entries {
-                ensure!(key >= lowest_key);
+
+            let child_keys = split_keys(parent_key, &entries[..])?;
+
+            for (kr, (_, val)) in child_keys.iter().zip(entries) {
                 ensure!(val != 0);
-                lowest_key = key;
-                rtree_check(engine, val, lowest_key, stats)?;
+                rtree_check(engine, val, kr, stats)?;
             }
         }
         Node::Leaf { header, entries } => {
             stats.nr_leaves += 1;
             stats.nr_entries += entries.len() as u64;
             ensure!(header.block == root);
+
+            let mut lowest_key = parent_key.start.unwrap_or(0);
             for m in entries {
                 ensure!(m.thin_begin >= lowest_key);
-                lowest_key = m.thin_begin;
+                lowest_key = m.thin_begin + m.len as u64;
             }
+            ensure!(lowest_key <= parent_key.end.unwrap_or(u64::MAX));
         }
     }
 
@@ -353,7 +363,8 @@ impl<'a> RTreeTest<'a> {
 
         let bm = get_bm(self.fix, self.bm);
         let mut stats = TreeStats::default();
-        rtree_check(&*bm, self.root, 0, &mut stats)?;
+        let kr = KeyRange::new();
+        rtree_check(&*bm, self.root, &kr, &mut stats)?;
         debug!("{:?}", stats);
         Ok(stats)
     }
