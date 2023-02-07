@@ -694,21 +694,14 @@ fn test_insert_random(fix: &mut Fixture) -> Result<()> {
     mappings.shuffle(&mut rng);
 
     let mut n = 0;
-    let mut total = 0;
-    let mut csv = File::create("./rtree.csv")?;
-    writeln!(csv, "inserts, nr_internal, nr_leaves, nr_entries")?;
+    rtree.stats_start();
+
     for m in &mappings {
         let _nr_inserted = rtree.insert(m)?;
         n += 1;
 
         if n == COMMIT_INTERVAL {
-            let stats = rtree.check()?;
-            total += n;
-            writeln!(
-                csv,
-                "{}, {}, {}, {}",
-                total, stats.nr_internal, stats.nr_leaves, stats.nr_entries
-            )?;
+            rtree.check()?;
             n = 0;
         }
     }
@@ -768,21 +761,14 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     const COMMIT_INTERVAL: usize = 1000;
     let mut rtree = RTreeTest::new(fix, 1024)?;
     let mut n = 0;
-    let mut total = 0;
-    let mut csv = File::create("./rtree.csv")?;
-    writeln!(csv, "inserts, nr_internal, nr_leaves, nr_entries")?;
+    rtree.stats_start();
+
     for m in &mappings {
         let _nr_inserted = rtree.insert(m)?;
         n += 1;
 
         if n == COMMIT_INTERVAL {
-            let stats = rtree.check()?;
-            total += n;
-            writeln!(
-                csv,
-                "{}, {}, {}, {}",
-                total, stats.nr_internal, stats.nr_leaves, stats.nr_entries
-            )?;
+            rtree.check()?;
             n = 0;
         }
     }
