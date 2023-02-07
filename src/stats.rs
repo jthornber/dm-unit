@@ -2,27 +2,17 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::prelude::*;
 
-use crate::fixture::*;
 use crate::block_manager::*;
+use crate::fixture::*;
 
 //-------------------------------
 
+#[derive(Default)]
 pub struct Stats {
     pub instrs: u64,
     pub read_locks: u64,
     pub write_locks: u64,
     pub disk_reads: u64,
-}
-
-impl Default for Stats {
-    fn default() -> Self {
-        Stats {
-            instrs: 0,
-            read_locks: 0,
-            write_locks: 0,
-            disk_reads: 0,
-        }
-    }
 }
 
 impl Stats {
@@ -74,9 +64,9 @@ impl CostTracker {
 
     pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
         let delta = Stats::delta(&self.baseline, fix, bm);
-        write!(
+        writeln!(
             self.csv_out,
-            "{}, {}, {}, {}, {}\n",
+            "{}, {}, {}, {}, {}",
             self.iteration, delta.instrs, delta.read_locks, delta.write_locks, delta.disk_reads
         )?;
         Ok(())

@@ -607,11 +607,11 @@ impl LoaderInfo {
     }
 
     pub fn get_sym(&self, name: &str) -> Option<Addr> {
-        self.symbols.get(name).map(|a| a.clone())
+        self.symbols.get(name).copied()
     }
 
     pub fn get_rmap(&self, loc: Addr) -> Option<String> {
-        self.sym_rmap.get(&loc).map(|s| s.clone())
+        self.sym_rmap.get(&loc).cloned()
     }
 }
 
@@ -740,7 +740,14 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
     };
 
     let ld_cmd = format!("{}ld", cross_compile);
-    let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output.to_str().unwrap()];
+    let mut args = vec![
+        "-r",
+        "-melf64lriscv",
+        "-T",
+        "misc/module.lds",
+        "-o",
+        output.to_str().unwrap(),
+    ];
     for p in paths {
         args.push(p.as_ref().to_str().unwrap());
     }

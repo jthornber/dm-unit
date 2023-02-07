@@ -1,8 +1,8 @@
 use crate::anymap::*;
-use crate::emulator::riscv::Reg;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_EXEC};
+use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
 
@@ -50,7 +50,7 @@ impl KernelModule {
     pub fn path<P: AsRef<Path>>(&self, kernel_dir: P) -> PathBuf {
         let mut module = PathBuf::new();
         module.push(kernel_dir);
-        module.push(self.relative_path.to_string());
+        module.push(self.relative_path);
         module
     }
 
@@ -292,7 +292,7 @@ impl Fixture {
 
     fn trace_exit(&mut self, func: &str, rv: u64) {
         let err = rv as i32;
-        let estr = if err < 0 && err >= -1024 {
+        let estr = if (-1024..0).contains(&err) {
             error_string(-err)
         } else {
             format!("{:x}", rv)

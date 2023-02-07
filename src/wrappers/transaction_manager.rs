@@ -1,10 +1,8 @@
-use crate::emulator::riscv::*;
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::Reg::*;
+use crate::fixture::*;
 
 use anyhow::Result;
-
-use Reg::*;
 
 //-------------------------------
 
@@ -19,7 +17,7 @@ pub fn dm_tm_create(fix: &mut Fixture, bm: Addr, sb_loc: u64) -> Result<(Addr, A
     fix.vm.set_reg(A1, sb_loc);
     let (mut fix, tm_result) = auto_alloc(fix, 8)?;
     fix.vm.set_reg(A2, tm_result.0);
-    let (mut fix, sm_result) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, sm_result) = auto_alloc(&mut fix, 8)?;
     fix.vm.set_reg(A3, sm_result.0);
     fix.call_with_errno("dm_tm_create_with_sm")?;
 
@@ -67,7 +65,7 @@ pub fn dm_tm_shadow_block(
 
     let (mut fix, result_ptr) = auto_alloc(fix, 8)?;
     fix.vm.set_reg(A3, result_ptr.0);
-    let (mut fix, inc_children) = auto_alloc(&mut *fix, 4)?;
+    let (mut fix, inc_children) = auto_alloc(&mut fix, 4)?;
     fix.vm.set_reg(A4, inc_children.0);
 
     fix.call_with_errno("dm_tm_shadow_block")?;

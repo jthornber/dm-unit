@@ -40,9 +40,7 @@ impl UserData {
 
         match ud.unwrap().downcast_ref::<T>() {
             Some(v) => Ok(v),
-            None => {
-                Err(UserData::bad_type(ptr))
-            }
+            None => Err(UserData::bad_type(ptr)),
         }
     }
 

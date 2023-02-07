@@ -6,9 +6,9 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
-use crate::emulator::riscv::*;
 use crate::emulator::ir::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::{self, *};
 
 //-----------------------------
 
@@ -50,7 +50,7 @@ pub struct BBStats {
 
 //-----------------------------
 
-use Reg::*;
+use riscv::Reg::*;
 
 pub struct Stats {
     pub instrs: u64,
@@ -178,7 +178,7 @@ impl VM {
     }
 
     pub fn push(&mut self, v: u64) -> Result<()> {
-        let sp = self.reg(Reg::Sp) - 8;
+        let sp = self.reg(riscv::Reg::Sp) - 8;
         let bytes = v.to_le_bytes();
         self.mem
             .write(Addr(sp), &bytes, 0)
@@ -187,7 +187,7 @@ impl VM {
         Ok(())
     }
 
-    pub fn reg(&self, r: Reg) -> u64 {
+    pub fn reg(&self, r: riscv::Reg) -> u64 {
         if r == Zero {
             0u64
         } else {
@@ -195,7 +195,7 @@ impl VM {
         }
     }
 
-    pub fn set_reg(&mut self, r: Reg, v: u64) {
+    pub fn set_reg(&mut self, r: riscv::Reg, v: u64) {
         if r != Zero {
             self.reg[r as usize] = v;
         }
@@ -221,7 +221,7 @@ impl VM {
         }
     }
 
-    fn deref_u32(&self, r: Reg) -> Result<u32> {
+    fn deref_u32(&self, r: riscv::Reg) -> Result<u32> {
         let src = Addr(self.reg(r));
         let mut bytes = [0u8; 4];
         self.mem
@@ -230,7 +230,7 @@ impl VM {
         Ok(u32::from_le_bytes(bytes))
     }
 
-    fn deref_u64(&self, r: Reg) -> Result<u64> {
+    fn deref_u64(&self, r: riscv::Reg) -> Result<u64> {
         let src = Addr(self.reg(r));
         let mut bytes = [0u8; 8];
         self.mem
@@ -239,7 +239,7 @@ impl VM {
         Ok(u64::from_le_bytes(bytes))
     }
 
-    fn set_deref_u32(&mut self, dest: Reg, v: u32) -> Result<()> {
+    fn set_deref_u32(&mut self, dest: riscv::Reg, v: u32) -> Result<()> {
         let dest = Addr(self.reg(dest));
         let bytes = v.to_le_bytes();
         self.mem
@@ -247,7 +247,7 @@ impl VM {
             .map_err(VmErr::BadAccess)
     }
 
-    fn set_deref_u64(&mut self, dest: Reg, v: u64) -> Result<()> {
+    fn set_deref_u64(&mut self, dest: riscv::Reg, v: u64) -> Result<()> {
         let dest = Addr(self.reg(dest));
         let bytes = v.to_le_bytes();
         self.mem
@@ -257,9 +257,9 @@ impl VM {
 
     fn amo_op_u32<F: FnOnce(u32, u32) -> u32>(
         &mut self,
-        rd: Reg,
-        rs1: Reg,
-        rs2: Reg,
+        rd: riscv::Reg,
+        rs1: riscv::Reg,
+        rs2: riscv::Reg,
         f: F,
     ) -> Result<()> {
         let t = self.deref_u32(rs1)?;
@@ -270,9 +270,9 @@ impl VM {
 
     fn amo_op_u64<F: FnOnce(u64, u64) -> u64>(
         &mut self,
-        rd: Reg,
-        rs1: Reg,
-        rs2: Reg,
+        rd: riscv::Reg,
+        rs1: riscv::Reg,
+        rs2: riscv::Reg,
         f: F,
     ) -> Result<()> {
         let t = self.deref_u64(rs1)?;
@@ -288,7 +288,7 @@ impl VM {
     }
 
     // Pushes a register onto the stack
-    pub fn push_reg(&mut self, rd: Reg) -> Result<()> {
+    pub fn push_reg(&mut self, rd: riscv::Reg) -> Result<()> {
         // addi sp,sp,-8
         self.set_reg(Sp, self.reg(Sp).wrapping_add(-8i64 as u64));
 
@@ -303,14 +303,14 @@ impl VM {
     }
 
     // Pops the stack into a register
-    pub fn pop_reg(&mut self, rd: Reg) -> Result<()> {
+    pub fn pop_reg(&mut self, rd: riscv::Reg) -> Result<()> {
         // ld r,0(sp)
         let src = Addr(self.reg(Sp));
         let mut bytes = [0u8; 8];
         self.mem
             .read(src, &mut bytes, PERM_READ)
             .map_err(VmErr::BadAccess)?;
-        self.set_reg(rd, i64::from_le_bytes(bytes) as i64 as u64);
+        self.set_reg(rd, i64::from_le_bytes(bytes) as u64);
 
         // addi sp,sp,8
         self.set_reg(Sp, self.reg(Sp).wrapping_add(8u64));
@@ -491,11 +491,7 @@ impl VM {
                 self.inc_pc(pc_increment);
             }
             Sltiu { rd, rs, imm } => {
-                let v = if (self.reg(rs) as u64) < (imm as u64) {
-                    1
-                } else {
-                    0
-                };
+                let v = if self.reg(rs) < (imm as u64) { 1 } else { 0 };
                 self.set_reg(rd, v);
                 self.inc_pc(pc_increment);
             }
@@ -574,7 +570,7 @@ impl VM {
             }
             Slliw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
-                self.set_reg(rd, (rs << shamt) as i32 as i64 as u64);
+                self.set_reg(rd, (rs << shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             Srliw { rd, rs, shamt } => {
@@ -584,7 +580,7 @@ impl VM {
             }
             Sraiw { rd, rs, shamt } => {
                 let rs = self.reg(rs) as i32;
-                self.set_reg(rd, ((rs as i32) >> shamt) as i64 as u64);
+                self.set_reg(rd, (rs >> shamt) as i64 as u64);
                 self.inc_pc(pc_increment);
             }
             Addw { rd, rs1, rs2 } => {
@@ -635,13 +631,13 @@ impl VM {
             }
             Mulhsu { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as i64 as u128;
-                let rs2 = self.reg(rs2) as u64 as u128;
+                let rs2 = self.reg(rs2) as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
             Mulhu { rd, rs1, rs2 } => {
-                let rs1 = self.reg(rs1) as u64 as u128;
-                let rs2 = self.reg(rs2) as u64 as u128;
+                let rs1 = self.reg(rs1) as u128;
+                let rs2 = self.reg(rs2) as u128;
                 self.set_reg(rd, (rs1.wrapping_mul(rs2) >> 64) as u64);
                 self.inc_pc(pc_increment);
             }
@@ -680,7 +676,7 @@ impl VM {
             Mulw { rd, rs1, rs2 } => {
                 let rs1 = self.reg(rs1) as u32;
                 let rs2 = self.reg(rs2) as u32;
-                let v = (rs1 as u32).wrapping_mul(rs2 as u32);
+                let v = rs1.wrapping_mul(rs2);
                 self.set_reg(rd, v as i32 as u64);
                 self.inc_pc(pc_increment);
             }
@@ -688,7 +684,7 @@ impl VM {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
                 let v = if rs2 == 0 { -1 } else { rs1.wrapping_div(rs2) };
-                self.set_reg(rd, v as i32 as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             Divuw { rd, rs1, rs2 } => {
@@ -706,7 +702,7 @@ impl VM {
                 let rs1 = self.reg(rs1) as i32;
                 let rs2 = self.reg(rs2) as i32;
                 let v = if rs2 == 0 { rs1 } else { rs1.wrapping_rem(rs2) };
-                self.set_reg(rd, v as i32 as u64);
+                self.set_reg(rd, v as u64);
                 self.inc_pc(pc_increment);
             }
             Remuw { rd, rs1, rs2 } => {

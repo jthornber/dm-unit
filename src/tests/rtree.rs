@@ -1,5 +1,6 @@
 use crate::emulator::memory::*;
 use crate::fixture::*;
+use crate::stats::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
@@ -18,10 +19,12 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::prelude::*;
 use thinp::io_engine::{IoEngine, BLOCK_SIZE};
+use thinp::pdata::btree_error::{split_key_ranges, KeyRange};
 use thinp::pdata::unpack::Unpack;
 
 //-------------------------------
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct Header {
     pub block: u64,
@@ -136,27 +139,22 @@ impl Unpack for Node {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct TreeStats {
     nr_internal: u64,
     nr_leaves: u64,
     nr_entries: u64,
 }
 
-impl Default for TreeStats {
-    fn default() -> Self {
-        TreeStats {
-            nr_internal: 0,
-            nr_leaves: 0,
-            nr_entries: 0,
-        }
-    }
+fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRange>> {
+    let keys: Vec<u64> = entries.iter().map(|m| m.0).collect();
+    split_key_ranges(&[], parent_key, &keys[..]).map_err(|e| e.into())
 }
 
 fn rtree_check(
     engine: &dyn IoEngine,
     root: u64,
-    mut lowest_key: u64,
+    parent_key: &KeyRange,
     stats: &mut TreeStats,
 ) -> Result<()> {
     let b = engine.read(root)?;
@@ -167,25 +165,74 @@ fn rtree_check(
         Node::Internal { header, entries } => {
             stats.nr_internal += 1;
             ensure!(header.block == root);
-            for (key, val) in entries {
-                ensure!(key >= lowest_key);
+
+            let child_keys = split_keys(parent_key, &entries[..])?;
+
+            for (kr, (_, val)) in child_keys.iter().zip(entries) {
                 ensure!(val != 0);
-                lowest_key = key;
-                rtree_check(engine, val, lowest_key, stats)?;
+                rtree_check(engine, val, kr, stats)?;
             }
         }
         Node::Leaf { header, entries } => {
             stats.nr_leaves += 1;
             stats.nr_entries += entries.len() as u64;
             ensure!(header.block == root);
+
+            let mut lowest_key = parent_key.start.unwrap_or(0);
             for m in entries {
                 ensure!(m.thin_begin >= lowest_key);
-                lowest_key = m.thin_begin;
+                lowest_key = m.thin_begin + m.len as u64;
             }
+            ensure!(lowest_key <= parent_key.end.unwrap_or(u64::MAX));
         }
     }
 
     Ok(())
+}
+
+//-------------------------------
+
+trait NodeVisitor {
+    fn visit(&mut self, header: Header, entries: Vec<Mapping>) -> Result<()>;
+}
+
+fn rtree_walk(engine: &dyn IoEngine, root: u64, visitor: &mut dyn NodeVisitor) -> Result<()> {
+    let b = engine.read(root)?;
+    let data = b.get_data();
+    let (_, node) = Node::unpack(data)?;
+
+    match node {
+        Node::Internal { header: _, entries } => {
+            for (_key, val) in entries {
+                rtree_walk(engine, val, visitor)?;
+            }
+        }
+        Node::Leaf { header, entries } => {
+            visitor.visit(header, entries)?;
+        }
+    }
+
+    Ok(())
+}
+
+struct MappingCollector {
+    entries: Vec<Mapping>,
+}
+
+impl MappingCollector {
+    fn new() -> Self {
+        Self {
+            entries: Vec::default(),
+        }
+    }
+}
+
+impl NodeVisitor for MappingCollector {
+    fn visit(&mut self, _header: Header, entries: Vec<Mapping>) -> Result<()> {
+        let mut other = entries;
+        self.entries.append(&mut other);
+        Ok(())
+    }
 }
 
 //-------------------------------
@@ -221,6 +268,7 @@ fn enable_traces(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 struct RTreeTest<'a> {
     fix: &'a mut Fixture,
     bm: Addr,
@@ -229,6 +277,7 @@ struct RTreeTest<'a> {
     data_sm: Addr,
     root: u64,
     sb: Addr,
+    baseline: Stats,
 }
 
 const SUPERBLOCK: u64 = 0;
@@ -246,6 +295,11 @@ impl<'a> RTreeTest<'a> {
         sm_inc_block(fix, metadata_sm, SUPERBLOCK, SUPERBLOCK + 1)?;
         let sb = dm_bm_write_lock_zero(fix, bm, SUPERBLOCK, Addr(0))?;
 
+        let baseline = {
+            let bm = get_bm(fix, bm);
+            Stats::collect_stats(fix, &bm)
+        };
+
         Ok(RTreeTest {
             fix,
             bm,
@@ -254,6 +308,7 @@ impl<'a> RTreeTest<'a> {
             data_sm,
             root,
             sb,
+            baseline,
         })
     }
 
@@ -280,14 +335,13 @@ impl<'a> RTreeTest<'a> {
     }
 
     fn insert(&mut self, v: &Mapping) -> Result<u32> {
-        /*
         sm_inc_block(
             self.fix,
             self.data_sm,
             v.data_begin,
             v.data_begin + v.len as u64,
         )?;
-        */
+
         let (new_root, nr_inserted) =
             dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, v)?;
         self.root = new_root;
@@ -298,19 +352,52 @@ impl<'a> RTreeTest<'a> {
         Ok(nr_inserted)
     }
 
+    fn remove(&mut self, thin_begin: u64, thin_end: u64) -> Result<()> {
+        let new_root = dm_rtree_remove(
+            self.fix,
+            self.tm,
+            self.data_sm,
+            self.root,
+            thin_begin,
+            thin_end,
+        )?;
+        self.root = new_root;
+        Ok(())
+    }
+
     fn check(&mut self) -> Result<TreeStats> {
         // Ensure everything has been written.
         self.commit()?;
 
         let bm = get_bm(self.fix, self.bm);
         let mut stats = TreeStats::default();
-        rtree_check(&*bm, self.root, 0, &mut stats)?;
+        let kr = KeyRange::new();
+        rtree_check(&*bm, self.root, &kr, &mut stats)?;
         debug!("{:?}", stats);
         Ok(stats)
     }
 
+    fn walk(&mut self, visitor: &mut dyn NodeVisitor) -> Result<()> {
+        self.commit()?;
+
+        let bm = get_bm(self.fix, self.bm);
+        rtree_walk(&*bm, self.root, visitor)?;
+        Ok(())
+    }
+
     fn lookup(&mut self, thin_begin: u64) -> Result<Option<Mapping>> {
         dm_rtree_lookup(self.fix, self.tm, self.root, thin_begin)
+    }
+
+    fn stats_start(&mut self) {
+        let bm = get_bm(self.fix, self.bm);
+        self.baseline = Stats::collect_stats(self.fix, &bm);
+    }
+
+    fn stats_delta(&mut self) -> Result<Stats> {
+        let bm = get_bm(self.fix, self.bm);
+        let delta = self.baseline.delta(self.fix, &bm);
+        Ok(delta)
     }
 }
 
@@ -531,7 +618,7 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         .collect();
 
     for m in &mappings {
-        let _nr_inserted = rtree.insert(&m)?;
+        let _nr_inserted = rtree.insert(m)?;
     }
 
     // These mappings should have all been merged into a single
@@ -607,21 +694,14 @@ fn test_insert_random(fix: &mut Fixture) -> Result<()> {
     mappings.shuffle(&mut rng);
 
     let mut n = 0;
-    let mut total = 0;
-    let mut csv = File::create("./rtree.csv")?;
-    write!(csv, "inserts, nr_internal, nr_leaves, nr_entries\n")?;
+    rtree.stats_start();
+
     for m in &mappings {
-        let _nr_inserted = rtree.insert(&m)?;
+        let _nr_inserted = rtree.insert(m)?;
         n += 1;
 
         if n == COMMIT_INTERVAL {
-            let stats = rtree.check()?;
-            total += n;
-            write!(
-                csv,
-                "{}, {}, {}, {}\n",
-                total, stats.nr_internal, stats.nr_leaves, stats.nr_entries
-            )?;
+            rtree.check()?;
             n = 0;
         }
     }
@@ -681,21 +761,14 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     const COMMIT_INTERVAL: usize = 1000;
     let mut rtree = RTreeTest::new(fix, 1024)?;
     let mut n = 0;
-    let mut total = 0;
-    let mut csv = File::create("./rtree.csv")?;
-    write!(csv, "inserts, nr_internal, nr_leaves, nr_entries\n")?;
+    rtree.stats_start();
+
     for m in &mappings {
-        let _nr_inserted = rtree.insert(&m)?;
+        let _nr_inserted = rtree.insert(m)?;
         n += 1;
 
         if n == COMMIT_INTERVAL {
-            let stats = rtree.check()?;
-            total += n;
-            write!(
-                csv,
-                "{}, {}, {}, {}\n",
-                total, stats.nr_internal, stats.nr_leaves, stats.nr_entries
-            )?;
+            rtree.check()?;
             n = 0;
         }
     }
@@ -713,6 +786,1070 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     }
 
     // rtree.del()?;
+    Ok(())
+}
+
+//-------------------------------
+
+fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 200000;
+    const COMMIT_INTERVAL: usize = 100;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    rtree.check()?;
+
+    let mut mappings: Vec<Mapping> = (0..COUNT)
+        .into_iter()
+        .map(|i| Mapping {
+            thin_begin: i,
+            data_begin: i + 1234,
+            len: 1,
+            time: 0,
+        })
+        .collect();
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    mappings.shuffle(&mut rng);
+
+    let mut csv = File::create("./rtree.csv")?;
+    writeln!(
+        csv,
+        "inserts, nr_internal, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
+    )?;
+
+    rtree.stats_start();
+
+    let mut total = 0;
+    for chunk in mappings.chunks(COMMIT_INTERVAL) {
+        for m in chunk {
+            let _nr_inserted = rtree.insert(m)?;
+        }
+
+        let stats = rtree.check()?; // implicitly commit
+        let residency = (stats.nr_entries * 100) / (stats.nr_leaves * MAX_LEAF_ENTRIES as u64);
+
+        let delta = rtree.stats_delta()?;
+        rtree.stats_start();
+
+        total += chunk.len();
+        writeln!(
+            csv,
+            "{}, {}, {}, {}, {}, {}, {}, {}",
+            total,
+            stats.nr_internal,
+            stats.nr_leaves,
+            stats.nr_entries,
+            residency,
+            delta.instrs / chunk.len() as u64,
+            delta.read_locks / chunk.len() as u64,
+            delta.write_locks / chunk.len() as u64,
+        )?;
+    }
+
+    rtree.del()?;
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn test_trim_entry_begin(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+    ensure!(rtree.remove(0, 50).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 1);
+
+    let result = rtree.lookup(50)?;
+    ensure!(
+        result
+            == Some(Mapping {
+                thin_begin: 50,
+                data_begin: 41,
+                len: 60,
+                time: 0,
+            })
+    );
+
+    Ok(())
+}
+
+fn test_trim_entry_end(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+    ensure!(rtree.remove(50, 120).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 1);
+
+    let result = rtree.lookup(50)?;
+    ensure!(
+        result
+            == Some(Mapping {
+                thin_begin: 10,
+                data_begin: 1,
+                len: 40,
+                time: 0,
+            })
+    );
+
+    Ok(())
+}
+
+fn test_remove_single_entry(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+    ensure!(rtree.remove(0, 120).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 0);
+
+    let result = rtree.lookup(10)?;
+    ensure!(result.is_none());
+
+    Ok(())
+}
+
+fn test_split_single_entry(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+    ensure!(rtree.remove(50, 70).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 2);
+
+    let result = rtree.lookup(10)?;
+    ensure!(
+        result
+            == Some(Mapping {
+                thin_begin: 10,
+                data_begin: 1,
+                len: 40,
+                time: 0,
+            })
+    );
+
+    let result = rtree.lookup(70)?;
+    ensure!(
+        result
+            == Some(Mapping {
+                thin_begin: 70,
+                data_begin: 61,
+                len: 40,
+                time: 0,
+            })
+    );
+
+    Ok(())
+}
+
+fn test_remove_range_below(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+    ensure!(rtree.remove(110, 120).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 1);
+
+    let result = rtree.lookup(v.thin_begin)?;
+    ensure!(result == Some(v));
+
+    Ok(())
+}
+
+fn test_remove_range_above(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+    ensure!(rtree.remove(0, 10).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 1);
+
+    let result = rtree.lookup(v.thin_begin)?;
+    ensure!(result == Some(v));
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn test_remove_leading_entries(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 25;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT);
+
+    // remove and trim leading entries
+    ensure!(rtree
+        .remove(mappings[0].thin_begin, mappings[9].thin_begin + 1)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT - 9);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(
+        visitor.entries[0]
+            == Mapping {
+                thin_begin: mappings[9].thin_begin + 1,
+                data_begin: mappings[9].data_begin + 1,
+                len: mappings[9].len - 1,
+                time: 0,
+            }
+    );
+    ensure!(visitor.entries[1..] == mappings[10..]);
+
+    Ok(())
+}
+
+fn test_remove_trailing_entries(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 25;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    // remove and trim trailing entries
+    let last = mappings.last().unwrap();
+    ensure!(rtree
+        .remove(
+            mappings[15].thin_begin + 1,
+            last.thin_begin + last.len as u64
+        )
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64 - 9);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries[..14] == mappings[..14]);
+    ensure!(
+        visitor.entries[15]
+            == Mapping {
+                thin_begin: mappings[15].thin_begin,
+                data_begin: mappings[15].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+fn test_remove_middle_entries(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 100;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    ensure!(rtree
+        .remove(mappings[10].thin_begin + 1, mappings[14].thin_begin + 1)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64 - 3);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries[..10] == mappings[..10]);
+    ensure!(visitor.entries[12..] == mappings[15..]);
+    ensure!(
+        visitor.entries[10]
+            == Mapping {
+                thin_begin: mappings[10].thin_begin,
+                data_begin: mappings[10].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[11]
+            == Mapping {
+                thin_begin: mappings[14].thin_begin + 1,
+                data_begin: mappings[14].data_begin + 1,
+                len: mappings[14].len - 1,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+fn test_remove_all_entries(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 25;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    let last = mappings.last().unwrap();
+    ensure!(rtree.remove(0, last.thin_begin + last.len as u64).is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 0);
+
+    Ok(())
+}
+
+fn test_split_middle_entry(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 25;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    ensure!(rtree
+        .remove(mappings[10].thin_begin + 1, mappings[10].thin_begin + 2)
+        .is_ok());
+    ensure!(rtree
+        .remove(mappings[20].thin_begin + 1, mappings[20].thin_begin + 2)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64 + 2);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries[..10] == mappings[..10]);
+    ensure!(visitor.entries[12..21] == mappings[11..20]);
+    ensure!(visitor.entries[23..] == mappings[21..]);
+    ensure!(
+        visitor.entries[10]
+            == Mapping {
+                thin_begin: mappings[10].thin_begin,
+                data_begin: mappings[10].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[11]
+            == Mapping {
+                thin_begin: mappings[10].thin_begin + 2,
+                data_begin: mappings[10].data_begin + 2,
+                len: mappings[10].len - 2,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[21]
+            == Mapping {
+                thin_begin: mappings[20].thin_begin,
+                data_begin: mappings[20].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[22]
+            == Mapping {
+                thin_begin: mappings[20].thin_begin + 2,
+                data_begin: mappings[20].data_begin + 2,
+                len: mappings[20].len - 2,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn test_remove_leading_leaves(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 500;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 3);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    ensure!(rtree
+        .remove(mappings[0].thin_begin, mappings[200].thin_begin + 1)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 2);
+    ensure!(stats.nr_entries == COUNT as u64 - 200);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(
+        visitor.entries[0]
+            == Mapping {
+                thin_begin: mappings[200].thin_begin + 1,
+                data_begin: mappings[200].data_begin + 1,
+                len: mappings[200].len - 1,
+                time: 0,
+            }
+    );
+    ensure!(visitor.entries[1..] == mappings[201..]);
+
+    Ok(())
+}
+
+fn test_remove_trailing_leaves(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 500;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 3);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    // remove and trim trailing entries
+    let last = mappings.last().unwrap();
+    ensure!(rtree
+        .remove(
+            mappings[200].thin_begin + 1,
+            last.thin_begin + last.len as u64
+        )
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 2);
+    ensure!(stats.nr_entries == COUNT as u64 - 299);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries[..200] == mappings[..200]);
+    ensure!(
+        visitor.entries[200]
+            == Mapping {
+                thin_begin: mappings[200].thin_begin,
+                data_begin: mappings[200].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 384;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 3);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    ensure!(rtree
+        .remove(mappings[49].thin_begin + 1, mappings[350].thin_begin + 1)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 2);
+    ensure!(stats.nr_entries == COUNT as u64 - 300);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries[..49] == mappings[..49]);
+    ensure!(visitor.entries[51..] == mappings[351..]);
+    ensure!(
+        visitor.entries[49]
+            == Mapping {
+                thin_begin: mappings[49].thin_begin,
+                data_begin: mappings[49].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[50]
+            == Mapping {
+                thin_begin: mappings[350].thin_begin + 1,
+                data_begin: mappings[350].data_begin + 1,
+                len: mappings[350].len - 1,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+fn test_remove_all_leaves(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 500;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 3);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    let last = mappings.last().unwrap();
+    ensure!(rtree
+        .remove(mappings[0].thin_begin, last.thin_begin + last.len as u64)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 0);
+
+    Ok(())
+}
+
+// split the root into two
+fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 169;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    // split an entry into two, causing splitting of the leaf
+    ensure!(rtree
+        .remove(mappings[100].thin_begin + 1, mappings[100].thin_begin + 2)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 2);
+    ensure!(stats.nr_entries == COUNT as u64 + 1);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+
+    ensure!(visitor.entries[..100] == mappings[..100]);
+    ensure!(visitor.entries[102..] == mappings[101..]);
+    ensure!(
+        visitor.entries[100]
+            == Mapping {
+                thin_begin: mappings[100].thin_begin,
+                data_begin: mappings[100].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[101]
+            == Mapping {
+                thin_begin: mappings[100].thin_begin + 2,
+                data_begin: mappings[100].data_begin + 2,
+                len: mappings[100].len - 2,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 334;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 3;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 2);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    ensure!(rtree
+        .remove(mappings[100].thin_begin + 1, mappings[100].thin_begin + 2)
+        .is_ok());
+
+    ensure!(rtree
+        .remove(mappings[101].thin_begin + 1, mappings[101].thin_begin + 2)
+        .is_ok());
+
+    ensure!(rtree
+        .remove(mappings[102].thin_begin + 1, mappings[102].thin_begin + 2)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 3);
+    ensure!(stats.nr_entries == COUNT as u64 + 3);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+
+    ensure!(visitor.entries[..100] == mappings[..100]);
+    ensure!(visitor.entries[106..] == mappings[103..]);
+    ensure!(
+        visitor.entries[100]
+            == Mapping {
+                thin_begin: mappings[100].thin_begin,
+                data_begin: mappings[100].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[101]
+            == Mapping {
+                thin_begin: mappings[100].thin_begin + 2,
+                data_begin: mappings[100].data_begin + 2,
+                len: mappings[100].len - 2,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[102]
+            == Mapping {
+                thin_begin: mappings[101].thin_begin,
+                data_begin: mappings[101].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[103]
+            == Mapping {
+                thin_begin: mappings[101].thin_begin + 2,
+                data_begin: mappings[101].data_begin + 2,
+                len: mappings[101].len - 2,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[104]
+            == Mapping {
+                thin_begin: mappings[102].thin_begin,
+                data_begin: mappings[102].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[105]
+            == Mapping {
+                thin_begin: mappings[102].thin_begin + 2,
+                data_begin: mappings[102].data_begin + 2,
+                len: mappings[102].len - 2,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
+fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 336;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mut begin: u64 = 0;
+    let mut len: u32 = 2;
+    let mappings: Vec<Mapping> = (0..COUNT)
+        .map(|_| {
+            let thin_begin = begin;
+            let map_len = len;
+            begin += len as u64 + 1;
+            len += 1;
+
+            Mapping {
+                thin_begin,
+                data_begin: thin_begin + 1234,
+                len: map_len,
+                time: 0,
+            }
+        })
+        .collect();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(&m)?;
+    }
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 2);
+    ensure!(stats.nr_entries == COUNT as u64);
+
+    ensure!(rtree
+        .remove(mappings[200].thin_begin + 1, mappings[200].thin_begin + 2)
+        .is_ok());
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 1);
+    ensure!(stats.nr_leaves == 3);
+    ensure!(stats.nr_entries == COUNT as u64 + 1);
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+
+    for (i, m) in visitor.entries.iter().enumerate() {
+        info!("{} {:?}", i, m);
+    }
+
+    ensure!(visitor.entries[..200] == mappings[..200]);
+    ensure!(visitor.entries[202..] == mappings[201..]);
+    ensure!(
+        visitor.entries[200]
+            == Mapping {
+                thin_begin: mappings[200].thin_begin,
+                data_begin: mappings[200].data_begin,
+                len: 1,
+                time: 0,
+            }
+    );
+    ensure!(
+        visitor.entries[201]
+            == Mapping {
+                thin_begin: mappings[200].thin_begin + 2,
+                data_begin: mappings[200].data_begin + 2,
+                len: mappings[200].len - 2,
+                time: 0,
+            }
+    );
+
     Ok(())
 }
 
@@ -751,6 +1888,57 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("insert/many/descending", test_insert_descending)
         test!("insert/many/random", test_insert_random)
         test!("insert/many/runs", test_insert_runs)
+        test!("remove/single/trim-begin", test_trim_entry_begin)
+        test!("remove/single/trim-end", test_trim_entry_end)
+        test!("remove/single/all", test_remove_single_entry)
+        test!("remove/single/split", test_split_single_entry)
+        test!("remove/single/below", test_remove_range_below)
+        test!("remove/single/above", test_remove_range_above)
+        test!("remove/multiple/leading", test_remove_leading_entries)
+        test!("remove/multiple/trailing", test_remove_trailing_entries)
+        test!("remove/multiple/middle", test_remove_middle_entries)
+        test!("remove/multiple/all", test_remove_all_entries)
+        test!("remove/multiple/split", test_split_middle_entry)
+        test!("remove/leaves/leading", test_remove_leading_leaves)
+        test!("remove/leaves/trailing", test_remove_trailing_leaves)
+        test!("remove/leaves/middle", test_remove_middle_leaves)
+        test!("remove/leaves/all", test_remove_all_leaves)
+        test!("remove/leaves/split-root", test_remove_split_root)
+        test!("remove/leaves/split-first", test_remove_split_first_leaf)
+        test!("remove/leaves/split-last", test_remove_split_last_leaf)
+    };
+
+    Ok(())
+}
+
+pub fn register_bench(runner: &mut TestRunner) -> Result<()> {
+    let kmodules = vec![PDATA_MOD];
+    let mut prefix: Vec<&'static str> = Vec::new();
+
+    macro_rules! test_section {
+        ($path:expr, $($s:stmt)*) => {{
+            prefix.push($path);
+            $($s)*
+            prefix.pop().unwrap();
+        }}
+    }
+
+    macro_rules! test {
+        ($path:expr, $func:expr) => {{
+            prefix.push($path);
+            let p = prefix.concat();
+            prefix.pop().unwrap();
+            runner.register(&p, Test::new(kmodules.clone(), Box::new($func)));
+        }};
+    }
+
+    test_section! {
+        "/pdata/rtree/",
+
+        test_section! {
+            "insert/",
+            test!("random", bench_insert_random)
+        }
     };
 
     Ok(())

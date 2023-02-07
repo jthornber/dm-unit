@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::emulator::riscv::{self, *};
 use crate::emulator::memory::*;
+use crate::emulator::riscv::{self, *};
 
 /// The intermediate representation is vey similar to riscv, except:
 /// - it uses static single assignment, no registers/infinite registers.
@@ -320,20 +320,11 @@ impl std::fmt::Display for IR {
 
 //----------------------------------
 
+#[derive(Default)]
 struct Builder {
     buffer: Vec<IR>,
     current_reg: u32,
     guest_regs: BTreeMap<riscv::Reg, Reg>,
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Builder {
-            buffer: Vec::new(),
-            current_reg: 0,
-            guest_regs: BTreeMap::new(),
-        }
-    }
 }
 
 impl Builder {
@@ -357,7 +348,7 @@ impl Builder {
 
     /// Returns the IR register that contains the guest reg
     fn ref_greg(&self, greg: &riscv::Reg) -> Reg {
-        self.guest_regs.get(greg).unwrap().clone()
+        *self.guest_regs.get(greg).unwrap()
     }
 
     /// Call this when you want to mutate the value of a guest register.
@@ -365,7 +356,7 @@ impl Builder {
     fn mut_greg(&mut self, greg: &riscv::Reg) -> (Reg, Reg) {
         let mut new = self.next_reg();
         new.1 = Some(*greg);
-        let old = self.guest_regs.get(greg).unwrap().clone();
+        let old = *self.guest_regs.get(greg).unwrap();
 
         // We don't insert the new reg for zero, since it
         // shouldn't change.
@@ -408,14 +399,7 @@ impl Builder {
 
     // Pushes a sequence of instructions that implement a branch.
     // if rs1 <op> rs2 { pc += offset } else { pc += width }
-    fn branch(
-        &mut self,
-        rs1: &riscv::Reg,
-        rs2: &riscv::Reg,
-        offset: &i32,
-        op: TestOp,
-        width: i32,
-    ) {
+    fn branch(&mut self, rs1: &riscv::Reg, rs2: &riscv::Reg, offset: &i32, op: TestOp, width: i32) {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let (old_pc, new_pc) = self.mut_greg(&riscv::Reg::PC);
@@ -498,14 +482,7 @@ impl Builder {
     fn xlate_shift(&mut self, rd: &riscv::Reg, op: ShiftOp, rs: &riscv::Reg, shamt: u8) {
         let rs = self.ref_greg(rs);
         let rd = self.def_greg(rd);
-        self.assign(
-            rd,
-            RValue::Shift {
-                op,
-                rs: rs,
-                shamt: shamt,
-            },
-        );
+        self.assign(rd, RValue::Shift { op, rs, shamt });
     }
 
     fn imm(&mut self, rd: &riscv::Reg, op: ImmOp, rs: &riscv::Reg, imm: &i32) {
@@ -570,7 +547,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
                 Imm {
                     op: Addi,
                     rs: old_pc,
-                    imm: width as i32,
+                    imm: width,
                 },
             );
 
@@ -966,7 +943,7 @@ fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
             rs: base,
             imm: *greg as i32 * 8,
         });
-        let rd2 = b.def_greg(&greg);
+        let rd2 = b.def_greg(greg);
         b.assign(rd2, Ld { rs: rd1 });
     }
 
@@ -985,7 +962,7 @@ fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
             rs: base,
             imm: *greg as i32 * 8,
         });
-        let rs2 = b.ref_greg(&greg);
+        let rs2 = b.ref_greg(greg);
         b.push(Sd { rs1, rs2 });
     }
 }
@@ -1241,7 +1218,7 @@ fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
     for ir in instrs {
         match ir {
             Assign { rd, rval } => {
-                let rval = simplify(&rval, &mut defs);
+                let rval = simplify(rval, &mut defs);
                 r.push(Assign { rd: *rd, rval });
                 defs.insert(*rd, rval);
             }
@@ -1391,11 +1368,7 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     for r in &ranges {
         by_base.insert(
             r.base,
-            (
-                Reg(highest_reg, None),
-                Reg(highest_reg + 1, None),
-                r.clone(),
-            ),
+            (Reg(highest_reg, None), Reg(highest_reg + 1, None), *r),
         );
         highest_reg += 2;
     }

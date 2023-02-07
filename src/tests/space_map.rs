@@ -1,8 +1,8 @@
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 use crate::stats::*;
-use crate::wrappers::space_map::*;
 use crate::stubs::block_manager::*;
+use crate::wrappers::space_map::*;
 
 use anyhow::{anyhow, ensure, Result};
 use log::*;

@@ -1,6 +1,6 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
-use crate::emulator::memory::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
@@ -140,7 +140,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     );
     runner.register(
         "/pdata/block-manager/write-lock",
-        Test::new(kmodules.clone(), Box::new(test_write_lock)),
+        Test::new(kmodules, Box::new(test_write_lock)),
     );
 
     Ok(())

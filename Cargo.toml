@@ -7,28 +7,27 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.35"
+anyhow = "1.0"
 bit-set = "0.5.2"
-byteorder = "1.3"
+byteorder = "1.4"
 clap = "2.33"
-crc32c = "0.4"
-duct = "0.13.5"
+crc32c = "0.6"
+duct = "0.13"
 elf = "0.0.10"
-env_logger = "0.8.2"
-fixedbitset = "0.3.1"
-gimli = "0.23"
+env_logger = "0.10"
+fixedbitset = "0.4"
+gimli = "0.27"
 intrusive-collections = "0.9"
-libc = "0.2.82"
+libc = "0.2"
 log = "0.4"
-nom = "6.0.1"
-num_cpus = "1.13"
+nom = "7.1"
+num_cpus = "1.14"
 regex = "1"
 rand = "0.8.0"
 rand_chacha = "0.3"
-tempfile = "3.2"
-threadpool = "1.0"
-# thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", branch = "main" }
-thinp = { path = "../thinp-for-dmunit" }
+tempfile = "3.3"
+threadpool = "1.8"
+thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", tag = "v1.0.0-rc1" }
 
 thiserror = "1.0"
 
