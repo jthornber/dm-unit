@@ -29,6 +29,13 @@ fn register_tests(runner: &mut TestRunner) -> Result<()> {
     Ok(())
 }
 
+fn register_bench(runner: &mut TestRunner) -> Result<()> {
+    btree::register_bench(runner)?;
+    rtree::register_bench(runner)?;
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -60,7 +67,8 @@ fn main() -> Result<()> {
             Arg::with_name("JIT")
                 .long("jit")
                 .help("Turn on the experimental jit compiler"),
-        );
+        )
+        .arg(Arg::with_name("BENCH").long("bench").help("Run benchmarks"));
 
     let matches = parser.get_matches();
     let kernel_dir = Path::new(matches.value_of("KERNEL_DIR").unwrap());
@@ -84,7 +92,11 @@ fn main() -> Result<()> {
         runner.set_jit();
     }
 
-    register_tests(&mut runner)?;
+    if matches.is_present("BENCH") {
+        register_bench(&mut runner)?;
+    } else {
+        register_tests(&mut runner)?;
+    }
 
     let (pass, fail) = runner.exec()?;
 

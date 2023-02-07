@@ -1,5 +1,6 @@
 use crate::emulator::memory::*;
 use crate::fixture::*;
+use crate::stats::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
@@ -276,6 +277,7 @@ struct RTreeTest<'a> {
     data_sm: Addr,
     root: u64,
     sb: Addr,
+    baseline: Stats,
 }
 
 const SUPERBLOCK: u64 = 0;
@@ -293,6 +295,11 @@ impl<'a> RTreeTest<'a> {
         sm_inc_block(fix, metadata_sm, SUPERBLOCK, SUPERBLOCK + 1)?;
         let sb = dm_bm_write_lock_zero(fix, bm, SUPERBLOCK, Addr(0))?;
 
+        let baseline = {
+            let bm = get_bm(fix, bm);
+            Stats::collect_stats(fix, &bm)
+        };
+
         Ok(RTreeTest {
             fix,
             bm,
@@ -301,6 +308,7 @@ impl<'a> RTreeTest<'a> {
             data_sm,
             root,
             sb,
+            baseline,
         })
     }
 
@@ -379,6 +387,17 @@ impl<'a> RTreeTest<'a> {
 
     fn lookup(&mut self, thin_begin: u64) -> Result<Option<Mapping>> {
         dm_rtree_lookup(self.fix, self.tm, self.root, thin_begin)
+    }
+
+    fn stats_start(&mut self) {
+        let bm = get_bm(self.fix, self.bm);
+        self.baseline = Stats::collect_stats(self.fix, &bm);
+    }
+
+    fn stats_delta(&mut self) -> Result<Stats> {
+        let bm = get_bm(self.fix, self.bm);
+        let delta = self.baseline.delta(self.fix, &bm);
+        Ok(delta)
     }
 }
 
@@ -781,6 +800,69 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     }
 
     // rtree.del()?;
+    Ok(())
+}
+
+//-------------------------------
+
+fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 200000;
+    const COMMIT_INTERVAL: usize = 100;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    rtree.check()?;
+
+    let mut mappings: Vec<Mapping> = (0..COUNT)
+        .into_iter()
+        .map(|i| Mapping {
+            thin_begin: i,
+            data_begin: i + 1234,
+            len: 1,
+            time: 0,
+        })
+        .collect();
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    mappings.shuffle(&mut rng);
+
+    let mut csv = File::create("./rtree.csv")?;
+    writeln!(
+        csv,
+        "inserts, nr_internal, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
+    )?;
+
+    rtree.stats_start();
+
+    let mut total = 0;
+    for chunk in mappings.chunks(COMMIT_INTERVAL) {
+        for m in chunk {
+            let _nr_inserted = rtree.insert(m)?;
+        }
+
+        let stats = rtree.check()?; // implicitly commit
+        let residency = (stats.nr_entries * 100) / (stats.nr_leaves * MAX_LEAF_ENTRIES as u64);
+
+        let delta = rtree.stats_delta()?;
+        rtree.stats_start();
+
+        total += chunk.len();
+        writeln!(
+            csv,
+            "{}, {}, {}, {}, {}, {}, {}, {}",
+            total,
+            stats.nr_internal,
+            stats.nr_leaves,
+            stats.nr_entries,
+            residency,
+            delta.instrs / chunk.len() as u64,
+            delta.read_locks / chunk.len() as u64,
+            delta.write_locks / chunk.len() as u64,
+        )?;
+    }
+
+    rtree.del()?;
+
     Ok(())
 }
 
@@ -1838,6 +1920,39 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("remove/leaves/split-root", test_remove_split_root)
         test!("remove/leaves/split-first", test_remove_split_first_leaf)
         test!("remove/leaves/split-last", test_remove_split_last_leaf)
+    };
+
+    Ok(())
+}
+
+pub fn register_bench(runner: &mut TestRunner) -> Result<()> {
+    let kmodules = vec![PDATA_MOD];
+    let mut prefix: Vec<&'static str> = Vec::new();
+
+    macro_rules! test_section {
+        ($path:expr, $($s:stmt)*) => {{
+            prefix.push($path);
+            $($s)*
+            prefix.pop().unwrap();
+        }}
+    }
+
+    macro_rules! test {
+        ($path:expr, $func:expr) => {{
+            prefix.push($path);
+            let p = prefix.concat();
+            prefix.pop().unwrap();
+            runner.register(&p, Test::new(kmodules.clone(), Box::new($func)));
+        }};
+    }
+
+    test_section! {
+        "/pdata/rtree/",
+
+        test_section! {
+            "insert/",
+            test!("random", bench_insert_random)
+        }
     };
 
     Ok(())
