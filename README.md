@@ -74,4 +74,4 @@ Rather than:
 
 # Documentation
 
-See doc/Contents.md
+The doc directory contains markdown files giving more information.  Best viewed in [Obsidian](https://obsidian.md).
