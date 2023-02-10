@@ -1,6 +1,6 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
-use crate::emulator::memory::*;
 
 use anyhow::Result;
 use log::*;
@@ -60,7 +60,7 @@ pub fn memcmp(fix: &mut Fixture) -> Result<()> {
     fix.vm.mem.read(s2, &mut b2, PERM_READ)?;
 
     let mut r: i64 = 0;
-    
+
     for i in 0..len {
         if b1[i] < b2[i] {
             r = -1;
@@ -176,6 +176,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.at_func("kfree", Box::new(kfree));
     let _ = fix.at_func("__kmalloc", Box::new(kmalloc));
     let _ = fix.at_func("kmalloc_order", Box::new(kmalloc));
+    let _ = fix.at_func("kmalloc_large", Box::new(kmalloc));
     let _ = fix.at_func("memcpy", Box::new(memcpy));
     let _ = fix.at_func("memmove", Box::new(memcpy));
     let _ = fix.at_func("memcmp", Box::new(memcmp));
