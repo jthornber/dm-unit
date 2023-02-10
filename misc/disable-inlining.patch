@@ -1,25 +1,26 @@
 diff --git a/Makefile b/Makefile
-index e0af7a4a5..673772625 100644
+index 997b67722292..e7ca18bd828e 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -850,6 +850,12 @@ endif # CONFIG_DEBUG_INFO
- KBUILD_CFLAGS += $(DEBUG_CFLAGS)
- export DEBUG_CFLAGS
+@@ -922,6 +922,13 @@ ifdef CONFIG_ZERO_CALL_USED_REGS
+ KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
+ endif
  
 +ifdef CONFIG_NO_AUTO_INLINE
 +KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
 +		   $(call cc-option, -fno-inline-small-functions) \
-+		   $(call cc-option, -fno-inline-functions-called-once)
++		   $(call cc-option, -fno-inline-functions-called-once) \
++		   -fno-ipa-cp
 +endif
 +
  ifdef CONFIG_FUNCTION_TRACER
- ifdef CONFIG_FTRACE_MCOUNT_RECORD
-   # gcc 5 supports generating the mcount tables directly
+ ifdef CONFIG_FTRACE_MCOUNT_USE_CC
+   CC_FLAGS_FTRACE	+= -mrecord-mcount
 diff --git a/lib/Kconfig b/lib/Kconfig
-index 46806332a..087903ddc 100644
+index 9bbf8a4b2108..19f54b623f9e 100644
 --- a/lib/Kconfig
 +++ b/lib/Kconfig
-@@ -86,6 +86,23 @@ config ARCH_HAS_FAST_MULTIPLIER
+@@ -88,6 +88,23 @@ config ARCH_HAS_FAST_MULTIPLIER
  config ARCH_USE_SYM_ANNOTATIONS
  	bool
  
