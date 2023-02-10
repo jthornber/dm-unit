@@ -335,12 +335,12 @@ impl<'a> RTreeTest<'a> {
     }
 
     fn insert(&mut self, v: &Mapping) -> Result<u32> {
-        sm_inc_block(
+        /*sm_inc_block(
             self.fix,
             self.data_sm,
             v.data_begin,
             v.data_begin + v.len as u64,
-        )?;
+        )?;*/
 
         let (new_root, nr_inserted) =
             dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, v)?;
@@ -373,7 +373,6 @@ impl<'a> RTreeTest<'a> {
         let mut stats = TreeStats::default();
         let kr = KeyRange::new();
         rtree_check(&*bm, self.root, &kr, &mut stats)?;
-        debug!("{:?}", stats);
         Ok(stats)
     }
 
@@ -833,6 +832,68 @@ fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
         rtree.stats_start();
 
         total += chunk.len();
+        writeln!(
+            csv,
+            "{}, {}, {}, {}, {}, {}, {}, {}",
+            total,
+            stats.nr_internal,
+            stats.nr_leaves,
+            stats.nr_entries,
+            residency,
+            delta.instrs / chunk.len() as u64,
+            delta.read_locks / chunk.len() as u64,
+            delta.write_locks / chunk.len() as u64,
+        )?;
+    }
+
+    rtree.del()?;
+
+    Ok(())
+}
+
+fn bench_lookup_random(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 200000;
+    const COMMIT_INTERVAL: usize = 100;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    rtree.check()?;
+
+    let mut mappings: Vec<Mapping> = (0..COUNT)
+        .into_iter()
+        .map(|i| Mapping {
+            thin_begin: i,
+            data_begin: i + 1234,
+            len: 1,
+            time: 0,
+        })
+        .collect();
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    mappings.shuffle(&mut rng);
+
+    let mut csv = File::create("./rtree.csv")?;
+    writeln!(
+        csv,
+        "nr_entries, nr_internal, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
+    )?;
+
+    let mut total = 0;
+    for chunk in mappings.chunks(COMMIT_INTERVAL) {
+        for m in chunk {
+            let _nr_inserted = rtree.insert(m)?;
+        }
+
+        let stats = rtree.check()?; // implicitly commit
+
+        rtree.stats_start();
+        for m in chunk {
+            rtree.lookup(m.thin_begin)?;
+        }
+        let delta = rtree.stats_delta()?;
+
+        total += chunk.len();
+        let residency = (stats.nr_entries * 100) / (stats.nr_leaves * MAX_LEAF_ENTRIES as u64);
         writeln!(
             csv,
             "{}, {}, {}, {}, {}, {}, {}, {}",
@@ -1938,6 +1999,10 @@ pub fn register_bench(runner: &mut TestRunner) -> Result<()> {
         test_section! {
             "insert/",
             test!("random", bench_insert_random)
+        }
+        test_section! {
+            "lookup/",
+            test!("random", bench_lookup_random)
         }
     };
 
