@@ -1,8 +1,8 @@
 use crate::anymap::*;
-use crate::emulator::riscv::Reg;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_EXEC};
+use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
 
@@ -62,6 +62,11 @@ impl KernelModule {
 pub const PDATA_MOD: KernelModule = KernelModule {
     basename: "dm-persistent-data",
     relative_path: "drivers/md/persistent-data/dm-persistent-data.ko",
+};
+
+pub const BUFIO_MOD: KernelModule = KernelModule {
+    basename: "dm-bufio",
+    relative_path: "drivers/md/dm-bufio.ko",
 };
 
 pub const THIN_MOD: KernelModule = KernelModule {

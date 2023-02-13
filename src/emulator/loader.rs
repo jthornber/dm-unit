@@ -171,7 +171,7 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
             i += 1;
             if i < rlocs.len() {
                 let rloc2 = &rlocs[i];
-                if rloc2.rtype == Rpcrel_lo12_i {
+                if rloc2.rtype == Rpcrel_lo12_i || rloc2.rtype == Rpcrel_lo12_s {
                     compound.push(CompoundRel::Pair(rloc.clone(), rloc2.clone()));
                     i += 1;
                 } else {
@@ -270,11 +270,22 @@ fn relocate(
                 (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
             })?;
         }
+        Rpcrel_lo12_s => {
+            mutate_u32(mem, location, |old| {
+                (old & 0xfffff) | (((sym.0 as u32) & 0x1f) << 7) | (((sym.0 as u32) & 0xfe) << 24)
+            })?;
+        }
         Radd32 => {
             mutate_u32(mem, location, |old| old + sym.0 as u32)?;
         }
         Rsub32 => {
             mutate_u32(mem, location, |old| old.wrapping_sub(sym.0 as u32))?;
+        }
+        Radd64 => {
+            mutate_u64(mem, location, |old| old + sym.0 as u64)?;
+        }
+        Rsub64 => {
+            mutate_u64(mem, location, |old| old.wrapping_sub(sym.0 as u64))?;
         }
         Rrvc_branch => {
             let offset = addr_offset(sym, location) as u16;
@@ -305,6 +316,7 @@ fn relocate(
             })?;
         }
         _ => {
+            debug!("unsupported relocation type: {:?}", rtype);
             return Err(anyhow!("unsupported relocation type: {:?}", rtype));
         }
     }
@@ -641,6 +653,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     )?;
 
     // FIXME: factor out
+    debug!("stubbing undefined references");
     {
         // Create a section for undefined references.  These will be hooked by
         // test code.
@@ -686,16 +699,19 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     // Now that the global refs have been stubbed, every
     // symbol in the relocations should have an associated
     // section.
+    debug!("checking relocations");
     for r in &module.relocations {
         check_relocation(r);
     }
 
     // Execute all the relocations.
+    debug!("executing relocations");
     for r in &module.relocations {
         exec_relocation(mem, r)?;
     }
 
     // build globals symbol table
+    debug!("building global symbol table");
     let mut symtable = BTreeMap::new();
     for s in &module.refs {
         let s = s.borrow();
@@ -705,6 +721,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
+    debug!("building defs");
     for s in &module.defs {
         let s = s.borrow();
         if let Some(section) = &s.section {
@@ -713,6 +730,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
+    debug!("building internals");
     for s in &module.internal {
         let s = s.borrow();
         if let Some(section) = &s.section {
@@ -740,7 +758,14 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
     };
 
     let ld_cmd = format!("{}ld", cross_compile);
-    let mut args = vec!["-r", "-melf64lriscv", "-T", "misc/module.lds", "-o", output.to_str().unwrap()];
+    let mut args = vec![
+        "-r",
+        "-melf64lriscv",
+        "-T",
+        "misc/module.lds",
+        "-o",
+        output.to_str().unwrap(),
+    ];
     for p in paths {
         args.push(p.as_ref().to_str().unwrap());
     }

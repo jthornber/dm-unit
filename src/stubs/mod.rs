@@ -182,6 +182,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.at_func("memcmp", Box::new(memcmp));
     let _ = fix.at_func("memset", Box::new(memset));
     let _ = fix.at_func("printk", Box::new(printk));
+    let _ = fix.at_func("_printk", Box::new(printk));
     let _ = fix.at_func("strncpy", Box::new(strncpy));
 
     rw_semaphore::rw_sem_stubs(fix)?;

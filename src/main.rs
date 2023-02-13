@@ -4,6 +4,7 @@ extern crate log;
 use dm_unit::test_runner::*;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
+use dm_unit::tests::bufio;
 use dm_unit::tests::cache;
 use dm_unit::tests::space_map_disk;
 use dm_unit::tests::space_map_metadata;
@@ -17,6 +18,7 @@ use std::path::Path;
 //-------------------------------
 
 fn register_tests(runner: &mut TestRunner) -> Result<()> {
+    bufio::register_tests(runner)?;
     block_manager::register_tests(runner)?;
     btree::register_tests(runner)?;
     cache::register_tests(runner)?;

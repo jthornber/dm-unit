@@ -1,10 +1,10 @@
 use crate::block_manager::*;
+use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 use crate::stats::*;
-use crate::stubs::*;
 use crate::stubs::block_manager::*;
+use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::btree::*;
@@ -210,7 +210,7 @@ impl Unpack for Value64 {
         8
     }
 
-    fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
+    fn unpack(data: &[u8]) -> nom::IResult<&[u8], Self> {
         let (i, v) = le_u64(data)?;
         Ok((i, Value64(v)))
     }
