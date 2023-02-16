@@ -281,6 +281,16 @@ impl Fixture {
         self.at_func(func, Box::new(callback))
     }
 
+    pub fn const_callback(&mut self, v: u64) -> Result<Addr> {
+        let callback = move |fix: &mut Fixture| {
+            fix.vm.ret(v);
+            Ok(())
+        };
+        let ptr = self.alloc_ebreak()?;
+        self.bp_at_addr(ptr, Box::new(callback));
+        Ok(ptr)
+    }
+
     // FIXME: there's got to be a better way to do this
     fn indent_string(&self) -> String {
         let mut r = String::new();
@@ -434,6 +444,26 @@ pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
         .mem
         .alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
+}
+
+pub fn auto_alloc_vec<'a, G: Guest>(
+    fix: &'a mut Fixture,
+    vals: &'a [G],
+) -> Result<(AutoGPtr<'a>, Vec<Addr>)> {
+    let len = G::guest_len() * vals.len();
+    let (mut fix, ptr) = auto_alloc(fix, len)?;
+
+    for (i, v) in vals.iter().enumerate() {
+        let v_ptr = Addr(ptr.0 + (G::guest_len() * i) as u64);
+        write_guest(&mut fix.vm.mem, v_ptr, v)?;
+    }
+
+    let ptrs = (0..vals.len())
+        .into_iter()
+        .map(|i| Addr(ptr.0 + (G::guest_len() * i) as u64))
+        .collect();
+
+    Ok((fix, ptrs))
 }
 
 /// Allocates an excutable chunk of memory that we can use to fake a callback.

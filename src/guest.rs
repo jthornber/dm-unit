@@ -10,7 +10,6 @@ use std::io::{Cursor, Read, Write};
 
 // FIXME: use read_some rather than copying all the time
 
-
 // Guest types must always consume the same amount of contiguous guest
 // memory.
 pub trait Guest {

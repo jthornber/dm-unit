@@ -153,6 +153,8 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.stub("mutex_lock", 0);
     let _ = fix.stub("mutex_unlock", 0);
     let _ = fix.stub("___ratelimit", 0);
+    let _ = fix.stub("__might_resched", 0);
+    let _ = fix.stub("__cond_resched", 0);
 
     let _ = fix.at_func("dm_block_data", Box::new(bm_block_data));
     let _ = fix.at_func("dm_block_location", Box::new(bm_block_location));

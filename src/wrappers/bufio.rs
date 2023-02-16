@@ -17,6 +17,15 @@ pub struct ListHead {
     pub prev: Addr,
 }
 
+impl Default for ListHead {
+    fn default() -> Self {
+        Self {
+            next: Addr(0),
+            prev: Addr(0),
+        }
+    }
+}
+
 impl Guest for ListHead {
     fn guest_len() -> usize {
         16
@@ -39,6 +48,15 @@ impl Guest for ListHead {
 pub struct LruEntry {
     pub list: ListHead,
     pub referenced: u32,
+}
+
+impl Default for LruEntry {
+    fn default() -> Self {
+        Self {
+            list: ListHead::default(),
+            referenced: 0,
+        }
+    }
 }
 
 impl Guest for LruEntry {
@@ -65,6 +83,15 @@ impl Guest for LruEntry {
 pub struct Lru {
     pub cursor: Addr,
     pub count: u64,
+}
+
+impl Default for Lru {
+    fn default() -> Self {
+        Self {
+            cursor: Addr(0),
+            count: 0,
+        }
+    }
 }
 
 impl Guest for Lru {
@@ -97,10 +124,12 @@ pub fn lru_exit(fix: &mut Fixture, lru: Addr) -> Result<()> {
     Ok(())
 }
 
+// This is a trivial function that gets inlined.  Instead of
+// calling the C version we read the lru structure from the
+// guest and access the count field.
 pub fn lru_count(fix: &mut Fixture, lru: Addr) -> Result<u64> {
-    fix.vm.set_reg(A0, lru.0);
-    fix.call("lru_count")?;
-    Ok(fix.vm.reg(A0))
+    let lru = read_guest::<Lru>(&fix.vm.mem, lru)?;
+    Ok(lru.count)
 }
 
 pub fn lru_insert(fix: &mut Fixture, lru: Addr, entry: Addr) -> Result<()> {
