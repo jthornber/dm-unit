@@ -161,3 +161,182 @@ pub fn lru_evict(fix: &mut Fixture, lru: Addr, pred: Addr, context: Addr) -> Res
 }
 
 //-------------------------------
+
+pub const BUFFER_CACHE_SIZE: usize = 4640;
+
+pub enum LruKind {
+    Clean,
+    Dirty,
+}
+
+pub const LIST_CLEAN: u64 = 0;
+pub const LIST_DIRTY: u64 = 1;
+
+fn encode_kind(k: LruKind) -> u64 {
+    use LruKind::*;
+
+    match k {
+        Clean => LIST_CLEAN,
+        Dirty => LIST_DIRTY,
+    }
+}
+
+pub fn cache_init(fix: &mut Fixture, cache: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.call("cache_init")?;
+    Ok(())
+}
+
+pub fn cache_exit(fix: &mut Fixture, cache: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.call("cache_destroy")?;
+    Ok(())
+}
+
+pub fn cache_count(fix: &mut Fixture, cache: Addr, k: LruKind) -> Result<usize> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, encode_kind(k));
+    fix.call("cache_count")?;
+    Ok(fix.vm.reg(A0) as usize)
+}
+
+pub fn cache_total(fix: &mut Fixture, cache: Addr) -> Result<usize> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.call("cache_total")?;
+    Ok(fix.vm.reg(A0) as usize)
+}
+
+pub fn cache_get(fix: &mut Fixture, cache: Addr, block: u64) -> Result<Addr> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, block);
+    fix.call("cache_get")?;
+    Ok(Addr(fix.vm.reg(A0)))
+}
+
+pub fn cache_find(
+    fix: &mut Fixture,
+    cache: Addr,
+    k: LruKind,
+    pred: Addr,
+    context: Addr,
+) -> Result<Addr> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, encode_kind(k));
+    fix.vm.set_reg(A2, pred.0);
+    fix.vm.set_reg(A3, context.0);
+
+    fix.call("cache_find")?;
+
+    Ok(Addr(fix.vm.reg(A0)))
+}
+
+pub fn cache_put(fix: &mut Fixture, cache: Addr, b: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, b.0);
+
+    fix.call("cache_put")?;
+
+    Ok(())
+}
+
+pub fn cache_evict(
+    fix: &mut Fixture,
+    cache: Addr,
+    k: LruKind,
+    pred: Addr,
+    context: Addr,
+) -> Result<Addr> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, encode_kind(k));
+    fix.vm.set_reg(A2, pred.0);
+    fix.vm.set_reg(A3, context.0);
+
+    fix.call("cache_evict")?;
+
+    Ok(Addr(fix.vm.reg(A0)))
+}
+
+pub fn cache_mark(fix: &mut Fixture, cache: Addr, b: Addr, k: LruKind) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, b.0);
+    fix.vm.set_reg(A2, encode_kind(k));
+
+    fix.call("cache_mark")?;
+
+    Ok(())
+}
+
+pub fn cache_mark_many(
+    fix: &mut Fixture,
+    cache: Addr,
+    old_k: LruKind,
+    new_k: LruKind,
+    pred: Addr,
+    context: Addr,
+) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, encode_kind(old_k));
+    fix.vm.set_reg(A2, encode_kind(new_k));
+    fix.vm.set_reg(A3, pred.0);
+    fix.vm.set_reg(A4, context.0);
+
+    fix.call("cache_mark_many")?;
+
+    Ok(())
+}
+
+pub fn cache_iterate(
+    fix: &mut Fixture,
+    cache: Addr,
+    k: LruKind,
+    iter_fn: Addr,
+    context: Addr,
+) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, encode_kind(k));
+    fix.vm.set_reg(A2, iter_fn.0);
+    fix.vm.set_reg(A3, context.0);
+
+    fix.call("cache_iterate")?;
+
+    Ok(())
+}
+
+pub fn cache_insert(fix: &mut Fixture, cache: Addr, b: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, b.0);
+
+    fix.call("cache_insert")?;
+
+    Ok(())
+}
+
+pub fn cache_remove(fix: &mut Fixture, cache: Addr, b: Addr) -> Result<bool> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, b.0);
+
+    fix.call("cache_remove")?;
+
+    Ok(fix.vm.reg(A0) != 0)
+}
+
+pub fn cache_remove_range(
+    fix: &mut Fixture,
+    cache: Addr,
+    b: u64,
+    e: u64,
+    pred: Addr,
+    release: Addr,
+) -> Result<()> {
+    fix.vm.set_reg(A0, cache.0);
+    fix.vm.set_reg(A1, b);
+    fix.vm.set_reg(A2, e);
+    fix.vm.set_reg(A3, pred.0);
+    fix.vm.set_reg(A4, release.0);
+
+    fix.call("cache_remove_range")?;
+
+    Ok(())
+}
+
+//-------------------------------
