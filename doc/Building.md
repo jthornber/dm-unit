@@ -23,8 +23,8 @@ Where CROSS_COMPILE is the prefix to your riscv tools.  A quick way to do this i
 copy ./misc/setup-cross-compile to your kernel source dir, and source it before you
 start work.
 
-I recommend applying misc/disable-inlining.patch to your kernel if you are
-doing development work.  It adds a config option to disable auto inlining.
+Apply this patch misc/all.patch to your kernel.  Among other things it
+adds a config option to disable auto inlining.
 Explict inline directives will still be obeyed.  Letting the compiler
 choose which functions are inlined can be frustrating when something as
 trivial as adding a printk to one function can cause a _different_ function
@@ -32,7 +32,7 @@ to be inlined.  Inlined functions will not appear in the symbol table,
 and cannot be hooked/tested.
 
 ```bash
-patch -p1 < path/to/dm-unit/misc/disable-inlining.patch 
+patch -p1 < path/to/dm-unit/misc/all.patch 
 ```
 
 Now we need to configure your kernel.  Copy either misc/kernel.config or misc/no-inlining-kernel.config
