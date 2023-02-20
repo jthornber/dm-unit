@@ -6,45 +6,7 @@ use crate::test_runner::*;
 use crate::wrappers::bufio::*;
 
 use anyhow::{anyhow, Result};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
-use std::io;
-use std::io::{Read, Write};
-
-//-------------------------------
-
-// What can we actually test, given so much of bufio
-// is about concurrency and IO.
-// A cut down buffer used for testing the LRU in isolation.
-struct MiniBuffer {
-    lru: LruEntry,
-    block: u64,
-    last_accessed: u64,
-}
-
-impl Guest for MiniBuffer {
-    fn guest_len() -> usize {
-        40
-    }
-
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        self.lru.pack(w)?;
-        w.write_u64::<LittleEndian>(self.block)?;
-        w.write_u64::<LittleEndian>(self.last_accessed)?;
-        Ok(())
-    }
-
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
-        let lru = LruEntry::unpack(r)?;
-        let block = r.read_u64::<LittleEndian>()?;
-        let last_accessed = r.read_u64::<LittleEndian>()?;
-        Ok(Self {
-            lru,
-            block,
-            last_accessed,
-        })
-    }
-}
 
 //-------------------------------
 
@@ -57,18 +19,6 @@ fn auto_lru<'a>(fix: &'a mut Fixture) -> Result<(AutoGPtr<'a>, Addr)> {
     Ok((AutoGPtr::new(fix, ptr), ptr))
 }
 
-/*
-fn auto_mini_buffer<'a>(fix: &'a mut Fixture, block: u64) -> Result<(AutoGPtr<'a>, Addr)> {
-    let mb = MiniBuffer {
-        lru: LruEntry::default(),
-        block,
-        last_accessed: 0,
-    };
-    let ptr = alloc_guest(&mut fix.vm.mem, &mb, PERM_READ | PERM_WRITE)?;
-    Ok((AutoGPtr::new(fix, ptr), ptr))
-}
-*/
-
 // The lru entry is the first field of buffers.  Let's put
 // this assumption in a single place.
 fn entry_to_buf(e: Addr) -> Addr {
@@ -80,7 +30,7 @@ fn list_to_entry(l: Addr) -> Addr {
     l
 }
 
-fn lru_read_buffers(fix: &mut Fixture, lru: Addr) -> Result<Vec<MiniBuffer>> {
+fn lru_read_buffers(fix: &mut Fixture, lru: Addr) -> Result<Vec<Buffer>> {
     let mut bufs = Vec::new();
 
     let lru = read_guest::<Lru>(&fix.vm.mem, lru)?;
@@ -91,7 +41,7 @@ fn lru_read_buffers(fix: &mut Fixture, lru: Addr) -> Result<Vec<MiniBuffer>> {
 
         loop {
             let buf_addr = entry_to_buf(list_to_entry(cursor));
-            let buf = read_guest::<MiniBuffer>(&fix.vm.mem, buf_addr)?;
+            let buf = read_guest::<Buffer>(&fix.vm.mem, buf_addr)?;
             cursor = buf.lru.list.next;
             bufs.push(buf);
 
@@ -115,13 +65,15 @@ fn test_lru_inserts(fix: &mut Fixture, blocks: &[u64]) -> Result<()> {
     standard_globals(fix)?;
     let (mut fix, lru) = auto_lru(fix)?;
 
-    let bufs: Vec<MiniBuffer> = blocks
+    let bufs: Vec<Buffer> = blocks
         .iter()
         .map({
-            |b| MiniBuffer {
+            |b| Buffer {
                 lru: LruEntry::default(),
                 block: *b,
+                hold_count: 0,
                 last_accessed: 0,
+                list_mode: LruKind::Clean,
             }
         })
         .collect();
@@ -164,14 +116,16 @@ fn test_lru_insert_many(fix: &mut Fixture) -> Result<()> {
     test_lru_inserts(fix, &blocks)
 }
 
-fn seq_buffers(b: usize, e: usize) -> Vec<MiniBuffer> {
+fn seq_buffers(b: usize, e: usize) -> Vec<Buffer> {
     (b..e)
         .into_iter()
         .map({
-            |b| MiniBuffer {
+            |b| Buffer {
                 lru: LruEntry::default(),
                 block: b as u64,
+                hold_count: 0,
                 last_accessed: 0,
+                list_mode: LruKind::Clean,
             }
         })
         .collect()
@@ -204,7 +158,7 @@ fn test_lru_evict(fix: &mut Fixture) -> Result<()> {
             return Err(anyhow!("evict failed"));
         }
 
-        let buf = read_guest::<MiniBuffer>(&fix.vm.mem, b_ptr)?;
+        let buf = read_guest::<Buffer>(&fix.vm.mem, b_ptr)?;
         if buf.block % 2 != 1 {
             return Err(anyhow!(
                 "unexpected block chosen for eviction {}",
@@ -234,7 +188,7 @@ fn test_lru_evict(fix: &mut Fixture) -> Result<()> {
             return Err(anyhow!("evict failed"));
         }
 
-        let buf = read_guest::<MiniBuffer>(&fix.vm.mem, b_ptr)?;
+        let buf = read_guest::<Buffer>(&fix.vm.mem, b_ptr)?;
         if buf.block < 1024 {
             return Err(anyhow!(
                 "unexpected block chosen for eviction {}",
@@ -258,7 +212,7 @@ fn test_lru_evict(fix: &mut Fixture) -> Result<()> {
             return Err(anyhow!("evict failed"));
         }
 
-        let buf = read_guest::<MiniBuffer>(&fix.vm.mem, b_ptr)?;
+        let buf = read_guest::<Buffer>(&fix.vm.mem, b_ptr)?;
         if buf.block >= 1024 {
             return Err(anyhow!(
                 "unexpected block chosen for eviction {}",
@@ -266,6 +220,45 @@ fn test_lru_evict(fix: &mut Fixture) -> Result<()> {
             ));
         }
     }
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn auto_cache<'a>(fix: &'a mut Fixture) -> Result<(AutoGPtr<'a>, Addr)> {
+    auto_alloc(fix, BUFFER_CACHE_SIZE)
+}
+
+fn test_cache_create(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let (mut fix, cache) = auto_cache(fix)?;
+    cache_exit(&mut fix, cache)?;
+
+    Ok(())
+}
+
+fn test_cache_insert(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let (mut fix, cache) = auto_cache(fix)?;
+
+    // Insert a bunch of buffers
+    let bufs = seq_buffers(0, 1024);
+    let (mut fix, guest_bufs) = auto_alloc_vec(&mut fix, &bufs)?;
+    for b in &guest_bufs {
+        cache_insert(&mut fix, cache, *b)?;
+    }
+
+    // Remove them all
+    for (i, b) in bufs.iter().enumerate() {
+        let b2 = cache_get(&mut fix, cache, b.block)?;
+        if guest_bufs[i] != b2 {
+            return Err(anyhow!("block mismatch"));
+        }
+        cache_remove(&mut fix, cache, b2)?;
+    }
+
+    cache_exit(&mut fix, cache)?;
 
     Ok(())
 }
@@ -299,6 +292,12 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("insert-1", test_lru_insert_1)
         test!("insert-many", test_lru_insert_many)
         test!("evict", test_lru_evict)
+    };
+
+    test_section! {
+        "/bufio/cache/",
+        test!("create", test_cache_create)
+        test!("insert", test_cache_insert)
     };
 
     Ok(())

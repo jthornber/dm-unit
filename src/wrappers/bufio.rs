@@ -162,8 +162,56 @@ pub fn lru_evict(fix: &mut Fixture, lru: Addr, pred: Addr, context: Addr) -> Res
 
 //-------------------------------
 
+pub struct Buffer {
+    pub lru: LruEntry,
+    pub block: u64,
+    pub hold_count: u32,
+    pub last_accessed: u64,
+    pub list_mode: LruKind,
+}
+
+impl Guest for Buffer {
+    fn guest_len() -> usize {
+        152
+    }
+
+    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        self.lru.pack(w)?;
+        w.write_u64::<LittleEndian>(self.block)?;
+        w.write_all(&[0; 40])?;
+        w.write_u32::<LittleEndian>(self.hold_count)?;
+        w.write_u64::<LittleEndian>(self.last_accessed)?;
+        w.write_u8(encode_kind(self.list_mode) as u8)?;
+        Ok(())
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let lru = LruEntry::unpack(r)?;
+        let block = r.read_u64::<LittleEndian>()?;
+        r.read_exact(&mut [0; 40])?;
+        let hold_count = r.read_u32::<LittleEndian>()?;
+        let last_accessed = r.read_u64::<LittleEndian>()?;
+        let list_mode = r.read_u8()?;
+
+        Ok(Self {
+            lru,
+            block,
+            hold_count,
+            last_accessed,
+            list_mode: if list_mode == 0 {
+                LruKind::Clean
+            } else {
+                LruKind::Dirty
+            },
+        })
+    }
+}
+
+//-------------------------------
+
 pub const BUFFER_CACHE_SIZE: usize = 4640;
 
+#[derive(Clone, Copy)]
 pub enum LruKind {
     Clean,
     Dirty,
@@ -172,7 +220,7 @@ pub enum LruKind {
 pub const LIST_CLEAN: u64 = 0;
 pub const LIST_DIRTY: u64 = 1;
 
-fn encode_kind(k: LruKind) -> u64 {
+pub fn encode_kind(k: LruKind) -> u64 {
     use LruKind::*;
 
     match k {
