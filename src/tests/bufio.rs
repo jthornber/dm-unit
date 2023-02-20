@@ -7,6 +7,7 @@ use crate::wrappers::bufio::*;
 
 use anyhow::{anyhow, Result};
 use log::*;
+use std::collections::BTreeSet;
 
 //-------------------------------
 
@@ -263,6 +264,56 @@ fn test_cache_insert(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+fn test_cache_mark(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let (mut fix, cache) = auto_cache(fix)?;
+
+    // Insert a bunch of buffers
+    let bufs = seq_buffers(0, 1024);
+    let (mut fix, guest_bufs) = auto_alloc_vec(&mut fix, &bufs)?;
+    for b in &guest_bufs {
+        cache_insert(&mut fix, cache, *b)?;
+    }
+
+    // Mark half as dirty
+    let mut dirty: BTreeSet<Addr> = BTreeSet::new();
+    for b in &bufs {
+        if b.block % 2 == 0 {
+            continue;
+        }
+
+        let b2 = cache_get(&mut fix, cache, b.block)?;
+        cache_mark(&mut fix, cache, b2, LruKind::Dirty)?;
+        cache_put(&mut fix, cache, b2)?;
+        dirty.insert(b2);
+    }
+
+    // check they are indeed dirty
+    let mut dirty2 = BTreeSet::new();
+    loop {
+        let pred = (&mut fix).const_callback(0)?; // ER_EVICT
+        let b = cache_evict(&mut fix, cache, LruKind::Dirty, pred, Addr(0))?;
+        if b.0 == 0 {
+            break;
+        }
+
+        dirty2.insert(b);
+    }
+
+    if dirty != dirty2 {
+        return Err(anyhow!("missing dirty buffer"));
+    }
+
+    // Remove them all, this time using remove_range
+    let pred = (&mut fix).const_callback(0)?; // ER_EVICT
+    let release = (&mut fix).const_callback(0)?;
+    cache_remove_range(&mut fix, cache, 0, 1024, pred, release)?;
+
+    cache_exit(&mut fix, cache)?;
+
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -298,6 +349,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         "/bufio/cache/",
         test!("create", test_cache_create)
         test!("insert", test_cache_insert)
+        test!("mark", test_cache_mark)
     };
 
     Ok(())
