@@ -72,7 +72,7 @@ fn check_btree(root: u64) -> Result<()> {
 struct ResidencyVisitor {
     nr_entries: AtomicU32,
     nr_leaves: AtomicU32,
-    leaves: Arc<Mutex<Vec<u64>>>
+    leaves: Arc<Mutex<Vec<u64>>>,
 }
 
 impl<V: Unpack> NodeVisitor<V> for ResidencyVisitor {
@@ -125,6 +125,37 @@ fn get_stats<V: Unpack>(bm: &Arc<BlockManager>, root: u64) -> Result<TreeStats> 
         nr_entries,
         nr_leaves,
     })
+}
+
+struct LayoutVisitor {}
+
+impl<V: Unpack> NodeVisitor<V> for LayoutVisitor {
+    fn visit(
+        &self,
+        path: &[u64],
+        _kr: &KeyRange,
+        _header: &NodeHeader,
+        keys: &[u64],
+        _values: &[V],
+    ) -> btree::Result<()> {
+        println!("block {} entries {}", path.last().unwrap_or(&0), keys.len());
+        Ok(())
+    }
+
+    fn visit_again(&self, _path: &[u64], _b: u64) -> btree::Result<()> {
+        Ok(())
+    }
+
+    fn end_walk(&self) -> btree::Result<()> {
+        Ok(())
+    }
+}
+
+fn print_layout<V: Unpack>(bm: &Arc<BlockManager>, root: u64) {
+    let walker = BTreeWalker::new(bm.clone(), false);
+    let visitor2 = LayoutVisitor {};
+    let mut path = Vec::new();
+    let _ = walker.walk::<LayoutVisitor, V>(&mut path, &visitor2, root);
 }
 
 fn residency<V: Unpack>(stats: &TreeStats) -> Result<usize> {
@@ -409,6 +440,13 @@ impl<'a> BTreeTest<'a> {
         Ok(())
     }
 
+    fn insert_kv(&mut self, key: u64, value: u64) -> Result<()> {
+        let ks = vec![key];
+        let v = Value64(value);
+        self.root = dm_btree_insert(self.fix, &self.info, self.root, &ks, &v)?;
+        Ok(())
+    }
+
     fn lookup(&mut self, key: u64) -> Result<()> {
         let keys = vec![key];
         let v = dm_btree_lookup(self.fix, &self.info, self.root, &keys)?;
@@ -463,6 +501,12 @@ impl<'a> BTreeTest<'a> {
     fn residency(&self) -> Result<usize> {
         let bm = get_bm(self.fix, self.bm);
         calc_residency::<Value64>(&bm, self.root)
+    }
+
+    fn print_layout(&self) -> Result<()> {
+        let bm = get_bm(self.fix, self.bm);
+        print_layout::<Value64>(&bm, self.root);
+        Ok(())
     }
 }
 
@@ -582,6 +626,10 @@ fn do_insert_bench_(fix: &mut Fixture, keys: &[u64], commit_interval: usize) -> 
     standard_globals(fix)?;
     let mut btree = BTreeTest::new(fix)?;
 
+    let mut dblocks: Vec<u64> = (0..keys.len() as u64).into_iter().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    dblocks.shuffle(&mut rng);
+
     let mut csv = File::create("./btree.csv")?;
     writeln!(
         csv,
@@ -589,14 +637,16 @@ fn do_insert_bench_(fix: &mut Fixture, keys: &[u64], commit_interval: usize) -> 
     )?;
 
     let mut total = 0;
+    let mut i = 0;
     for chunk in keys.chunks(commit_interval) {
         btree.stats_start();
 
         btree.begin()?;
         for k in chunk {
-            let _nr_inserted = btree.insert(*k)?;
+            let _nr_inserted = btree.insert_kv(*k, dblocks[i])?;
         }
         btree.commit()?;
+        i += 1;
 
         let delta = btree.stats_delta()?;
         let stats = btree.get_stats()?;
@@ -627,10 +677,10 @@ fn do_insert_perf_(fix: &mut Fixture, keys: &[u64], commit_interval: usize) -> R
         csv,
         "inserts, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
     )?;
-    println!("starting test");
+
     let mut total = 0;
-    for chunk in keys[0..4510].chunks(commit_interval) {
-    //for chunk in keys.chunks(commit_interval) {
+    for chunk in keys.chunks(commit_interval) {
+        //for chunk in keys.chunks(commit_interval) {
         btree.stats_start();
 
         btree.begin()?;
@@ -644,13 +694,7 @@ fn do_insert_perf_(fix: &mut Fixture, keys: &[u64], commit_interval: usize) -> R
             writeln!(
                 csv,
                 "{}, {}, {}, {}, {}, {}, {}",
-                total,
-                0,
-                0,
-                0,
-                delta.instrs,
-                delta.read_locks,
-                delta.write_locks,
+                total, 0, 0, 0, delta.instrs, delta.read_locks, delta.write_locks,
             )?;
         }
         btree.commit()?;
@@ -669,6 +713,121 @@ fn do_insert_perf_(fix: &mut Fixture, keys: &[u64], commit_interval: usize) -> R
             delta.read_locks / chunk.len() as u64,
             delta.write_locks / chunk.len() as u64,
         )?;
+    }
+
+    Ok(())
+}
+
+// This function is used to trace down how the btree insertion cost is increased
+// as the btree becomes bigger.
+// - do commit at every insertion
+// - print the stats for the insert operation
+// - print the stats for the (insert + commit) operations
+// - print the btree layout at every insertion
+fn do_insert_perf_with_layout_(
+    fix: &mut Fixture,
+    keys: &[u64],
+    commit_interval: usize,
+) -> Result<()> {
+    standard_globals(fix)?;
+    let mut btree = BTreeTest::new(fix)?;
+
+    let mut csv = File::create("./btree.csv")?;
+    writeln!(
+        csv,
+        "inserts, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
+    )?;
+
+    let mut total = 0;
+    for k in keys {
+        btree.stats_start();
+
+        btree.begin()?;
+        {
+            println!("=== inserting {}, {} ===", k, total);
+            btree.stats_start();
+            let _nr_inserted = btree.insert(*k)?;
+            let delta = btree.stats_delta()?;
+            total += 1;
+
+            writeln!(
+                csv,
+                "{}, {}, {}, {}, {}, {}, {}",
+                total, 0, 0, 0, delta.instrs, delta.read_locks, delta.write_locks,
+            )?;
+        }
+        btree.commit()?;
+
+        let delta = btree.stats_delta()?;
+        let stats = btree.get_stats()?;
+        btree.print_layout()?;
+
+        writeln!(
+            csv,
+            "{}, {}, {}, {}, {}, {}, {}",
+            total,
+            stats.nr_leaves,
+            stats.nr_entries,
+            residency::<Value64>(&stats)?,
+            delta.instrs,
+            delta.read_locks,
+            delta.write_locks,
+        )?;
+    }
+
+    Ok(())
+}
+
+// do the insertion benchmark, and print the btree layout at every commit as well
+fn do_insert_bench_with_layout_(
+    fix: &mut Fixture,
+    keys: &[u64],
+    commit_interval: usize,
+) -> Result<()> {
+    standard_globals(fix)?;
+    let mut btree = BTreeTest::new(fix)?;
+
+    let mut dblocks: Vec<u64> = (0..keys.len() as u64).into_iter().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    dblocks.shuffle(&mut rng);
+
+    let mut csv = File::create("./btree.csv")?;
+    writeln!(
+        csv,
+        "inserts, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
+    )?;
+
+    let mut total = 0;
+    let mut i = 0;
+    for chunk in keys.chunks(commit_interval) {
+        btree.stats_start();
+
+        btree.begin()?;
+        for k in chunk {
+            let _nr_inserted = btree.insert_kv(*k, dblocks[i])?;
+        }
+        btree.commit()?;
+        i += 1;
+
+        println!("=== round {} ===", total);
+
+        let delta = btree.stats_delta()?;
+        let stats = btree.get_stats()?;
+
+        total += chunk.len();
+        writeln!(
+            csv,
+            "{}, {}, {}, {}, {}, {}, {}",
+            total,
+            stats.nr_leaves,
+            stats.nr_entries,
+            residency::<Value64>(&stats)?,
+            delta.instrs / chunk.len() as u64,
+            delta.read_locks / chunk.len() as u64,
+            delta.write_locks / chunk.len() as u64,
+        )?;
+
+        btree.print_layout();
     }
 
     Ok(())
@@ -720,8 +879,26 @@ fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
     let mut keys: Vec<u64> = (0..200000).rev().collect();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     keys.shuffle(&mut rng);
+    do_insert_bench_(fix, &keys, 100)
+    //do_insert_perf_(fix, &keys, 100)
+}
+
+fn bench_insert_random_with_layout(fix: &mut Fixture) -> Result<()> {
+    let mut keys: Vec<u64> = (0..200000).rev().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    keys.shuffle(&mut rng);
     //do_insert_bench_(fix, &keys, 100)
+    do_insert_bench_with_layout_(fix, &keys, 100)
+}
+
+fn bench_insert_ascending(fix: &mut Fixture) -> Result<()> {
+    let keys: Vec<u64> = (0..5000).collect();
     do_insert_perf_(fix, &keys, 100)
+}
+
+fn bench_insert_ascending_with_layout(fix: &mut Fixture) -> Result<()> {
+    let keys: Vec<u64> = (0..5000).collect();
+    do_insert_perf_with_layout_(fix, &keys, 100)
 }
 
 fn bench_lookup_random(fix: &mut Fixture) -> Result<()> {
@@ -1084,6 +1261,21 @@ pub fn register_bench(runner: &mut TestRunner) -> Result<()> {
             "insert/",
             test!("random", bench_insert_random)
         }
+
+        test_section! {
+            "insert/",
+            test!("random_layout", bench_insert_random_with_layout)
+        }
+
+        test_section! {
+            "insert/",
+            test!("ascending", bench_insert_ascending)
+        }
+
+        /*test_section! {
+            "insert/",
+            test!("ascending_layout", bench_insert_ascending_with_layout)
+        }*/
 
         test_section! {
             "lookup/",
