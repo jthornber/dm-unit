@@ -852,15 +852,15 @@ fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
         total += chunk.len();
         writeln!(
             csv,
-            "{}, {}, {}, {}, {}, {}, {}, {}",
+            "{}, {}, {}, {}, {}, {}, {:.1}, {:.1}",
             total,
             stats.nr_internal,
             stats.nr_leaves,
             stats.nr_entries,
             residency,
             delta.instrs / chunk.len() as u64,
-            delta.read_locks / chunk.len() as u64,
-            delta.write_locks / chunk.len() as u64,
+            delta.read_locks as f64 / chunk.len() as f64,
+            delta.write_locks as f64 / chunk.len() as f64,
         )?;
     }
 
@@ -980,15 +980,15 @@ fn perf_insert_random(fix: &mut Fixture) -> Result<()> {
         //total += chunk.len();
         writeln!(
             csv,
-            "{}, {}, {}, {}, {}, {}, {}, {}",
+            "{}, {}, {}, {}, {}, {}, {:.1}, {:.1}",
             total,
             stats.nr_internal,
             stats.nr_leaves,
             stats.nr_entries,
             residency,
             delta.instrs / chunk.len() as u64,
-            delta.read_locks / chunk.len() as u64,
-            delta.write_locks / chunk.len() as u64,
+            delta.read_locks as f64 / chunk.len() as f64,
+            delta.write_locks as f64 / chunk.len() as f64,
         )?;
     }
 
@@ -1042,15 +1042,15 @@ fn bench_lookup_random(fix: &mut Fixture) -> Result<()> {
         let residency = (stats.nr_entries * 100) / (stats.nr_leaves * MAX_LEAF_ENTRIES as u64);
         writeln!(
             csv,
-            "{}, {}, {}, {}, {}, {}, {}, {}",
+            "{}, {}, {}, {}, {}, {}, {:.1}, {:.1}",
             total,
             stats.nr_internal,
             stats.nr_leaves,
             stats.nr_entries,
             residency,
             delta.instrs / chunk.len() as u64,
-            delta.read_locks / chunk.len() as u64,
-            delta.write_locks / chunk.len() as u64,
+            delta.read_locks as f64 / chunk.len() as f64,
+            delta.write_locks as f64 / chunk.len() as f64,
         )?;
     }
 
