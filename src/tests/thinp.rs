@@ -5,6 +5,7 @@ use rand::SeedableRng;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thinp::io_engine::*;
+use thinp::pdata::btree_error::KeyRange;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::space_map::common::{IndexEntry, SMRoot};
 use thinp::pdata::unpack::*;
@@ -20,6 +21,7 @@ use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::btree::*;
+use crate::tests::rtree::*;
 use crate::wrappers::thinp_metadata::*;
 
 //-------------------------------
@@ -188,6 +190,22 @@ impl ThinPool {
         Ok(())
     }
 
+    fn check_rtree(&self, fix: &Fixture) -> Result<()> {
+        let bm = get_bm(fix, self.bm_ptr);
+        let sb = read_superblock(bm.as_ref(), 0)?;
+
+        let mut path = Vec::new();
+        let roots = btree_to_map(&mut path, bm.clone(), false, sb.mapping_root)?;
+        for (thin_id, root) in roots {
+            let mut stats = TreeStats::default();
+            let kr = KeyRange::new();
+            rtree_check(&*bm, root, &kr, &mut stats)?;
+            println!("thin id {}, stats {:?}", thin_id, stats);
+        }
+
+        Ok(())
+    }
+
     fn show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
         let bm = get_bm(fix, self.bm_ptr);
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr);
@@ -299,6 +317,7 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
             pool.commit(fix)?;
             pool.stats_report(fix, "provision", commit_interval)?;
             pool.stats_start(fix);
+            pool.check_rtree(fix)?;
             insert_count = 0;
         }
     }
