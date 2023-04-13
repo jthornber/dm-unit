@@ -140,7 +140,7 @@ impl Unpack for Node {
 }
 
 #[derive(Debug, Default)]
-struct TreeStats {
+pub struct TreeStats {
     nr_internal: u64,
     nr_leaves: u64,
     nr_entries: u64,
@@ -151,7 +151,7 @@ fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRa
     split_key_ranges(&[], parent_key, &keys[..]).map_err(|e| e.into())
 }
 
-fn rtree_check(
+pub fn rtree_check(
     engine: &dyn IoEngine,
     root: u64,
     parent_key: &KeyRange,
@@ -163,7 +163,7 @@ fn rtree_check(
 
     match node {
         Node::Internal { header, entries } => {
-            println!("internal node {}", root);
+            //println!("internal node {}", root);
             stats.nr_internal += 1;
             ensure!(header.block == root);
 
@@ -175,7 +175,7 @@ fn rtree_check(
             }
         }
         Node::Leaf { header, entries } => {
-            println!("leaf node {}", root);
+            //println!("leaf node {} entries {}", root, entries.len());
             stats.nr_leaves += 1;
             stats.nr_entries += entries.len() as u64;
             ensure!(header.block == root);
@@ -399,6 +399,10 @@ impl<'a> RTreeTest<'a> {
         let bm = get_bm(self.fix, self.bm);
         let delta = self.baseline.delta(self.fix, &bm);
         Ok(delta)
+    }
+
+    fn load_internal_stats(&mut self) -> Result<(Vec<u32>, Vec<u32>)> {
+        dm_tm_load_stats(self.fix, self.tm)
     }
 }
 
@@ -681,11 +685,15 @@ fn test_insert_random(fix: &mut Fixture) -> Result<()> {
     let mut rtree = RTreeTest::new(fix, 1024)?;
     rtree.check()?;
 
+    let mut dblocks: Vec<u64> = (0..COUNT).into_iter().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    dblocks.shuffle(&mut rng);
+
     let mut mappings: Vec<Mapping> = (0..COUNT)
         .into_iter()
         .map(|i| Mapping {
             thin_begin: i,
-            data_begin: i + 1234,
+            data_begin: dblocks[i as usize],
             len: 1,
             time: 0,
         })
@@ -797,14 +805,18 @@ fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
 
     const COUNT: u64 = 200000;
     const COMMIT_INTERVAL: usize = 100;
-    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let mut rtree = RTreeTest::new(fix, 2048)?;
     rtree.check()?;
+
+    //let mut dblocks: Vec<u64> = (0..COUNT).into_iter().collect();
+    //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    //dblocks.shuffle(&mut rng);
 
     let mut mappings: Vec<Mapping> = (0..COUNT)
         .into_iter()
         .map(|i| Mapping {
             thin_begin: i,
-            data_begin: i + 1234,
+            data_begin: i + 1234, //dblocks[i as usize],
             len: 1,
             time: 0,
         })
@@ -814,6 +826,68 @@ fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
     mappings.shuffle(&mut rng);
 
     let mut csv = File::create("./rtree.csv")?;
+    writeln!(
+        csv,
+        "inserts, nr_internal, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
+    )?;
+
+    rtree.stats_start();
+
+    let mut total = 0;
+    for chunk in mappings.chunks(COMMIT_INTERVAL) {
+        println!("=== round {} to {} ===", total, total + chunk.len());
+
+        for m in chunk {
+            let _nr_inserted = rtree.insert(m)?;
+        }
+
+        let (actions, tree_stats) = rtree.load_internal_stats()?;
+        println!("{:?} {:?}", actions, tree_stats);
+
+        let stats = rtree.check()?; // implicitly commit
+        let residency = (stats.nr_entries * 100) / (stats.nr_leaves * MAX_LEAF_ENTRIES as u64);
+
+        let delta = rtree.stats_delta()?;
+        rtree.stats_start();
+        total += chunk.len();
+        writeln!(
+            csv,
+            "{}, {}, {}, {}, {}, {}, {}, {}",
+            total,
+            stats.nr_internal,
+            stats.nr_leaves,
+            stats.nr_entries,
+            residency,
+            delta.instrs / chunk.len() as u64,
+            delta.read_locks / chunk.len() as u64,
+            delta.write_locks / chunk.len() as u64,
+        )?;
+    }
+
+    rtree.del()?;
+
+    Ok(())
+}
+
+fn bench_insert_ascending(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 200000;
+    const COMMIT_INTERVAL: usize = 100;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    rtree.check()?;
+
+    let mut mappings: Vec<Mapping> = (0..COUNT)
+        .into_iter()
+        .map(|i| Mapping {
+            thin_begin: i * 2,
+            data_begin: i + 1234,
+            len: 1,
+            time: 0,
+        })
+        .collect();
+
+    let mut csv = File::create("./rtree_ascending.csv")?;
     writeln!(
         csv,
         "inserts, nr_internal, nr_leaves, nr_entries, residency, instructions, read_locks, write_locks"
@@ -883,7 +957,7 @@ fn perf_insert_random(fix: &mut Fixture) -> Result<()> {
     rtree.stats_start();
 
     let mut total = 0;
-    for chunk in mappings[0..COMMIT_INTERVAL*4].chunks(COMMIT_INTERVAL) {
+    for chunk in mappings[0..COMMIT_INTERVAL * 4].chunks(COMMIT_INTERVAL) {
         for m in chunk {
             rtree.stats_start();
             println!("insert {}", m.thin_begin);
@@ -893,14 +967,7 @@ fn perf_insert_random(fix: &mut Fixture) -> Result<()> {
             writeln!(
                 csv,
                 "{}, {}, {}, {}, {}, {}, {}, {}",
-                total,
-                0,
-                0,
-                0,
-                0,
-                delta.instrs,
-                delta.read_locks,
-                delta.write_locks,
+                total, 0, 0, 0, 0, delta.instrs, delta.read_locks, delta.write_locks,
             )?;
         }
 
@@ -2077,8 +2144,14 @@ pub fn register_bench(runner: &mut TestRunner) -> Result<()> {
 
         test_section! {
             "insert/",
-            test!("random", perf_insert_random)
+            test!("random", bench_insert_random)
         }
+
+        test_section! {
+            "insert/",
+            test!("ascending", bench_insert_ascending)
+        }
+
         test_section! {
             "lookup/",
             test!("random", bench_lookup_random)
