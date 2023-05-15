@@ -658,7 +658,7 @@ fn test_fragment_concurrent(fix: &mut Fixture) -> Result<()> {
     let mut td = vec![];
     for i in 0..nr_thins {
         pool.create_thin(fix, i)?;
-        td.push(Some(pool.open_thin(fix, 0)?));
+        td.push(Some(pool.open_thin(fix, i)?));
     }
 
     let mut insert_count = 0;
