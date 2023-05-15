@@ -25,7 +25,6 @@ use std::sync::{Arc, Mutex};
 use thinp::io_engine::BLOCK_SIZE;
 use thinp::pdata::btree;
 use thinp::pdata::btree::*;
-use thinp::pdata::btree_builder::*;
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::unpack::*;
 
@@ -217,7 +216,7 @@ impl Unpack for Value64 {
 }
 
 impl Pack for Value64 {
-    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
+    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.0)?;
         Ok(())
     }
@@ -238,7 +237,7 @@ impl Unpack for Value32 {
 }
 
 impl Pack for Value32 {
-    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> Result<()> {
+    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> io::Result<()> {
         w.write_u32::<LittleEndian>(self.0)?;
         Ok(())
     }

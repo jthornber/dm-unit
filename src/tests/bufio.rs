@@ -6,7 +6,6 @@ use crate::test_runner::*;
 use crate::wrappers::bufio::*;
 
 use anyhow::{anyhow, Result};
-use log::*;
 use std::collections::BTreeSet;
 
 //-------------------------------

@@ -1,7 +1,7 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -137,7 +137,7 @@ impl BMInner {
             nr_read_locks: 0,
             nr_write_locks: 0,
             nr_prepares: 0,
-            nr_disk_reads:  0,
+            nr_disk_reads: 0,
         }
     }
 
@@ -250,7 +250,11 @@ impl BMInner {
                 // FIXME: run validator->check()
 
                 // Create guest ptr.
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -280,7 +284,11 @@ impl BMInner {
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ, 4096)?;
 
                 // Create guest ptr.
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -352,7 +360,11 @@ impl BMInner {
 
                 // Create guest ptr.
                 let data = mem.alloc_aligned(data, PERM_READ | PERM_WRITE, 4096)?;
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -384,7 +396,11 @@ impl BMInner {
                 let data = mem.alloc_aligned(vec![0; BLOCK_SIZE], PERM_READ | PERM_WRITE, 4096)?;
 
                 // Create guest ptr.
-                let gb = GBlock { bm_ptr: self.bm_ptr, loc, data };
+                let gb = GBlock {
+                    bm_ptr: self.bm_ptr,
+                    loc,
+                    data,
+                };
                 let guest_ptr = alloc_guest::<GBlock>(mem, &gb, PERM_READ)?;
 
                 // insert lock
@@ -810,6 +826,10 @@ impl IoEngine for BlockManager {
 
     fn get_batch_size(&self) -> usize {
         1024
+    }
+
+    fn suggest_nr_threads(&self) -> usize {
+        1
     }
 
     fn read(&self, b: u64) -> io::Result<io_engine::Block> {

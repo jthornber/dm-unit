@@ -2,18 +2,19 @@ use anyhow::Result;
 use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use thinp::io_engine::*;
 use thinp::pdata::btree_walker::*;
-use thinp::pdata::space_map::*;
+use thinp::pdata::space_map::common::{IndexEntry, SMRoot};
 use thinp::pdata::unpack::*;
 use thinp::report::*;
+use thinp::thin::block_time::*;
 use thinp::thin::check::*;
 use thinp::thin::superblock::*;
 
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;
@@ -47,13 +48,24 @@ impl ReportInner for DebugReportInner {
         debug!("report sub title: {}", txt);
     }
 
+    fn set_level(&mut self, _level: LogLevel) {}
+
     fn progress(&mut self, _percent: u8) {}
 
-    fn log(&mut self, txt: &str) {
+    fn log(&mut self, txt: &str, _level: LogLevel) {
         debug!("report: {}", txt);
     }
 
     fn complete(&mut self) {}
+
+    fn to_stdout(&mut self, _txt: &str) {}
+
+    fn get_prompt_input(&mut self, prompt: &str) -> std::io::Result<String> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("get_prompt_input: {}", prompt),
+        ))
+    }
 }
 
 impl ThinPool {
@@ -212,6 +224,56 @@ impl ThinPool {
             "residency of metadata sm overflow: {}",
             calc_residency::<Value32>(&bm, root.ref_count_root)?
         );
+        Ok(())
+    }
+
+    fn show_fragmentation(&self, fix: &Fixture) -> Result<()> {
+        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
+        let sb = read_superblock(engine.as_ref(), 0)?;
+
+        let mut path = Vec::new();
+        let roots = btree_to_map(&mut path, engine.clone(), false, sb.mapping_root)?;
+
+        for (_thin_id, root) in roots {
+            let blocks: BTreeMap<u64, BlockTime> =
+                btree_to_map(&mut path, engine.clone(), false, root)?;
+
+            // Build a histogram of run lengths
+            let mut histogram = BTreeMap::new();
+            let mut last_entry: Option<(u64, BlockTime)> = None;
+            let mut run_length = 0;
+
+            for (k, v) in &blocks {
+                match last_entry {
+                    Some((last_key, last_value))
+                        if last_key + 1 == *k && last_value.block + 1 == v.block =>
+                    {
+                        // Blocks and keys are both adjacent, increment run length
+                        run_length += 1;
+                    }
+                    _ => {
+                        // Blocks or keys are not adjacent or this is the first entry,
+                        // count the run length and start a new run
+                        if let Some(_last) = last_entry {
+                            *histogram.entry(run_length).or_insert(0) += 1;
+                        }
+                        run_length = 1;
+                    }
+                }
+                last_entry = Some((*k, v.clone()));
+            }
+
+            // Record the last run
+            if let Some(_last) = last_entry {
+                *histogram.entry(run_length).or_insert(0) += 1;
+            }
+
+            // Print the histogram
+            for (run_length, count) in &histogram {
+                debug!("run length {}: {}", run_length, count);
+            }
+        }
+
         Ok(())
     }
 }
@@ -584,6 +646,48 @@ fn test_discard_rolling_snaps(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+fn test_fragment_concurrent(fix: &mut Fixture) -> Result<()> {
+    let nr_blocks = 20_000;
+    let nr_thins = 2;
+    let commit_interval = 1000;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64)?;
+
+    let mut td = vec![];
+    for i in 0..nr_thins {
+        pool.create_thin(fix, i)?;
+        td.push(Some(pool.open_thin(fix, 0)?));
+    }
+
+    let mut insert_count = 0;
+    for thin_b in 0..nr_blocks {
+        for i in 0..nr_thins {
+            let data_b = pool.alloc_data_block(fix)?;
+            pool.insert_block(fix, &td[i as usize].as_ref().unwrap(), thin_b, data_b)?;
+        }
+
+        insert_count += 1;
+
+        if insert_count == commit_interval {
+            pool.commit(fix)?;
+            insert_count = 0;
+        }
+    }
+
+    for i in 0..nr_thins {
+        let td = td[i as usize].take();
+        pool.close_thin(fix, td.unwrap())?;
+    }
+
+    pool.show_fragmentation(fix)?;
+
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let kmodules = vec![PDATA_MOD, THIN_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
@@ -617,6 +721,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("snaps/rolling", test_provision_rolling_snaps)
         test!("discard/runs", test_discard_single_thin)
         test!("discard/rolling", test_discard_rolling_snaps)
+        test!("fragmentation/concurrent", test_fragment_concurrent)
     }
 
     Ok(())
