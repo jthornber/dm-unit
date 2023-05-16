@@ -367,7 +367,7 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
             let offset = addr_offset(Addr(sym_addr + hi_rloc.addend), hi_location);
             let hi20 = ((offset + 0x800) as u32 as u64) & 0xfffff000;
             let lo12 = (offset as u32 as u64).wrapping_sub(hi20);
-            relocate(mem, lo_rloc.rtype, lo_location, Addr(lo12), lo_rloc.addend)?;
+            relocate(mem, lo_rloc.rtype, lo_location, Addr(lo12), 0)?;
         }
     }
 
