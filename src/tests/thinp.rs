@@ -476,7 +476,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
             }
             pool.commit(fix)?;
             //pool.stats_report(fix, "provision", commit_interval)?;
-            pool.check(fix)?;
+            pool.check_rtree(fix)?;
 
             pool.stats_start(fix);
             insert_count = 0;
@@ -484,7 +484,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     }
 
     pool.close_thin(fix, td)?;
-    pool.show_mapping_residency(fix)?;
+    //pool.show_mapping_residency(fix)?; // TODO: rtree version
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())
@@ -535,7 +535,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
         if discard_count == commit_interval {
             pool.commit(fix)?;
             pool.stats_report(fix, "discard", commit_interval)?;
-            pool.check(fix)?;
+            pool.check_rtree(fix)?;
             pool.stats_start(fix);
             discard_count = 0;
         }
@@ -586,14 +586,14 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
                 pool.delete_thin(fix, thin_id - 10)?;
             }
             pool.commit(fix)?;
-            pool.check(fix)?;
+            pool.check_rtree(fix)?;
 
             insert_count = 0;
         }
     }
 
     pool.close_thin(fix, td)?;
-    pool.show_mapping_residency(fix)?;
+    //pool.show_mapping_residency(fix)?; // TODO: rtree version
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())
