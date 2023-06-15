@@ -775,8 +775,9 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
 
 pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
     let super_module = NamedTempFile::new()?;
-    link_modules(paths, super_module.path())?;
-    let module = read_module(super_module.path())?;
+    let path = super_module.path();
+    link_modules(paths, path)?;
+    let module = read_module(path)?;
     load_module(mem, module)
 }
 
