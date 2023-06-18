@@ -159,21 +159,31 @@ enum CompoundRel {
     Pair(Relocation, Relocation),
 }
 
+/// Builds a vector of `CompoundRel` instances from a vector of `Relocation` instances.
+///
+/// A `CompoundRel` instance represents either a single `Relocation` instance or a pair of `Relocation`
+/// instances that need to be performed together. Specifically, if a `Relocation` instance has a type of
+/// `Rpcrel_hi20`, it needs to be paired with the next `Relocation` instance if its type is either
+/// `Rpcrel_lo12_i` or `Rpcrel_lo12_s`.
+///
+/// # Arguments
+///
+/// * `rlocs` - A vector of `Relocation` instances to process.
+///
+/// # Returns
+///
+/// A vector of `CompoundRel` instances.
 fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
     use RelocationType::*;
 
-    let mut i = 0;
     let mut compound = Vec::new();
-    while i < rlocs.len() {
-        let rloc = &rlocs[i];
+    let mut iter = rlocs.iter().peekable();
+    while let Some(rloc) = iter.next() {
         if rloc.rtype == Rpcrel_hi20 {
-            // the next entry is probably the corresponding lo12
-            i += 1;
-            if i < rlocs.len() {
-                let rloc2 = &rlocs[i];
+            if let Some(rloc2) = iter.peek() {
                 if rloc2.rtype == Rpcrel_lo12_i || rloc2.rtype == Rpcrel_lo12_s {
                     compound.push(CompoundRel::Pair(rloc.clone(), rloc2.clone()));
-                    i += 1;
+                    iter.next();
                 } else {
                     compound.push(CompoundRel::Simple(rloc.clone()));
                 }
@@ -182,7 +192,6 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
             }
         } else {
             compound.push(CompoundRel::Simple(rloc.clone()));
-            i += 1;
         }
     }
 
@@ -774,8 +783,7 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
 }
 
 pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
-    let super_module = NamedTempFile::new()?;
-    let path = super_module.path();
+    let path = Path::new("super-module.ko");
     link_modules(paths, path)?;
     let module = read_module(path)?;
     load_module(mem, module)
