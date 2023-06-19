@@ -182,7 +182,7 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
         if rloc.rtype == Rpcrel_hi20 {
             if let Some(rloc2) = iter.peek() {
                 if rloc2.rtype == Rpcrel_lo12_i || rloc2.rtype == Rpcrel_lo12_s {
-                    compound.push(CompoundRel::Pair(rloc.clone(), rloc2.clone()));
+                    compound.push(CompoundRel::Pair(rloc.clone(), (*rloc2).clone()));
                     iter.next();
                 } else {
                     compound.push(CompoundRel::Simple(rloc.clone()));
