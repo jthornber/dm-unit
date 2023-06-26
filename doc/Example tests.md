@@ -1,10 +1,14 @@
-Tests are kept in _src/tests_.  Each test module has a `register_tests()` function; you can copy and paste this function into your test code, changing the test paths and test functions approriately.
+Tests are kept in _src/tests_.  Each test module has a `register_tests()`
+function; you can copy and paste this function into your test code,
+changing the test paths and test functions approriately.
 
-Reading the existing test suites is the best way to learn how to write tests.  I'll give a couple of short examples here.
+Reading the existing test suites is the best way to learn how to write
+tests.  I'll give a couple of short examples here.
 
 ## test_redistribute_2
 
-The redistribute2 function in dm-btree.c takes a pair of btree node and redistributes the entries to make them have similar amounts in each.
+The redistribute2 function in dm-btree.c takes a pair of btree node and
+redistributes the entries to make them have similar amounts in each.
 
 The test goes through the following steps:
 
@@ -58,11 +62,18 @@ A longer test.  This:
 1. Sets up standard stubs.
 2. Create a new btree within the guest
 3. inserts many keys, committing regularly
-4. when it commits it also reports some useful statistics such as instruction counts, buffer locks, average residency of btree.
+4. when it commits it also reports some useful statistics such as
+   instruction counts, buffer locks, average residency of btree.
 5. Use the guest to look up all the keys to check they really were inserted.
 6. Run a check of the whole btree.
 
-Recording metrics is very easy with the approach, because any Rust code you run has no effect on the vm (eg, instruction counts).  I typically write csv files from my longer running tests and analyse in an app such as Mathematica.  When first running this dm_btree_insert() test it became apparent that occasionally insert would take hugely more instructions and buffer locks.  This would not have been obvious if we'd just been recording wall clock time, or average execution time.
+Recording metrics is very easy with the approach, because any Rust code
+you run has no effect on the vm (eg, instruction counts).  I typically
+write csv files from my longer running tests and analyse in an app such
+as Mathematica.  When first running this dm_btree_insert() test it became
+apparent that occasionally insert would take hugely more instructions
+and buffer locks.  This would not have been obvious if we'd just been
+recording wall clock time, or average execution time.
 
 ``` Rust 
 fn do_insert_test_(
