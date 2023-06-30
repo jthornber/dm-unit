@@ -2117,6 +2117,58 @@ fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let v = Mapping {
+        thin_begin: 10,
+        data_begin: 1,
+        len: 100,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+
+    let v = Mapping {
+        thin_begin: 5,
+        data_begin: 20,
+        len: 10,
+        time: 0,
+    };
+    let _nr_inserted = rtree.insert(&v)?;
+
+    let stats = rtree.check()?;
+    ensure!(stats.nr_internal == 0);
+    ensure!(stats.nr_leaves == 1);
+    ensure!(stats.nr_entries == 2);
+
+    let result = rtree.lookup(5)?;
+    ensure!(
+        result
+            == Some(Mapping {
+                thin_begin: 5,
+                data_begin: 20,
+                len: 10,
+                time: 0,
+            })
+    );
+
+    let result = rtree.lookup(15)?;
+    ensure!(
+        result
+            == Some(Mapping {
+                thin_begin: 15,
+                data_begin: 6,
+                len: 95,
+                time: 0,
+            })
+    );
+
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let kmodules = vec![PDATA_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
@@ -2169,6 +2221,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("remove/leaves/split-root", test_remove_split_root)
         test!("remove/leaves/split-first", test_remove_split_first_leaf)
         test!("remove/leaves/split-last", test_remove_split_last_leaf)
+        test!("overwrite/single/", test_overwrite_entry_begin)
     };
 
     Ok(())
