@@ -493,7 +493,7 @@ impl Memory {
     }
 
     /// This is a bit of a hack for use by printk and friends.
-    pub fn read_string(&mut self, ptr: Addr) -> Result<String> {
+    pub fn read_string(&self, ptr: Addr) -> Result<String> {
         // We assume the string is short, and grab the indexes for that max range.
         // Then read bytes from it.
         let mut buffer = Vec::new();

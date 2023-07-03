@@ -1,31 +1,18 @@
 use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
+use crate::stubs::printk::printk;
 
 use anyhow::Result;
-use log::*;
 
 pub mod block_device;
 pub mod block_manager;
+pub mod printk;
 pub mod rw_semaphore;
 
 use Reg::*;
 
 //-------------------------------
-
-pub fn printk(fix: &mut Fixture) -> Result<()> {
-    let msg = fix.vm.mem.read_string(Addr(fix.vm.reg(A0)))?;
-    info!(
-        "printk(\"{}\", 0x{:x}, 0x{:x}, 0x{:x}, 0x{:x})",
-        &msg[2..],
-        fix.vm.reg(A1),
-        fix.vm.reg(A2),
-        fix.vm.reg(A3),
-        fix.vm.reg(A4)
-    );
-    fix.vm.ret(0);
-    Ok(())
-}
 
 pub fn memcpy(fix: &mut Fixture) -> Result<()> {
     let dest = Addr(fix.vm.reg(A0));
