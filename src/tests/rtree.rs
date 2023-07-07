@@ -337,12 +337,12 @@ impl<'a> RTreeTest<'a> {
     }
 
     fn insert(&mut self, v: &Mapping) -> Result<u32> {
-        /*sm_inc_block(
+        sm_inc_block(
             self.fix,
             self.data_sm,
             v.data_begin,
             v.data_begin + v.len as u64,
-        )?;*/
+        )?;
 
         let (new_root, nr_inserted) =
             dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, v)?;
