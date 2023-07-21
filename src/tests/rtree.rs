@@ -163,7 +163,7 @@ pub fn rtree_check(
 
     match node {
         Node::Internal { header, entries } => {
-            //println!("internal node {}", root);
+            //debug!("internal node {}", root);
             stats.nr_internal += 1;
             ensure!(header.block == root);
 
@@ -175,13 +175,14 @@ pub fn rtree_check(
             }
         }
         Node::Leaf { header, entries } => {
-            //println!("leaf node {} entries {}", root, entries.len());
+            //debug!("leaf node {} entries {}", root, entries.len());
             stats.nr_leaves += 1;
             stats.nr_entries += entries.len() as u64;
             ensure!(header.block == root);
 
             let mut lowest_key = parent_key.start.unwrap_or(0);
             for m in entries {
+                //debug!("  entry {:?}", m);
                 ensure!(m.thin_begin >= lowest_key);
                 lowest_key = m.thin_begin + m.len as u64;
             }
