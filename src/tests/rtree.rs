@@ -590,6 +590,45 @@ fn test_insert_three(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+// test that a mapping should be inserted to the lower-bound position
+fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    let mappings: Vec<Mapping> = (0..170)
+        .into_iter()
+        .map(|i| Mapping {
+            thin_begin: i * 2,
+            data_begin: i * 2,
+            len: 1,
+            time: 0,
+        })
+        .collect();
+
+    for v in &mappings {
+        let _nr_inserted = rtree.insert(v)?;
+    }
+
+    // Insert a mapping that falls between two leaves,
+    // and is adjacented to the last entry of the left one.
+    let v = Mapping {
+        thin_begin: 167,
+        data_begin: 167,
+        len: 1,
+        time: 0,
+    };
+    rtree.insert(&v)?;
+
+    rtree.check()?;
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries.len() == 170);
+
+    Ok(())
+}
+
 /// Trims a mapping to a particular thin_begin and len.
 fn trim_mapping(m: &Mapping, thin_begin: u64, len: u32) -> Option<Mapping> {
     if thin_begin + (len as u64) < m.thin_begin {
@@ -2075,6 +2114,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("insert/two/adjacent", test_insert_two_adjacent)
         test!("insert/two/reversed", test_insert_two_reversed)
         test!("insert/three", test_insert_three)
+        test!("insert/tail_adjacented", test_insert_tail_adjacented)
         test!("insert/many/ascending", test_insert_ascending)
         test!("insert/many/descending", test_insert_descending)
         test!("insert/many/random", test_insert_random)
