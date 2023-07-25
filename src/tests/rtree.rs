@@ -1770,7 +1770,10 @@ fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
     const NR_REMOVED: usize = REMOVE_END - REMOVE_BEGIN - 1; // assume END > BEGIN
 
     ensure!(rtree
-        .remove(mappings[REMOVE_BEGIN].thin_begin + 1, mappings[REMOVE_END].thin_begin + 1)
+        .remove(
+            mappings[REMOVE_BEGIN].thin_begin + 1,
+            mappings[REMOVE_END].thin_begin + 1
+        )
         .is_ok());
 
     let stats = rtree.check()?;
