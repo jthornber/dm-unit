@@ -344,14 +344,43 @@ impl<'a> RTreeTest<'a> {
             v.data_begin + v.len as u64,
         )?;
 
-        let (new_root, nr_inserted) =
-            dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, v)?;
-        self.root = new_root;
+        let mut m = v.clone();
+        m.len = 1;
+        for i in 0..v.len {
+            let (r, _) = dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, &m)?;
+            self.root = r;
+            m.thin_begin += 1;
+            m.data_begin += 1;
+        }
 
         // FIXME: remove
         // self.check()?;
 
-        Ok(nr_inserted)
+        // FIXME: return the nr_inserted from rtree_insert
+        Ok(v.len)
+    }
+
+    fn insert_reversed(&mut self, v: &Mapping) -> Result<u32> {
+        sm_inc_block(
+            self.fix,
+            self.data_sm,
+            v.data_begin,
+            v.data_begin + v.len as u64,
+        )?;
+
+        let mut m = v.clone();
+        m.thin_begin += m.len as u64 - 1;
+        m.data_begin += m.len as u64 - 1;
+        m.len = 1;
+        for i in 0..v.len {
+            let (r, _) = dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, &m)?;
+            self.root = r;
+            m.thin_begin -= 1;
+            m.data_begin -= 1;
+        }
+
+        // FIXME: return the nr_inserted from rtree_insert
+        Ok(v.len)
     }
 
     fn remove(&mut self, thin_begin: u64, thin_end: u64) -> Result<()> {
@@ -517,7 +546,7 @@ fn test_insert_two_reversed(fix: &mut Fixture) -> Result<()> {
     };
 
     let _nr_inserted = rtree.insert(&v2)?;
-    let _nr_inserted = rtree.insert(&v1)?;
+    let _nr_inserted = rtree.insert_reversed(&v1)?;
 
     let result = rtree.lookup(v1.thin_begin)?;
     let expected = Mapping {
