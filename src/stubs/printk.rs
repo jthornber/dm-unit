@@ -33,7 +33,6 @@ enum Flag {
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 enum LengthModifier {
-    Char,
     Short,
     Long,
     LongLong,
@@ -393,7 +392,7 @@ fn exec_specifier(spec: &FormatSpecifier, vm: &VM, arg_index: usize) -> Result<S
             result = vm.mem.read_string(Addr(value))?;
         }
         Conversion::Pointer => {
-            result.push_str(&format!("{:x}", value));
+            result.push_str(&format!("0x{:x}", value));
         }
         Conversion::Count => {
             result.push_str(&format!("{}", value));
