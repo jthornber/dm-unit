@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
-use tempfile::NamedTempFile;
 
 use crate::emulator::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
 
@@ -151,20 +150,22 @@ fn addr_offset(lhs: Addr, rhs: Addr) -> i32 {
     }
 }
 
-/// Some relocations need to be performed as a pair.  ie. the location of the hi
-/// relocation is used in the calculation for the low bits.
+/// Some relocations need to be performed as a pair.  ie. the location
+/// of the hi relocation is used in the calculation for the low bits.
 #[derive(Clone)]
 enum CompoundRel {
     Simple(Relocation),
     Pair(Relocation, Relocation),
 }
 
-/// Builds a vector of `CompoundRel` instances from a vector of `Relocation` instances.
+/// Builds a vector of `CompoundRel` instances from a vector of
+/// `Relocation` instances.
 ///
-/// A `CompoundRel` instance represents either a single `Relocation` instance or a pair of `Relocation`
-/// instances that need to be performed together. Specifically, if a `Relocation` instance has a type of
-/// `Rpcrel_hi20`, it needs to be paired with the next `Relocation` instance if its type is either
-/// `Rpcrel_lo12_i` or `Rpcrel_lo12_s`.
+/// A `CompoundRel` instance represents either a single `Relocation`
+/// instance or a pair of `Relocation` instances that need to be performed
+/// together. Specifically, if a `Relocation` instance has a type of
+/// `Rpcrel_hi20`, it needs to be paired with the next `Relocation`
+/// instance if its type is either `Rpcrel_lo12_i` or `Rpcrel_lo12_s`.
 ///
 /// # Arguments
 ///
@@ -179,18 +180,18 @@ fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
     let mut compound = Vec::new();
     let mut iter = rlocs.iter().peekable();
     while let Some(rloc) = iter.next() {
+        let mut push_simple = true;
         if rloc.rtype == Rpcrel_hi20 {
             if let Some(rloc2) = iter.peek() {
                 if rloc2.rtype == Rpcrel_lo12_i || rloc2.rtype == Rpcrel_lo12_s {
                     compound.push(CompoundRel::Pair(rloc.clone(), (*rloc2).clone()));
                     iter.next();
-                } else {
-                    compound.push(CompoundRel::Simple(rloc.clone()));
+                    push_simple = false;
                 }
-            } else {
-                compound.push(CompoundRel::Simple(rloc.clone()));
             }
-        } else {
+        }
+
+        if push_simple {
             compound.push(CompoundRel::Simple(rloc.clone()));
         }
     }
