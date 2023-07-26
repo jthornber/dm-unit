@@ -89,7 +89,7 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
         *b = v;
     }
     fix.vm.mem.write(base, &bytes, PERM_WRITE)?;
-    fix.vm.ret(0);
+    fix.vm.ret(base.0);
     Ok(())
 }
 
