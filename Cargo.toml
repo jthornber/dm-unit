@@ -25,6 +25,7 @@ num_cpus = "1.13"
 regex = "1"
 rand = "0.8.0"
 rand_chacha = "0.3"
+roaring = "0.10"
 tempfile = "3.2"
 threadpool = "1.0"
 thinp = { git = "https://github.com/jthornber/thin-provisioning-tools.git", branch = "main" }

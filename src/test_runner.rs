@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 
-use crate::fixture::*;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 
 //-------------------------------
 
@@ -279,6 +279,9 @@ impl<'a> TestRunner<'a> {
                         match Fixture::new(loader_info, mem, jit) {
                             Ok(fix) => {
                                 let res = run_test(fix, t);
+                                if res.is_err() {
+                                    warn!("test {} failed: {}", p, res.as_ref().unwrap_err());
+                                }
 
                                 // FIXME: common code
                                 let mut results = results.lock().unwrap();

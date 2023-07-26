@@ -226,7 +226,10 @@ impl Fixture {
     }
 
     pub fn call(&mut self, func: &str) -> Result<()> {
-        self.call_at(self.lookup_fn(func)?)
+        // debug!(">>> {}()", func);
+        self.call_at(self.lookup_fn(func)?)?;
+        // debug!("<<< {}()", func);
+        Ok(())
     }
 
     // Use this to call functions that return an int errno.
@@ -243,7 +246,7 @@ impl Fixture {
         Ok(())
     }
 
-    pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
+    pub fn call_at_with_errno_(&mut self, loc: Addr) -> Result<()> {
         self.call_at(loc)?;
         let r = self.vm.reg(A0) as i64 as i32;
         if r != 0 {
@@ -253,6 +256,13 @@ impl Fixture {
                 return Err(anyhow!("failed: {}", r));
             }
         }
+        Ok(())
+    }
+
+    pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
+        // debug!(">>> 0x{:x}", loc.0);
+        self.call_at_with_errno_(loc)?;
+        // debug!("<<< 0x{:x}", loc.0);
         Ok(())
     }
 
@@ -413,10 +423,27 @@ impl<'a> AutoGPtr<'a> {
     pub fn new(fix: &'a mut Fixture, ptr: Addr) -> Self {
         AutoGPtr { fix, ptr }
     }
+
+    /// Takes ownership of the pointer and returns its value.
+    ///
+    /// The method sets the pointer to zero to prevent double-freeing and returns its original value.
+    ///
+    /// # Returns
+    ///
+    /// The value of the pointer.
+    pub fn take(&mut self) -> Addr {
+        let ptr = self.ptr;
+        self.ptr.0 = 0;
+        ptr
+    }
 }
 
 impl<'a> Drop for AutoGPtr<'a> {
     fn drop(&mut self) {
+        if self.ptr.is_null() {
+            return;
+        }
+
         self.fix
             .vm
             .mem
@@ -438,6 +465,8 @@ impl<'a> DerefMut for AutoGPtr<'a> {
     }
 }
 
+/// Create an auto ptr to a guest allocation of size |len|.  The memory
+/// will have read/write permissions.
 pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
     let ptr = fix
         .vm
