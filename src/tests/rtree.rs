@@ -660,9 +660,9 @@ fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
 
 /// Trims a mapping to a particular thin_begin and len.
 fn trim_mapping(m: &Mapping, thin_begin: u64, len: u32) -> Option<Mapping> {
-    if thin_begin + (len as u64) < m.thin_begin {
+    if thin_begin < m.thin_begin {
         None
-    } else if thin_begin >= m.thin_begin + (m.len as u64) {
+    } else if thin_begin + (len as u64) > m.thin_begin + (m.len as u64) {
         None
     } else {
         Some(Mapping {
