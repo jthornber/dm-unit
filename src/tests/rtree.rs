@@ -866,6 +866,64 @@ fn test_insert_runs(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+fn test_insert_runs_descending(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+    ranges.shuffle(&mut rng);
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin,
+            len: len as u32,
+            time: 0,
+        });
+        data_begin += len as u64;
+    }
+
+    // FIXME: factor out common code
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    rtree.stats_start();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert_reversed(m)?;
+    }
+    rtree.check()?;
+
+    for m in &mappings {
+        let result = rtree
+            .lookup(m.thin_begin)?
+            .and_then(|r| trim_mapping(&r, m.thin_begin, m.len));
+
+        if result != Some(m.clone()) {
+            debug!("lookup of {}", m.thin_begin);
+            ensure!(result == Some(m.clone()));
+        }
+    }
+
+    Ok(())
+}
+
 //-------------------------------
 
 fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
@@ -2203,6 +2261,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("insert/many/descending", test_insert_descending)
         test!("insert/many/random", test_insert_random)
         test!("insert/many/runs", test_insert_runs)
+        test!("insert/many/runs_descending", test_insert_runs_descending)
         test!("remove/single/trim-begin", test_trim_entry_begin)
         test!("remove/single/trim-end", test_trim_entry_end)
         test!("remove/single/all", test_remove_single_entry)
