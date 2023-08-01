@@ -2361,6 +2361,79 @@ fn test_overwrite_runs_descending(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+// Test overwriting length-1 mappings (REPLACE)
+fn test_overwrite_random(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const COUNT: u64 = 200000;
+    const COMMIT_INTERVAL: usize = 1000;
+    let mut rtree = RTreeTest::new(fix, 4096)?;
+    rtree.check()?;
+
+    let mut dblocks: Vec<u64> = (0..COUNT).into_iter().collect();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    dblocks.shuffle(&mut rng);
+
+    let mut mappings: Vec<Mapping> = (0..COUNT)
+        .into_iter()
+        .map(|i| Mapping {
+            thin_begin: i,
+            data_begin: dblocks[i as usize],
+            len: 1,
+            time: 0,
+        })
+        .collect();
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    mappings.shuffle(&mut rng);
+
+    let mut n = 0;
+
+    // populate
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(m)?;
+        n += 1;
+
+        // commit the transaction to prevent from holding too much shadows
+        if n == COMMIT_INTERVAL {
+            rtree.commit()?;
+            n = 0;
+        }
+    }
+    rtree.check()?;
+
+    // overwrite
+    n = 0;
+    let mut cnt = 0;
+    for m in &mut mappings {
+        m.data_begin += COUNT;
+        m.time = 1;
+        let _nr_inserted = rtree.insert(m)?;
+        n += 1;
+        cnt += 1;
+
+        // commit the transaction to prevent from holding too much shadows
+        if n == COMMIT_INTERVAL {
+            rtree.commit()?;
+            n = 0;
+        }
+    }
+    rtree.check()?;
+
+    for m in &mappings {
+        let result = rtree
+            .lookup(m.thin_begin)?
+            .and_then(|r| trim_mapping(&r, m.thin_begin, m.len));
+
+        if result != Some(m.clone()) {
+            debug!("lookup of {}", m.thin_begin);
+            ensure!(result == Some(m.clone()));
+        }
+    }
+
+    rtree.del()?;
+    Ok(())
+}
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -2417,6 +2490,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("remove/leaves/split-first", test_remove_split_first_leaf)
         test!("remove/leaves/split-last", test_remove_split_last_leaf)
         test!("overwrite/single/", test_overwrite_entry_begin)
+        test!("overwrite/many/random", test_overwrite_random)
         test!("overwrite/many/runs", test_overwrite_runs)
         test!("overwrite/many/runs_descending", test_overwrite_runs_descending)
     };
