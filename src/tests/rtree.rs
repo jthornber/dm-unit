@@ -342,12 +342,20 @@ impl<'a> RTreeTest<'a> {
             self.data_sm,
             v.data_begin,
             v.data_begin + v.len as u64,
-        )?;
+        )
+        .map_err(|e| {
+            println!("cannot inc {}:{}", v.data_begin, v.len);
+            e
+        })?;
 
         let mut m = v.clone();
         m.len = 1;
         for i in 0..v.len {
-            let (r, _) = dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, &m)?;
+            let (r, _) =
+                dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, &m).map_err(|e| {
+                    println!("insert failed at {}: {:?}", m.thin_begin, e);
+                    e
+                })?;
             self.root = r;
             m.thin_begin += 1;
             m.data_begin += 1;
