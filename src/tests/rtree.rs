@@ -932,6 +932,82 @@ fn test_insert_runs_descending(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+// Test randomly merging runs by filling the gaps (MERGE)
+fn test_insert_with_merges(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin: r.start as u64,
+            len: len as u32,
+            time: 0,
+        });
+        data_begin += len as u64;
+    }
+
+    // FIXME: factor out common code
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    // insert ranges with gaps
+    for m in &mappings {
+        if m.len > 1 {
+            let mut m = m.clone();
+            m.len -= 1;
+            rtree.insert(&m)?;
+        }
+    }
+    rtree.check()?;
+
+    // merge ranges by randomly filling up gaps
+    mappings.shuffle(&mut rng);
+    for m in &mappings {
+        let gap = Mapping {
+            thin_begin: m.thin_begin + m.len as u64 - 1,
+            data_begin: m.data_begin + m.len as u64 - 1,
+            len: 1,
+            time: 0,
+        };
+        rtree.insert(&gap)?;
+    }
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries.len() == 1);
+    ensure!(
+        visitor.entries[0]
+            == Mapping {
+                thin_begin: 0,
+                data_begin: 0,
+                len: KEY_COUNT as u32,
+                time: 0,
+            }
+    );
+
+    Ok(())
+}
+
 //-------------------------------
 
 fn bench_insert_random(fix: &mut Fixture) -> Result<()> {
@@ -2442,6 +2518,91 @@ fn test_overwrite_random(fix: &mut Fixture) -> Result<()> {
     rtree.del()?;
     Ok(())
 }
+
+// Test randomly merge runs by overwriting the gaps (MERGE_REPLACED)
+fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin: r.start as u64,
+            len: len as u32,
+            time: 1,
+        });
+        data_begin += len as u64;
+    }
+
+    // FIXME: factor out common code
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    // insert ranges with gaps
+    for m in &mappings {
+        if m.len > 1 {
+            let mut m2 = m.clone();
+            m2.len -= 1;
+            rtree.insert(&m2)?;
+        }
+
+        let gap = Mapping {
+            thin_begin: m.thin_begin + m.len as u64 - 1,
+            data_begin: m.data_begin + m.len as u64 - 1,
+            len: 1,
+            time: 0,
+        };
+        rtree.insert(&gap)?;
+    }
+    rtree.check()?;
+
+    // merge ranges by randomly filling up gaps
+    mappings.shuffle(&mut rng);
+    for m in &mappings {
+        let gap = Mapping {
+            thin_begin: m.thin_begin + m.len as u64 - 1,
+            data_begin: m.data_begin + m.len as u64 - 1,
+            len: 1,
+            time: 1,
+        };
+        rtree.insert(&gap)?;
+    }
+
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    ensure!(visitor.entries.len() == 1);
+    ensure!(
+        visitor.entries[0]
+            == Mapping {
+                thin_begin: 0,
+                data_begin: 0,
+                len: KEY_COUNT as u32,
+                time: 1,
+            }
+    );
+
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -2479,6 +2640,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("insert/many/random", test_insert_random)
         test!("insert/many/runs", test_insert_runs)
         test!("insert/many/runs_descending", test_insert_runs_descending)
+        test!("insert/many/merge", test_insert_with_merges)
         test!("remove/single/trim-begin", test_trim_entry_begin)
         test!("remove/single/trim-end", test_trim_entry_end)
         test!("remove/single/all", test_remove_single_entry)
@@ -2501,6 +2663,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("overwrite/many/random", test_overwrite_random)
         test!("overwrite/many/runs", test_overwrite_runs)
         test!("overwrite/many/runs_descending", test_overwrite_runs_descending)
+        test!("overwrite/many/merge", test_overwrite_with_merges)
     };
 
     Ok(())
