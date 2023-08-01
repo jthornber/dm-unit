@@ -2225,6 +2225,142 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+// Test TRUNCATE_FRONT, PUSH_BACK_TRUNCATED, and PUSH_BACK_REPLACED
+fn test_overwrite_runs(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+    ranges.shuffle(&mut rng);
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin,
+            len: len as u32,
+            time: 0,
+        });
+        data_begin += len as u64;
+    }
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let mut n = 0;
+    rtree.stats_start();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(m)?;
+    }
+    rtree.check()?;
+
+    // overwrite the runs with modified mapped values
+    for m in &mut mappings {
+        m.data_begin += KEY_COUNT as u64;
+        m.time = 1;
+        let _nr_inserted = rtree.insert(m)?;
+    }
+    rtree.check()?;
+
+    for m in &mappings {
+        let result = rtree
+            .lookup(m.thin_begin)?
+            .and_then(|r| trim_mapping(&r, m.thin_begin, m.len));
+
+        if result != Some(m.clone()) {
+            debug!("lookup of {}", m.thin_begin);
+            ensure!(result == Some(m.clone()));
+        }
+    }
+
+    // rtree.del()?;
+    Ok(())
+}
+
+// Test TRUNCATE_BACK, PUSH_FRONT_TRUNCATED, and PUSH_FRONT_REPLACED
+fn test_overwrite_runs_descending(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+    ranges.shuffle(&mut rng);
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin,
+            len: len as u32,
+            time: 0,
+        });
+        data_begin += len as u64;
+    }
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    let mut n = 0;
+    rtree.stats_start();
+
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(m)?;
+    }
+    rtree.check()?;
+
+    // overwrite the runs with modified mapped values
+    for m in &mut mappings {
+        m.data_begin += KEY_COUNT as u64;
+        m.time = 1;
+        let _nr_inserted = rtree.insert_reversed(m)?;
+    }
+    rtree.check()?;
+
+    for m in &mappings {
+        let result = rtree
+            .lookup(m.thin_begin)?
+            .and_then(|r| trim_mapping(&r, m.thin_begin, m.len));
+
+        if result != Some(m.clone()) {
+            debug!("lookup of {}", m.thin_begin);
+            ensure!(result == Some(m.clone()));
+        }
+    }
+
+    // rtree.del()?;
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -2281,6 +2417,8 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("remove/leaves/split-first", test_remove_split_first_leaf)
         test!("remove/leaves/split-last", test_remove_split_last_leaf)
         test!("overwrite/single/", test_overwrite_entry_begin)
+        test!("overwrite/many/runs", test_overwrite_runs)
+        test!("overwrite/many/runs_descending", test_overwrite_runs_descending)
     };
 
     Ok(())
