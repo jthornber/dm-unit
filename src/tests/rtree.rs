@@ -2603,6 +2603,82 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+// Test the SPLIT scenario
+fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin: r.start as u64,
+            len: len as u32,
+            time: 0,
+        });
+        data_begin += len as u64;
+    }
+
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+
+    // prepare the initial mappings
+    rtree.insert(&Mapping {
+        thin_begin: 0,
+        data_begin: 0,
+        len: KEY_COUNT as u32,
+        time: 0,
+    })?;
+    rtree.check()?;
+
+    // overwrite incompatible mappings to split the range
+    mappings.shuffle(&mut rng);
+    for (i, m) in mappings.iter().enumerate() {
+        let gap = Mapping {
+            thin_begin: m.thin_begin + m.len as u64 - 1,
+            data_begin: KEY_COUNT as u64 + i as u64,
+            len: 1,
+            time: 0,
+        };
+        rtree.insert(&gap)?;
+    }
+    rtree.check()?;
+
+    for m in &mappings {
+        if m.len == 1 { // TODO: validate the gaps
+            continue;
+        }
+
+        let result = rtree.lookup(m.thin_begin)?;
+        let mut expected = m.clone();
+        expected.len -= 1;
+
+        if result != Some(expected.clone()) {
+            debug!("lookup failed, expected {:?}, actual {:?}", expected, result);
+            ensure!(result == Some(expected));
+        }
+    }
+
+    Ok(())
+}
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -2664,6 +2740,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("overwrite/many/runs", test_overwrite_runs)
         test!("overwrite/many/runs_descending", test_overwrite_runs_descending)
         test!("overwrite/many/merge", test_overwrite_with_merges)
+        test!("overwrite/many/split", test_overwrite_with_splitting)
     };
 
     Ok(())
