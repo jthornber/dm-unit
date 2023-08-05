@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
@@ -35,6 +35,16 @@ struct ThinPool {
 
 struct ThinDev {
     td: Addr,
+}
+
+impl ThinDev {
+    fn alloc_data_block(&mut self, fix: &mut Fixture) -> Result<u64> {
+        dm_thin_alloc_data_block(fix, self.td)
+    }
+
+    fn insert_block(&mut self, fix: &mut Fixture, thin_b: u64, data_b: u64) -> Result<()> {
+        dm_thin_insert_block(fix, self.td, thin_b, data_b)
+    }
 }
 
 struct DebugReportInner {}
@@ -136,20 +146,6 @@ impl ThinPool {
         dm_pool_close_thin_device(fix, td.td)
     }
 
-    fn alloc_data_block(&mut self, fix: &mut Fixture) -> Result<u64> {
-        dm_pool_alloc_data_block(fix, self.pmd)
-    }
-
-    fn insert_block(
-        &mut self,
-        fix: &mut Fixture,
-        td: &ThinDev,
-        thin_b: u64,
-        data_b: u64,
-    ) -> Result<()> {
-        dm_thin_insert_block(fix, td.td, thin_b, data_b)
-    }
-
     fn remove_range(&mut self, fix: &mut Fixture, td: &ThinDev, b: u64, e: u64) -> Result<()> {
         dm_thin_remove_range(fix, td.td, b, e)
     }
@@ -159,6 +155,10 @@ impl ThinPool {
         // transaction overhead.  I add it back in here because I want
         // this number to agree with that from thin_check.
         dm_pool_get_free_metadata_block_count(fix, self.pmd).map(|n| n + 0x400)
+    }
+
+    fn free_data_blocks(&mut self, fix: &mut Fixture) -> Result<u64> {
+        dm_pool_get_free_block_count(fix, self.pmd)
     }
 
     fn check(&mut self, fix: &Fixture) -> Result<()> {
@@ -227,19 +227,19 @@ impl ThinPool {
         Ok(())
     }
 
-    fn show_fragmentation(&self, fix: &Fixture) -> Result<()> {
+    fn build_run_histogram(&self, fix: &Fixture) -> Result<BTreeMap<usize, usize>> {
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
         let sb = read_superblock(engine.as_ref(), 0)?;
 
         let mut path = Vec::new();
         let roots = btree_to_map(&mut path, engine.clone(), false, sb.mapping_root)?;
 
+        let mut histogram = BTreeMap::new();
         for (_thin_id, root) in roots {
             let blocks: BTreeMap<u64, BlockTime> =
                 btree_to_map(&mut path, engine.clone(), false, root)?;
 
             // Build a histogram of run lengths
-            let mut histogram = BTreeMap::new();
             let mut last_entry: Option<(u64, BlockTime)> = None;
             let mut run_length = 0;
 
@@ -267,11 +267,15 @@ impl ThinPool {
             if let Some(_last) = last_entry {
                 *histogram.entry(run_length).or_insert(0) += 1;
             }
+        }
 
-            // Print the histogram
-            for (run_length, count) in &histogram {
-                debug!("run length {}: {}", run_length, count);
-            }
+        Ok(histogram)
+    }
+
+    fn show_fragmentation(&self, histogram: &BTreeMap<usize, usize>) -> Result<()> {
+        // Print the histogram
+        for (run_length, count) in histogram {
+            debug!("run length {}: {}", run_length, count);
         }
 
         Ok(())
@@ -333,7 +337,7 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
 
     let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
     pool.create_thin(fix, 0)?;
-    let td = pool.open_thin(fix, 0)?;
+    let mut td = pool.open_thin(fix, 0)?;
 
     let mut alloc_tracker = CostTracker::new("single-alloc-block.csv")?;
     let mut insert_tracker = CostTracker::new("single-insert-block.csv")?;
@@ -342,11 +346,11 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
     pool.stats_start(fix);
     for thin_b in thin_blocks {
         alloc_tracker.begin(fix, &bm);
-        let data_b = pool.alloc_data_block(fix)?;
+        let data_b = td.alloc_data_block(fix)?;
         alloc_tracker.end(fix, &bm)?;
 
         insert_tracker.begin(fix, &bm);
-        pool.insert_block(fix, &td, *thin_b, data_b)?;
+        td.insert_block(fix, *thin_b, data_b)?;
         insert_tracker.end(fix, &bm)?;
 
         insert_count += 1;
@@ -436,8 +440,8 @@ fn do_provision_recursive_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result
     let mut insert_count = 0;
     pool.stats_start(fix);
     for thin_b in thin_blocks {
-        let data_b = pool.alloc_data_block(fix)?;
-        pool.insert_block(fix, &td, *thin_b, data_b)?;
+        let data_b = td.alloc_data_block(fix)?;
+        td.insert_block(fix, *thin_b, data_b)?;
         insert_count += 1;
 
         if insert_count == commit_interval {
@@ -481,7 +485,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
     let mut thin_id = 0;
     pool.create_thin(fix, 0)?;
-    let td = pool.open_thin(fix, 0)?;
+    let mut td = pool.open_thin(fix, 0)?;
 
     let mut alloc_tracker = CostTracker::new("alloc-block.csv")?;
     let mut insert_tracker = CostTracker::new("insert-block.csv")?;
@@ -491,11 +495,11 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     pool.stats_start(fix);
     for thin_b in thin_blocks {
         alloc_tracker.begin(fix, &bm);
-        let data_b = pool.alloc_data_block(fix)?;
+        let data_b = td.alloc_data_block(fix)?;
         alloc_tracker.end(fix, &bm)?;
 
         insert_tracker.begin(fix, &bm);
-        pool.insert_block(fix, &td, *thin_b, data_b)?;
+        td.insert_block(fix, *thin_b, data_b)?;
         insert_tracker.end(fix, &bm)?;
 
         insert_count += 1;
@@ -545,13 +549,13 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
 
     let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
     pool.create_thin(fix, 0)?;
-    let td = pool.open_thin(fix, 0)?;
+    let mut td = pool.open_thin(fix, 0)?;
 
     // Fully provision the thin
     info!("provisioning thin");
     for b in 0..DISCARD_SINGLE_COUNT {
-        let data_b = pool.alloc_data_block(fix)?;
-        pool.insert_block(fix, &td, b, data_b)?;
+        let data_b = td.alloc_data_block(fix)?;
+        td.insert_block(fix, b, data_b)?;
     }
     pool.commit(fix)?;
     info!("provisioned");
@@ -597,13 +601,13 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
     let mut thin_id = 0;
     let bm = get_bm(fix, pool.bm_ptr);
     pool.create_thin(fix, 0)?;
-    let td = pool.open_thin(fix, 0)?;
+    let mut td = pool.open_thin(fix, 0)?;
 
     let mut discard_tracker = CostTracker::new("discard-whole-thin.csv")?;
     let mut insert_count = 0;
     for thin_b in thin_blocks {
-        let data_b = pool.alloc_data_block(fix)?;
-        pool.insert_block(fix, &td, *thin_b, data_b)?;
+        let data_b = td.alloc_data_block(fix)?;
+        td.insert_block(fix, *thin_b, data_b)?;
 
         insert_count += 1;
 
@@ -646,26 +650,120 @@ fn test_discard_rolling_snaps(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-fn test_fragment_concurrent(fix: &mut Fixture) -> Result<()> {
+fn test_delete_frees_blocks(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
     let nr_blocks = 20_000;
-    let nr_thins = 2;
+    let nr_thins = 4;
     let commit_interval = 1000;
 
     standard_globals(fix)?;
 
     let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64)?;
 
+    let mut td = create_separate_thins(fix, &mut pool, nr_thins)?;
+
+    let mut insert_count = 0;
+    for thin_b in 0..nr_blocks {
+        for i in 0..nr_thins {
+            let data_b = td[i as usize].as_mut().unwrap().alloc_data_block(fix)?;
+            td[i as usize]
+                .as_mut()
+                .unwrap()
+                .insert_block(fix, thin_b, data_b)?;
+        }
+
+        insert_count += 1;
+
+        if insert_count == commit_interval {
+            pool.commit(fix)?;
+            insert_count = 0;
+        }
+    }
+
+    pool.commit(fix)?;
+
+    // We should have used up all space now
+    debug!("nr free = {}", pool.free_data_blocks(fix)?);
+    ensure!(pool.free_data_blocks(fix)? == 0, "expected no free blocks");
+
+    // Allocation should fail
+    pool.create_thin(fix, nr_thins)?;
+    let mut thin = pool.open_thin(fix, nr_thins)?;
+    ensure!(
+        thin.alloc_data_block(fix).is_err(),
+        "expected alloc to fail"
+    );
+
+    // Now delete one of the devices
+    let old_thin = td[0].take().unwrap();
+    pool.close_thin(fix, old_thin)?;
+    pool.delete_thin(fix, 0)?;
+    pool.commit(fix)?;
+
+    // and allocation should succeed
+    ensure!(
+        thin.alloc_data_block(fix).is_ok(),
+        "expected alloc to succeed"
+    );
+
+    Ok(())
+}
+
+//-------------------------------
+
+fn create_separate_thins(
+    fix: &mut Fixture,
+    pool: &mut ThinPool,
+    nr_thins: u32,
+) -> Result<Vec<Option<ThinDev>>> {
     let mut td = vec![];
     for i in 0..nr_thins {
         pool.create_thin(fix, i)?;
         td.push(Some(pool.open_thin(fix, i)?));
     }
+    Ok(td)
+}
+
+fn create_recursive_snaps(
+    fix: &mut Fixture,
+    pool: &mut ThinPool,
+    nr_thins: u32,
+) -> Result<Vec<Option<ThinDev>>> {
+    let mut td = vec![];
+    for i in 0..nr_thins {
+        if i == 0 {
+            pool.create_thin(fix, 0)?;
+        } else {
+            pool.create_snap(fix, i, i - 1)?;
+        }
+        td.push(Some(pool.open_thin(fix, i)?));
+    }
+    Ok(td)
+}
+
+fn do_fragment_test<F>(fix: &mut Fixture, func: F) -> Result<()>
+where
+    F: FnOnce(&mut Fixture, &mut ThinPool, u32) -> Result<Vec<Option<ThinDev>>>,
+{
+    let nr_blocks = 20_000;
+    let nr_thins = 4;
+    let commit_interval = 1000;
+
+    standard_globals(fix)?;
+
+    let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64)?;
+
+    let mut td = func(fix, &mut pool, nr_thins)?;
 
     let mut insert_count = 0;
     for thin_b in 0..nr_blocks {
         for i in 0..nr_thins {
-            let data_b = pool.alloc_data_block(fix)?;
-            pool.insert_block(fix, &td[i as usize].as_ref().unwrap(), thin_b, data_b)?;
+            let data_b = td[i as usize].as_mut().unwrap().alloc_data_block(fix)?;
+            td[i as usize]
+                .as_mut()
+                .unwrap()
+                .insert_block(fix, thin_b, data_b)?;
         }
 
         insert_count += 1;
@@ -681,9 +779,26 @@ fn test_fragment_concurrent(fix: &mut Fixture) -> Result<()> {
         pool.close_thin(fix, td.unwrap())?;
     }
 
-    pool.show_fragmentation(fix)?;
+    let histogram = pool.build_run_histogram(fix)?;
+    pool.show_fragmentation(&histogram)?;
+    ensure!(
+        histogram.len() == 1,
+        "expected a single run length in histogram"
+    );
+    ensure!(
+        *histogram.get(&(nr_blocks as usize)).unwrap() == nr_thins as usize,
+        "expected all blocks to be in a single run"
+    );
 
     Ok(())
+}
+
+fn test_fragment_thins(fix: &mut Fixture) -> Result<()> {
+    do_fragment_test(fix, create_separate_thins)
+}
+
+fn test_fragment_snapshots(fix: &mut Fixture) -> Result<()> {
+    do_fragment_test(fix, create_recursive_snaps)
 }
 
 //-------------------------------
@@ -721,7 +836,9 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("snaps/rolling", test_provision_rolling_snaps)
         test!("discard/runs", test_discard_single_thin)
         test!("discard/rolling", test_discard_rolling_snaps)
-        test!("fragmentation/concurrent", test_fragment_concurrent)
+        test!("delete-frees-blocks", test_delete_frees_blocks)
+        test!("fragmentation/thins", test_fragment_thins)
+        test!("fragmentation/snapshots", test_fragment_snapshots)
     }
 
     Ok(())

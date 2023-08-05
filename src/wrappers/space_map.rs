@@ -1,10 +1,11 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use log::*;
 use std::io;
 use std::io::{Read, Write};
 
@@ -28,6 +29,7 @@ pub struct SpaceMap {
     inc_block: Addr,
     dec_block: Addr,
     new_block: Addr,
+    new_block_in_range: Addr,
     root_size: Addr,
     copy_root: Addr,
     register_threshold_callback: Addr,
@@ -35,7 +37,7 @@ pub struct SpaceMap {
 
 impl Guest for SpaceMap {
     fn guest_len() -> usize {
-        112
+        120
     }
 
     fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
@@ -50,6 +52,7 @@ impl Guest for SpaceMap {
         w.write_u64::<LittleEndian>(self.inc_block.0)?;
         w.write_u64::<LittleEndian>(self.dec_block.0)?;
         w.write_u64::<LittleEndian>(self.new_block.0)?;
+        w.write_u64::<LittleEndian>(self.new_block_in_range.0)?;
         w.write_u64::<LittleEndian>(self.root_size.0)?;
         w.write_u64::<LittleEndian>(self.copy_root.0)?;
         w.write_u64::<LittleEndian>(self.register_threshold_callback.0)?;
@@ -68,6 +71,7 @@ impl Guest for SpaceMap {
         let inc_block = Addr(r.read_u64::<LittleEndian>()?);
         let dec_block = Addr(r.read_u64::<LittleEndian>()?);
         let new_block = Addr(r.read_u64::<LittleEndian>()?);
+        let new_block_in_range = Addr(r.read_u64::<LittleEndian>()?);
         let root_size = Addr(r.read_u64::<LittleEndian>()?);
         let copy_root = Addr(r.read_u64::<LittleEndian>()?);
         let register_threshold_callback = Addr(r.read_u64::<LittleEndian>()?);
@@ -84,6 +88,7 @@ impl Guest for SpaceMap {
             inc_block,
             dec_block,
             new_block,
+            new_block_in_range,
             root_size,
             copy_root,
             register_threshold_callback,
@@ -106,12 +111,14 @@ pub fn sm_extend(fix: &mut Fixture, sm_ptr: Addr, extra_blocks: u64) -> Result<(
 
 pub fn sm_get_nr_blocks(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    debug!("v");
 
     fix.vm.set_reg(A0, sm_ptr.0);
     let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
     fix.vm.set_reg(A1, result_ptr.0);
 
     fix.call_at_with_errno(sm.get_nr_blocks)?;
+    debug!("^");
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
@@ -189,6 +196,19 @@ pub fn sm_new_block(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     fix.vm.set_reg(A1, result_ptr.0);
 
     fix.call_at_with_errno(sm.new_block)?;
+    Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
+}
+
+pub fn sm_new_block_in_range(fix: &mut Fixture, sm_ptr: Addr, b: u64, e: u64) -> Result<u64> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, b);
+    fix.vm.set_reg(A2, e);
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    fix.vm.set_reg(A3, result_ptr.0);
+
+    fix.call_at_with_errno(sm.new_block_in_range)?;
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
