@@ -171,7 +171,7 @@ impl Fixture {
     // Sometimes we need a unique location to set a breakpoint, to do this
     // we allocate a word on the heap and fill it out with an ebreak.
     // FIXME: memleak
-    fn alloc_ebreak(&mut self) -> Result<Addr> {
+    pub fn alloc_ebreak(&mut self) -> Result<Addr> {
         // We need a unique address return control to us.
         let ptr = self.vm.mem.alloc_bytes(vec![0u8; 4], PERM_EXEC)?;
 

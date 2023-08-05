@@ -1,8 +1,8 @@
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::fixture::*;
 use crate::stats::*;
-use crate::wrappers::space_map::*;
 use crate::stubs::block_manager::*;
+use crate::wrappers::space_map::*;
 
 use anyhow::{anyhow, ensure, Result};
 use log::*;
@@ -142,7 +142,8 @@ pub trait SpaceMapBuilder {
 pub fn test_boundary_size(fix: &mut Fixture, builder: &mut dyn SpaceMapBuilder) -> Result<()> {
     let nr_blocks = ENTRIES_PER_BLOCK as u64;
     let mut sm = builder.create(fix, nr_blocks)?;
-    ensure!(nr_blocks == sm_get_nr_blocks(fix, sm.addr())?);
+    let nr = sm_get_nr_blocks(fix, sm.addr())?;
+    ensure!(nr_blocks == nr);
 
     let nr_free = sm_get_nr_free(fix, sm.addr())?;
     for _ in 0..nr_free {

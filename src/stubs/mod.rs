@@ -84,10 +84,7 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
     let base = Addr(fix.vm.reg(A0));
     let v = fix.vm.reg(A1) as u8;
     let len = fix.vm.reg(A2) as usize;
-    let mut bytes = vec![0u8; len];
-    for b in &mut bytes {
-        *b = v;
-    }
+    let bytes = vec![v; len];
     fix.vm.mem.write(base, &bytes, PERM_WRITE)?;
     fix.vm.ret(base.0);
     Ok(())
