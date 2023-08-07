@@ -574,6 +574,7 @@ impl BMInner {
                     self.v_prep(fix, guest_ptr, validator)?;
 
                     let data = fix.vm.mem.free(gb.data)?;
+                    fix.vm.mem.free(guest_ptr)?;
                     self.locks.insert(
                         gb.loc,
                         Lock::Clean {
