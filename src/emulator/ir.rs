@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::emulator::riscv::{self, *};
 use crate::emulator::memory::*;
+use crate::emulator::riscv::{self, *};
 
 /// The intermediate representation is vey similar to riscv, except:
 /// - it uses static single assignment, no registers/infinite registers.
@@ -16,21 +16,21 @@ use crate::emulator::memory::*;
 /// - No need for atomics, we only have one core.
 
 #[derive(Clone, Copy, Debug, Eq)]
-pub struct Reg(u32, Option<riscv::Reg>);
+pub struct IReg(u32, Option<riscv::Reg>);
 
-impl PartialOrd for Reg {
+impl PartialOrd for IReg {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.0.cmp(&other.0))
     }
 }
 
-impl Ord for Reg {
+impl Ord for IReg {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl PartialEq for Reg {
+impl PartialEq for IReg {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
@@ -38,7 +38,7 @@ impl PartialEq for Reg {
 
 // impl Eq for Reg {};
 
-impl std::fmt::Display for Reg {
+impl std::fmt::Display for IReg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = if let Some(greg) = self.1 {
             format!("t{}({})", self.0, greg)
@@ -125,37 +125,37 @@ use ShiftOp::*;
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum RValue {
     Gbase,
-    Gtoh { guest: Reg, len: u32, perms: u8 },
+    Gtoh { guest: IReg, len: u32, perms: u8 },
     Li { imm: i64 },
 
-    Test { op: TestOp, rs1: Reg, rs2: Reg },
+    Test { op: TestOp, rs1: IReg, rs2: IReg },
 
     // Conditional move, if t != 0 then rd = rs1, else rs2
-    Cond { t: Reg, rs1: Reg, rs2: Reg },
+    Cond { t: IReg, rs1: IReg, rs2: IReg },
 
-    Ld { rs: Reg },
-    Lb { rs: Reg },
-    Lh { rs: Reg },
-    Lw { rs: Reg },
-    Lbu { rs: Reg },
-    Lhu { rs: Reg },
-    Lwu { rs: Reg },
+    Ld { rs: IReg },
+    Lb { rs: IReg },
+    Lh { rs: IReg },
+    Lw { rs: IReg },
+    Lbu { rs: IReg },
+    Lhu { rs: IReg },
+    Lwu { rs: IReg },
 
-    Imm { op: ImmOp, rs: Reg, imm: i32 },
-    Shift { op: ShiftOp, rs: Reg, shamt: u8 },
-    Bin { op: BinOp, rs1: Reg, rs2: Reg },
+    Imm { op: ImmOp, rs: IReg, imm: i32 },
+    Shift { op: ShiftOp, rs: IReg, shamt: u8 },
+    Bin { op: BinOp, rs1: IReg, rs2: IReg },
 }
 
 use RValue::*;
 
 #[derive(Clone, Copy, Debug)]
 pub enum IR {
-    Assign { rd: Reg, rval: RValue },
+    Assign { rd: IReg, rval: RValue },
 
-    Sb { rs1: Reg, rs2: Reg },
-    Sh { rs1: Reg, rs2: Reg },
-    Sw { rs1: Reg, rs2: Reg },
-    Sd { rs1: Reg, rs2: Reg },
+    Sb { rs1: IReg, rs2: IReg },
+    Sh { rs1: IReg, rs2: IReg },
+    Sw { rs1: IReg, rs2: IReg },
+    Sd { rs1: IReg, rs2: IReg },
 
     Ecall,
     Ebreak,
@@ -323,7 +323,7 @@ impl std::fmt::Display for IR {
 struct Builder {
     buffer: Vec<IR>,
     current_reg: u32,
-    guest_regs: BTreeMap<riscv::Reg, Reg>,
+    guest_regs: BTreeMap<riscv::Reg, IReg>,
 }
 
 impl Default for Builder {
@@ -348,21 +348,21 @@ impl Builder {
     //     let rs = self.ref_greg(rs);
     // Since rs could be rd, and so you'll end up with something like: t59 <- t59 + 0x0.
     // Instead call def_greg() after getting any references you need to build the instruction.
-    fn def_greg(&mut self, greg: &riscv::Reg) -> Reg {
-        let reg = Reg(self.current_reg, Some(*greg));
+    fn def_greg(&mut self, greg: &riscv::Reg) -> IReg {
+        let reg = IReg(self.current_reg, Some(*greg));
         self.current_reg += 1;
         self.guest_regs.insert(*greg, reg);
         reg
     }
 
     /// Returns the IR register that contains the guest reg
-    fn ref_greg(&self, greg: &riscv::Reg) -> Reg {
+    fn ref_greg(&self, greg: &riscv::Reg) -> IReg {
         self.guest_regs.get(greg).unwrap().clone()
     }
 
     /// Call this when you want to mutate the value of a guest register.
     /// It returns (old, new)
-    fn mut_greg(&mut self, greg: &riscv::Reg) -> (Reg, Reg) {
+    fn mut_greg(&mut self, greg: &riscv::Reg) -> (IReg, IReg) {
         let mut new = self.next_reg();
         new.1 = Some(*greg);
         let old = self.guest_regs.get(greg).unwrap().clone();
@@ -375,19 +375,19 @@ impl Builder {
         (old, new)
     }
 
-    fn next_reg(&mut self) -> Reg {
+    fn next_reg(&mut self) -> IReg {
         let r = self.current_reg;
         self.current_reg += 1;
-        Reg(r, None)
+        IReg(r, None)
     }
 
     /// Pushes a new assignment operation
-    fn assign(&mut self, rd: Reg, rval: RValue) {
+    fn assign(&mut self, rd: IReg, rval: RValue) {
         self.push(IR::Assign { rd, rval });
     }
 
     /// Generates a new register, and pushes an assignment to it.
-    fn assign_next(&mut self, rval: RValue) -> Reg {
+    fn assign_next(&mut self, rval: RValue) -> IReg {
         let rd = self.next_reg();
         self.assign(rd, rval);
         rd
@@ -408,14 +408,7 @@ impl Builder {
 
     // Pushes a sequence of instructions that implement a branch.
     // if rs1 <op> rs2 { pc += offset } else { pc += width }
-    fn branch(
-        &mut self,
-        rs1: &riscv::Reg,
-        rs2: &riscv::Reg,
-        offset: &i32,
-        op: TestOp,
-        width: i32,
-    ) {
+    fn branch(&mut self, rs1: &riscv::Reg, rs2: &riscv::Reg, offset: &i32, op: TestOp, width: i32) {
         let rs1 = self.ref_greg(rs1);
         let rs2 = self.ref_greg(rs2);
         let (old_pc, new_pc) = self.mut_greg(&riscv::Reg::PC);
@@ -443,7 +436,7 @@ impl Builder {
         );
     }
 
-    fn load<F: FnOnce(Reg) -> RValue>(
+    fn load<F: FnOnce(IReg) -> RValue>(
         &mut self,
         rd: &riscv::Reg,
         rs: &riscv::Reg,
@@ -468,7 +461,7 @@ impl Builder {
         self.assign(new_rd, func(rd2));
     }
 
-    fn store<F: FnOnce(Reg, Reg) -> IR>(
+    fn store<F: FnOnce(IReg, IReg) -> IR>(
         &mut self,
         rs1: &riscv::Reg,
         rs2: &riscv::Reg,
@@ -993,7 +986,7 @@ fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
 //--------------------------------
 // Optimisation passes
 
-fn subst_reg(r: Reg, substs: &BTreeMap<Reg, Reg>) -> Reg {
+fn subst_reg(r: IReg, substs: &BTreeMap<IReg, IReg>) -> IReg {
     if let Some(old) = substs.get(&r) {
         *old
     } else {
@@ -1001,7 +994,7 @@ fn subst_reg(r: Reg, substs: &BTreeMap<Reg, Reg>) -> Reg {
     }
 }
 
-fn apply_substitutions(rval: &RValue, substs: &BTreeMap<Reg, Reg>) -> RValue {
+fn apply_substitutions(rval: &RValue, substs: &BTreeMap<IReg, IReg>) -> RValue {
     match rval {
         Gbase => Gbase,
         Gtoh { guest, len, perms } => Gtoh {
@@ -1071,8 +1064,8 @@ fn is_load(rval: &RValue) -> bool {
 /// Common subexpression elimination
 fn opt_cse(instrs: &[IR]) -> Vec<IR> {
     let mut r = Vec::new();
-    let mut seen: BTreeMap<RValue, Reg> = BTreeMap::new();
-    let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
+    let mut seen: BTreeMap<RValue, IReg> = BTreeMap::new();
+    let mut substs: BTreeMap<IReg, IReg> = BTreeMap::new();
 
     for ir in instrs {
         match ir {
@@ -1121,8 +1114,8 @@ fn opt_cse(instrs: &[IR]) -> Vec<IR> {
 
 /// Examines an rval and returns Some(rs) if it is a no op that could be
 /// replaced with a simple reference to rs
-fn is_noop(rval: &RValue) -> Option<Reg> {
-    let check = |t: bool, rs: &Reg| -> Option<Reg> {
+fn is_noop(rval: &RValue) -> Option<IReg> {
+    let check = |t: bool, rs: &IReg| -> Option<IReg> {
         if t {
             Some(*rs)
         } else {
@@ -1171,7 +1164,7 @@ fn is_noop(rval: &RValue) -> Option<Reg> {
 /// Remove Noops like addi rs,0
 fn opt_noop(instrs: &[IR]) -> Vec<IR> {
     let mut r = Vec::new();
-    let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
+    let mut substs: BTreeMap<IReg, IReg> = BTreeMap::new();
 
     for ir in instrs {
         match ir {
@@ -1212,7 +1205,7 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-fn simplify(rval: &RValue, defs: &mut BTreeMap<Reg, RValue>) -> RValue {
+fn simplify(rval: &RValue, defs: &mut BTreeMap<IReg, RValue>) -> RValue {
     match rval {
         Imm { op: Addi, rs, imm } => {
             let rval2 = defs.get(rs).unwrap();
@@ -1268,7 +1261,7 @@ fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
 
 #[derive(Clone, Copy, Debug)]
 struct GuestRange {
-    base: Reg,
+    base: IReg,
     offset: i32,
     len: u32,
     perms: u8,
@@ -1282,10 +1275,10 @@ enum Merge {
 use Merge::*;
 
 fn extract_range(
-    guest: &Reg,
+    guest: &IReg,
     len: u32,
     perms: u8,
-    defs: &BTreeMap<Reg, RValue>,
+    defs: &BTreeMap<IReg, RValue>,
 ) -> Option<GuestRange> {
     let rval = defs.get(guest).unwrap();
 
@@ -1387,13 +1380,13 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     //    addi new_base, offset
 
     // allocate new_base registers
-    let mut by_base: BTreeMap<Reg, (Reg, Reg, GuestRange)> = BTreeMap::new();
+    let mut by_base: BTreeMap<IReg, (IReg, IReg, GuestRange)> = BTreeMap::new();
     for r in &ranges {
         by_base.insert(
             r.base,
             (
-                Reg(highest_reg, None),
-                Reg(highest_reg + 1, None),
+                IReg(highest_reg, None),
+                IReg(highest_reg + 1, None),
                 r.clone(),
             ),
         );
@@ -1523,7 +1516,7 @@ fn opt_redundant_stores(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTreeSet<Reg>) {
+fn emit(r: &mut Vec<IR>, reg: &IReg, defs: &BTreeMap<IReg, RValue>, seen: &mut BTreeSet<IReg>) {
     if seen.contains(reg) {
         return;
     }
@@ -1586,7 +1579,7 @@ fn emit(r: &mut Vec<IR>, reg: &Reg, defs: &BTreeMap<Reg, RValue>, seen: &mut BTr
 /// has the effect of removing dead code.
 fn reorder(instrs: &[IR]) -> Vec<IR> {
     let mut r = Vec::new();
-    let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
+    let mut defs: BTreeMap<IReg, RValue> = BTreeMap::new();
 
     for ir in instrs {
         match ir {
@@ -1689,7 +1682,7 @@ pub fn to_ir(insts: &[(Inst, u8)], opt: bool) -> Vec<IR> {
 // order.  Only useful if you're printing the instructions.
 pub fn renumber(instrs: &[IR]) -> Vec<IR> {
     // let mut defs: BTreeMap<Reg, RValue> = BTreeMap::new();
-    let mut substs: BTreeMap<Reg, Reg> = BTreeMap::new();
+    let mut substs: BTreeMap<IReg, IReg> = BTreeMap::new();
     let mut next_reg = 0;
 
     let mut r = Vec::new();
@@ -1697,7 +1690,7 @@ pub fn renumber(instrs: &[IR]) -> Vec<IR> {
         match ir {
             Assign { rd, rval } => {
                 let rval = apply_substitutions(rval, &substs);
-                let new_reg = Reg(next_reg, rd.1);
+                let new_reg = IReg(next_reg, rd.1);
                 next_reg += 1;
                 substs.insert(*rd, new_reg);
                 r.push(Assign { rd: new_reg, rval });
