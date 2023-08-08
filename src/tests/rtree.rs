@@ -33,7 +33,7 @@ struct Header {
     pub nr_entries: u32,
 }
 
-const MAX_LEAF_ENTRIES: usize = (BLOCK_SIZE - 32) / (8 + 16);
+const MAX_LEAF_ENTRIES: usize = (BLOCK_SIZE - 32) / (8 + 8);
 const MAX_INTERNAL_ENTRIES: usize = (BLOCK_SIZE - 32) / 16;
 
 #[allow(dead_code)]
@@ -77,22 +77,21 @@ enum Node {
 }
 
 struct DiskMapping {
-    data_begin: u64,
+    data_begin: u64, // FIXME: shrink to u32
     len: u32,
     time: u32,
 }
 
 fn disk_mapping(data: &[u8]) -> IResult<&[u8], DiskMapping> {
-    let (i, data_begin) = le_u64(data)?;
-    let (i, len) = le_u32(i)?;
-    let (i, time) = le_u32(i)?;
+    let (i, data_begin) = le_u32(data)?;
+    let (i, len_time) = le_u32(i)?;
 
     Ok((
         i,
         DiskMapping {
-            data_begin,
-            len,
-            time,
+            data_begin: data_begin as u64,
+            len: len_time >> 20,
+            time: len_time & ((1 << 20) - 1),
         },
     ))
 }
