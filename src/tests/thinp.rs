@@ -299,8 +299,10 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
 
     let mut alloc_tracker = CostTracker::new("single-alloc-block.csv")?;
     let mut insert_tracker = CostTracker::new("single-insert-block.csv")?;
+    let mut overall_tracker = CostTracker::new("single-provision.csv")?;
     let mut insert_count = 0;
     let bm = get_bm(fix, pool.bm_ptr);
+    overall_tracker.begin(fix, &bm);
     pool.stats_start(fix);
     for thin_b in thin_blocks {
         alloc_tracker.begin(fix, &bm);
@@ -318,6 +320,8 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
             pool.stats_report(fix, "provision", commit_interval)?;
             pool.stats_start(fix);
             pool.check_rtree(fix)?;
+            overall_tracker.end_with_iter(fix, &bm, commit_interval);
+            overall_tracker.begin(fix, &bm);
             insert_count = 0;
         }
     }

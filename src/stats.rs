@@ -40,7 +40,7 @@ impl Stats {
 
 pub struct CostTracker {
     csv_out: File,
-    iteration: u32,
+    iteration: u64,
     baseline: Stats,
 }
 
@@ -48,7 +48,7 @@ impl CostTracker {
     pub fn new(path: &str) -> Result<Self> {
         // FIXME: support overwrite
         let mut csv_out = File::create(path)?;
-        csv_out.write_all(b"iteration, instructions, read locks, write locks\n")?;
+        csv_out.write_all(b"iteration, instructions, read_locks, write_locks, disk_reads\n")?;
 
         Ok(CostTracker {
             csv_out,
@@ -59,15 +59,28 @@ impl CostTracker {
 
     pub fn begin(&mut self, fix: &mut Fixture, bm: &BlockManager) {
         self.baseline = Stats::collect_stats(fix, bm);
-        self.iteration += 1;
     }
 
     pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
+        self.end_with_iter(fix, bm, 1)
+    }
+
+    pub fn end_with_iter(
+        &mut self,
+        fix: &mut Fixture,
+        bm: &BlockManager,
+        iters: u64,
+    ) -> Result<()> {
+        self.iteration += iters;
         let delta = Stats::delta(&self.baseline, fix, bm);
         writeln!(
             self.csv_out,
-            "{}, {}, {}, {}, {}",
-            self.iteration, delta.instrs, delta.read_locks, delta.write_locks, delta.disk_reads
+            "{}, {}, {:.1}, {:.1}, {:.1}",
+            self.iteration,
+            delta.instrs / iters,
+            delta.read_locks as f64 / iters as f64,
+            delta.write_locks as f64 / iters as f64,
+            delta.disk_reads as f64 / iters as f64
         )?;
         Ok(())
     }
