@@ -92,6 +92,13 @@ fn do_allocation_test(
     Ok(contexts)
 }
 
+fn test_single_leaf(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+    do_allocation_test(fix, 1, 1024, &allocated, 1024)?;
+    Ok(())
+}
+
 fn prealloc_test(
     fix: &mut Fixture,
     allocated: &Arc<Mutex<RoaringBitmap>>,
@@ -340,6 +347,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         "/pdata/extent-allocator/",
         test!("create", test_create)
         test!("no-preallocations", test_no_preallocations)
+        test!("single-leaf", test_single_leaf)
         test!("prealloc/linear-start", test_prealloc_linear_start)
         test!("prealloc/linear-middle", test_prealloc_linear_middle)
         test!("prealloc/linear-end", test_prealloc_linear_end)
