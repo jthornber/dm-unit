@@ -2663,7 +2663,8 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
     rtree.check()?;
 
     for m in &mappings {
-        if m.len == 1 { // TODO: validate the gaps
+        if m.len == 1 {
+            // TODO: validate the gaps
             continue;
         }
 
@@ -2672,7 +2673,10 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
         expected.len -= 1;
 
         if result != Some(expected.clone()) {
-            debug!("lookup failed, expected {:?}, actual {:?}", expected, result);
+            debug!(
+                "lookup failed, expected {:?}, actual {:?}",
+                expected, result
+            );
             ensure!(result == Some(expected));
         }
     }
