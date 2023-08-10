@@ -223,94 +223,124 @@ fn mutate_u64<F: FnOnce(u64) -> u64>(mem: &mut Memory, loc: Addr, f: F) -> Resul
         .map_err(|e| anyhow!("bad access at {}", e))
 }
 
-fn relocate(
-    mem: &mut Memory,
-    rtype: RelocationType,
-    location: Addr,
-    sym: Addr,
-    _addend: u64,
-) -> Result<()> {
+/// Performs a relocation.
+///
+/// See Table 3. Relocation types of the following:
+///    https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc
+///
+/// A: Addend field in the relocation entry associated with the symbol.
+/// P: Position of the relocation (ie. address)
+/// S: Value of the symbol
+/// V: Value currently stored in P
+///
+/// The newly calculated value gets written into a field at P.  This can be a simple
+/// type such as a word32.  Or it can be the immediate field of a risc-v instruction.
+/// Instruction formats containing immediates are denoted as I, S, B, U and J.  Some
+/// of these have the immediate field split up into multiple parts, so you will see
+/// some bit shuffling in the code below.
+fn relocate(mem: &mut Memory, rtype: RelocationType, p: u64, s: u64, a: u64) -> Result<()> {
     use RelocationType::*;
 
     match rtype {
         R32 => {
-            assert!(sym.0 as u32 as u64 == sym.0);
-            mutate_u32(mem, location, |_old| sym.0 as u32)?;
+            // S + A, word32
+            assert!(s as u32 as u64 == s);
+            mutate_u32(mem, Addr(p), |_v| (s + a) as u32)?;
         }
         R64 => {
-            mutate_u64(mem, location, |_old| sym.0)?;
+            // S + A, word64
+            mutate_u64(mem, Addr(p), |_v| s + a)?;
         }
         Rbranch => {
-            let offset = addr_offset(sym, location) as u32;
+            // S + A - P, B-type
+            let offset = (s + a - p) as u32;
 
             let imm12 = (offset & 0x1000) << (31 - 12);
             let imm11 = (offset & 0x800) >> (11 - 7);
             let imm10_5 = (offset & 0x7e0) << (30 - 10);
             let imm4_1 = (offset & 0x1e) << (11 - 4);
-            mutate_u32(mem, location, |old| {
-                (old & 0x1fff07f) | imm12 | imm11 | imm10_5 | imm4_1
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0x1fff07f) | imm12 | imm11 | imm10_5 | imm4_1
             })?;
         }
         Rjal => {
-            let offset = addr_offset(sym, location) as u32;
+            // S + A - P, J-type
+            let offset = (s + a - p) as u32;
             let imm20 = (offset & 0x100000) << (31 - 20);
             let imm19_12 = offset & 0xff000;
             let imm11 = (offset & 0x800) << (20 - 11);
             let imm10_1 = (offset & 0x7fe) << (30 - 10);
-            mutate_u32(mem, location, |old| {
-                (old & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
             })?;
         }
         Rcall => {
-            let offset = addr_offset(sym, location);
+            // S + A - P, U + I type (two instructions)
+            let offset = (s + a - p) as u32;
 
             let hi20: u32 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
             let lo12: u32 = (offset as u32).wrapping_sub(hi20) & 0xfff;
-            mutate_u32(mem, location, |old| (old & 0xfff) | hi20)?;
-            let location = Addr(location.0 + 4);
-            mutate_u32(mem, location, |old| (old & 0xfffff) | (lo12 << 20))?;
+            mutate_u32(mem, Addr(p), |v| (v & 0xfff) | hi20)?;
+            mutate_u32(mem, Addr(p + 4), |v| (v & 0xfffff) | (lo12 << 20))?;
         }
         Rpcrel_hi20 => {
-            let offset = addr_offset(sym, location);
+            // S + A - P, U-type
+            let offset = (s + a - p) as u32;
             let hi20 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
-            mutate_u32(mem, location, |old| (old & 0xfff) | hi20)?;
+            mutate_u32(mem, Addr(p), |v| (v & 0xfff) | hi20)?;
         }
         Rpcrel_lo12_i => {
-            mutate_u32(mem, location, |old| {
-                (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
+            // S - P, I-type
+            // let offset = (s - p) as u32;
+            let offset = s as u32; // FIXME: subtraction already occured in caller
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0xfffff) | (((offset as u32) & 0xfff) << 20)
             })?;
         }
         Rpcrel_lo12_s => {
-            mutate_u32(mem, location, |old| {
-                (old & 0xfffff) | (((sym.0 as u32) & 0x1f) << 7) | (((sym.0 as u32) & 0xfe) << 24)
+            // S + A, S-type
+            // let offset = (s + a) as u32;
+            let offset = s as u32; // FIXME: subtraction already occured in caller
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0xfffff) | (((offset as u32) & 0x1f) << 7) | (((offset as u32) & 0xfe) << 24)
             })?;
         }
         Radd32 => {
-            mutate_u32(mem, location, |old| old + sym.0 as u32)?;
+            // V + S + A, word32
+            mutate_u32(mem, Addr(p), |v| {
+                v.wrapping_add(s as u32).wrapping_add(a as u32)
+            })?;
         }
         Rsub32 => {
-            mutate_u32(mem, location, |old| old.wrapping_sub(sym.0 as u32))?;
+            // V - S - A, word32
+            mutate_u32(mem, Addr(p), |v| {
+                v.wrapping_sub(s as u32).wrapping_sub(a as u32)
+            })?;
         }
         Radd64 => {
-            mutate_u64(mem, location, |old| old + sym.0 as u64)?;
+            // V + S + A, word64
+            mutate_u64(mem, Addr(p), |v| v.wrapping_add(s).wrapping_add(a))?;
         }
         Rsub64 => {
-            mutate_u64(mem, location, |old| old.wrapping_sub(sym.0 as u64))?;
+            // V - S - A, word64
+            mutate_u64(mem, Addr(p), |v| v.wrapping_sub(s).wrapping_sub(a))?;
         }
         Rrvc_branch => {
-            let offset = addr_offset(sym, location) as u16;
+            // S + A - P, B-type (says CB-type in the doc ???)
+            let offset = (s + a - p) as u16;
 
             let imm8 = (offset & 0x100) << (12 - 8);
             let imm7_6 = (offset & 0xc0) >> (6 - 5);
             let imm5 = (offset & 0x20) >> (5 - 2);
             let imm4_3 = (offset & 0x18) << (12 - 5);
             let imm2_1 = (offset & 0x6) << (12 - 10);
-            mutate_u16(mem, location, |old| {
-                (old & 0xe383) | imm8 | imm7_6 | imm5 | imm4_3 | imm2_1
+            mutate_u16(mem, Addr(p), |v| {
+                (v & 0xe383) | imm8 | imm7_6 | imm5 | imm4_3 | imm2_1
             })?;
         }
         Rrvc_jump => {
-            let offset = addr_offset(sym, location) as u16;
+            // S + A - P, J-type (says CJ-type in the doc ???)
+            let offset = (s + a - p) as u16;
 
             let imm11 = (offset & 0x800) << (12 - 11);
             let imm10 = (offset & 0x400) >> (10 - 8);
@@ -321,8 +351,8 @@ fn relocate(
             let imm4 = (offset & 0x10) << (12 - 5);
             let imm3_1 = (offset & 0xe) << (12 - 10);
 
-            mutate_u16(mem, location, |old| {
-                (old & 0xe003) | imm11 | imm10 | imm9_8 | imm7 | imm6 | imm5 | imm4 | imm3_1
+            mutate_u16(mem, Addr(p), |v| {
+                (v & 0xe003) | imm11 | imm10 | imm9_8 | imm7 | imm6 | imm5 | imm4 | imm3_1
             })?;
         }
         _ => {
@@ -339,25 +369,18 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
         CompoundRel::Simple(rloc) => {
             // This is the location of the instruction that needs adjusting.
             let base = rloc.section.borrow().shdr.addr;
-            let location = Addr(base + rloc.offset);
+            let location = base + rloc.offset;
             let sym = rloc.sym.borrow();
             let mut sym_addr = sym.section.as_ref().unwrap().borrow().shdr.addr;
             sym_addr += sym.value;
 
-            relocate(
-                mem,
-                rloc.rtype,
-                location,
-                Addr(sym_addr + rloc.addend),
-                rloc.addend,
-            )?;
+            relocate(mem, rloc.rtype, location, sym_addr, rloc.addend)?;
         }
         CompoundRel::Pair(hi_rloc, lo_rloc) => {
             let base = hi_rloc.section.borrow().shdr.addr;
 
-            // These is the location of the instruction that needs adjusting.
-            let hi_location = Addr(base + hi_rloc.offset);
-            let lo_location = Addr(base + lo_rloc.offset);
+            let hi_location = base + hi_rloc.offset;
+            let lo_location = base + lo_rloc.offset;
 
             // Both hi/lo refer to the same sym.
             let sym = hi_rloc.sym.borrow();
@@ -365,19 +388,13 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
             sym_addr += sym.value;
 
             // Do the hi20 relocation
-            relocate(
-                mem,
-                hi_rloc.rtype,
-                hi_location,
-                Addr(sym_addr + hi_rloc.addend),
-                hi_rloc.addend,
-            )?;
+            relocate(mem, hi_rloc.rtype, hi_location, sym_addr, hi_rloc.addend)?;
 
             // Do the lo12 relocation
-            let offset = addr_offset(Addr(sym_addr + hi_rloc.addend), hi_location);
+            let offset = addr_offset(Addr(sym_addr + hi_rloc.addend), Addr(hi_location));
             let hi20 = ((offset + 0x800) as u32 as u64) & 0xfffff000;
             let lo12 = (offset as u32 as u64).wrapping_sub(hi20);
-            relocate(mem, lo_rloc.rtype, lo_location, Addr(lo12), 0)?;
+            relocate(mem, lo_rloc.rtype, lo_location, lo12, 0)?;
         }
     }
 
