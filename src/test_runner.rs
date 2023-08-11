@@ -261,13 +261,12 @@ impl<'a> TestRunner<'a> {
                 modules.insert(m.name());
             }
 
-            let rmem;
-            {
+            let rmem = {
                 let kernel_dir = self.kernel_dir.clone();
-                rmem = memories
+                memories
                     .entry(modules)
-                    .or_insert_with(|| Fixture::prep_memory(kernel_dir, &t.kmodules));
-            }
+                    .or_insert_with(|| Fixture::prep_memory(kernel_dir, &t.kmodules))
+            };
             match rmem {
                 Ok((loader_info, mem)) => {
                     let results = results.clone();
@@ -280,7 +279,7 @@ impl<'a> TestRunner<'a> {
                             Ok(fix) => {
                                 let res = run_test(fix, t);
                                 if res.is_err() {
-                                    warn!("test {} failed: {}", p, res.as_ref().unwrap_err());
+                                    warn!("test {} failed: {:#}", p, res.as_ref().unwrap_err());
                                 }
 
                                 // FIXME: common code
@@ -318,7 +317,7 @@ impl<'a> TestRunner<'a> {
                 Err(e) => {
                     fail += 1;
                     println!(" FAIL");
-                    info!("{}", e);
+                    info!("{:#}", e);
                 }
                 Ok(()) => {
                     pass += 1;

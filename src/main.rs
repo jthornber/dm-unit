@@ -12,7 +12,7 @@ use dm_unit::tests::space_map_metadata;
 use dm_unit::tests::thinp;
 
 use anyhow::Result;
-use clap::{arg, value_parser, Command};
+use clap::{arg, value_parser, Arg, ArgAction, Command};
 use regex::Regex;
 use std::path::Path;
 
@@ -49,7 +49,12 @@ fn main() -> Result<()> {
                 .required(false),
         )
         .arg(arg!(-t <FILTER>).help("regex filter to select which tests to run"))
-        .arg(arg!(--jit).help("Turn on the experimental jit compiler"));
+        .arg(
+            Arg::new("JIT")
+                .long("jit")
+                .action(ArgAction::SetTrue)
+                .help("Turn on the experimental jit compiler"),
+        );
 
     let matches = parser.get_matches();
     let kernel_dir = Path::new(matches.get_one::<String>("kernel-dir").unwrap());
@@ -69,6 +74,7 @@ fn main() -> Result<()> {
         runner.set_jobs(*jobs);
     }
 
+    // See if the jit flag is present
     if *matches.get_one::<bool>("JIT").unwrap_or(&false) {
         runner.set_jit();
     }

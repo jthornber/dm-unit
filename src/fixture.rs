@@ -6,7 +6,7 @@ use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use libc::{c_int, strerror_r};
 use log::*;
 use std::collections::BTreeMap;
@@ -219,7 +219,13 @@ impl Fixture {
                     self.bp_rm(exit_addr);
                     Ok(())
                 } else {
-                    Err(e)
+                    Err(e).with_context(|| {
+                        let debug = self.loader_info.debug.lock().unwrap();
+                        let loc = debug
+                            .addr2line(Addr(self.vm.reg(PC)))
+                            .unwrap_or(format!("0x{:x}", self.vm.reg(PC)));
+                        format!("{}", loc)
+                    })
                 }
             }
         }
