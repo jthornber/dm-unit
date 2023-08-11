@@ -263,16 +263,7 @@ fn relocate(mem: &mut Memory, rtype: RelocationType, p: u64, s: u64, a: u64) -> 
         R32 => {
             // S + A, word32
             assert!(s as u32 as u64 == s);
-            mutate_u32(mem, Addr(p), |_v| {
-                /*
-                debug!(
-                    "old value = 0x{:x}, new value = 0x{:x}",
-                    v,
-                    (s as u32).wrapping_add(a as u32)
-                );
-                */
-                (s as u32).wrapping_add(a as u32)
-            })?;
+            mutate_u32(mem, Addr(p), |_v| (s as u32).wrapping_add(a as u32))?;
         }
         R64 => {
             // S + A, word64
@@ -436,15 +427,6 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
             let sym = rloc.sym.borrow();
             let mut sym_addr = sym.section.as_ref().unwrap().borrow().shdr.addr;
             sym_addr += sym.value;
-
-            /*
-            if rloc.section.borrow().shdr.name == ".debug_info" {
-                debug!(
-                    "relocating debug_info at {:x}, rloc.rtype = {:?}, addend = {}, sym.name = {}, sym.value = {}",
-                    location, rloc.rtype, rloc.addend, sym.name, sym.value
-                );
-            }
-            */
 
             relocate(mem, rloc.rtype, location, sym_addr, rloc.addend)?;
         }
@@ -926,7 +908,6 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
     let mut args = vec![
         "-r",
         "-melf64lriscv",
-        "--compress-debug-sections=none",
         "-T",
         "misc/module.lds",
         "-o",
