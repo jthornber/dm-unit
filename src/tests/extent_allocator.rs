@@ -102,7 +102,12 @@ fn do_allocation_test(
 fn test_single_leaf(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
     let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
-    do_allocation_test(fix, 1, 1024, &allocated, 1024)?;
+    let contexts = do_allocation_test(fix, 1, 1024, &allocated, 1024)?;
+    for context in contexts {
+        let runs = build_runs(&context.blocks);
+        ensure!(runs.len() == 1);
+        ensure!(runs[0] == (0, 1024));
+    }
     Ok(())
 }
 
@@ -117,6 +122,7 @@ fn prealloc_test(
 
     standard_globals(fix)?;
 
+    let nr_prealloc = allocated.lock().unwrap().len();
     let contexts = do_allocation_test(
         fix,
         nr_contexts,
@@ -124,19 +130,31 @@ fn prealloc_test(
         allocated,
         nr_blocks_to_allocate,
     )?;
+    let nr_allocated = allocated.lock().unwrap().len() - nr_prealloc;
 
-    for context in contexts {
+    let mut total = 0;
+    for (i, context) in contexts.iter().enumerate() {
         let runs = build_runs(&context.blocks);
-        // debug!("runs {:?}", runs);
+        // debug!("runs {:?}, cnt = {}", runs, context.blocks.len());
         ensure!(runs.len() <= max_runs);
+
+        let mut expected = nr_blocks_to_allocate / nr_contexts;
+        if i < nr_blocks_to_allocate % nr_contexts {
+            expected += 1;
+        }
+        ensure!(context.blocks.len() == expected);
+        total += context.blocks.len();
     }
+
+    ensure!(nr_allocated == nr_blocks_to_allocate as u64);
+    ensure!(total == nr_blocks_to_allocate);
 
     Ok(())
 }
 
 fn test_no_preallocations(fix: &mut Fixture) -> Result<()> {
     let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
-    prealloc_test(fix, &allocated, 1024, 2)
+    prealloc_test(fix, &allocated, 1024, 1)
 }
 
 fn test_prealloc_linear_start(fix: &mut Fixture) -> Result<()> {
