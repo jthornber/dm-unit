@@ -37,7 +37,14 @@ impl AllocationContext {
         fix: &mut Fixture,
         allocated: &Arc<Mutex<RoaringBitmap>>,
     ) -> Result<Option<u64>> {
-        alloc_context_alloc(fix, self.context, &allocated)
+        match alloc_context_alloc(fix, self.context, &allocated) {
+            Ok(Some(block)) => {
+                self.blocks.push(block);
+                Ok(Some(block))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
