@@ -345,6 +345,55 @@ fn test_reset_many_holders(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+fn test_shared_contexts(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let nr_blocks = 1024;
+    let nr_contexts = 32;
+    let mut allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+
+    let mut rng = rand::thread_rng();
+    {
+        let mut allocated = allocated.lock().unwrap();
+        for _ in 0..(nr_blocks / 5) {
+            allocated.insert(rng.gen_range(0..nr_blocks) as u32);
+        }
+    }
+
+    let mut contexts = Vec::new();
+    let ea = extent_allocator_create(fix, nr_blocks as u64)?;
+
+    for _ in 0..nr_contexts {
+        let context = alloc_context_get(fix, ea)?;
+        contexts.push(AllocationContext::new(context));
+    }
+
+    // Disable kmalloc so that we force sharing of contexts
+    disable_kmalloc(fix)?;
+
+    for _ in 0..nr_contexts {
+        let context = alloc_context_get(fix, ea)?;
+        contexts.push(AllocationContext::new(context));
+    }
+
+    allocate_all_blocks(fix, &mut contexts, &mut allocated)?;
+
+    {
+        let allocated = allocated.lock().unwrap();
+        for b in 0..nr_blocks {
+            ensure!(allocated.contains(b as u32));
+        }
+    }
+
+    for context in &contexts {
+        ensure!(context.blocks.len() > 0);
+        alloc_context_put(fix, context.context)?;
+    }
+
+    extent_allocator_destroy(fix, ea)?;
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
@@ -380,6 +429,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
         test!("prealloc/many-contexts", test_prealloc_many_contexts)
         test!("reset/no-holders", test_reset_no_holders)
         test!("reset/many-holders", test_reset_many_holders)
+        test!("shared-contexts", test_shared_contexts)
     };
 
     Ok(())

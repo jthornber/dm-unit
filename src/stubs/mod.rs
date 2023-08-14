@@ -174,3 +174,11 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     rw_semaphore::rw_sem_stubs(fix)?;
     Ok(())
 }
+
+pub fn disable_kmalloc(fix: &mut Fixture) -> Result<()> {
+    let _ = fix.stub("__kmalloc", 0);
+    let _ = fix.stub("kmalloc_order", 0);
+    let _ = fix.stub("kmalloc_large", 0);
+
+    Ok(())
+}
