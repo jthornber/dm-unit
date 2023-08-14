@@ -273,9 +273,10 @@ impl<'a> TestRunner<'a> {
                     let loader_info = loader_info.clone();
                     let mem = mem.snapshot();
                     let jit = self.jit;
+                    let kernel_dir = self.kernel_dir.clone();
 
                     pool.execute(move || {
-                        match Fixture::new(loader_info, mem, jit) {
+                        match Fixture::new(&kernel_dir, loader_info, mem, jit) {
                             Ok(fix) => {
                                 let res = run_test(fix, t);
                                 if res.is_err() {

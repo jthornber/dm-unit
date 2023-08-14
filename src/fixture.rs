@@ -37,6 +37,8 @@ pub struct Fixture {
     // A useful place to store host structures against a guest
     // address.
     pub contexts: AnyMap<Addr>,
+
+    kernel_dir: PathBuf,
 }
 
 #[derive(Clone)]
@@ -101,7 +103,12 @@ impl Fixture {
         Ok((loader_info, mem))
     }
 
-    pub fn new(loader_info: LoaderInfo, mem: Memory, jit: bool) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        kernel_dir: &P,
+        loader_info: LoaderInfo,
+        mem: Memory,
+        jit: bool,
+    ) -> Result<Self> {
         let mut vm = VM::new(mem, jit);
 
         // Setup the stack and heap
@@ -113,6 +120,7 @@ impl Fixture {
             breakpoints: BTreeMap::new(),
             trace_indent: 0,
             contexts: AnyMap::default(),
+            kernel_dir: std::fs::canonicalize(PathBuf::from(kernel_dir.as_ref())).unwrap(),
         })
     }
 
@@ -222,7 +230,7 @@ impl Fixture {
                     Err(e).with_context(|| {
                         let debug = self.loader_info.debug.lock().unwrap();
                         let loc = debug
-                            .addr2line(Addr(self.vm.reg(PC)))
+                            .addr2line(&self.kernel_dir, Addr(self.vm.reg(PC)))
                             .unwrap_or(format!("0x{:x}", self.vm.reg(PC)));
                         format!("{}", loc)
                     })

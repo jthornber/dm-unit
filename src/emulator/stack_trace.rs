@@ -1,6 +1,7 @@
 use addr2line::Context;
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::emulator::memory::{Addr, Memory, PERM_READ};
@@ -15,6 +16,18 @@ type DebugContext = Context<gimli::EndianArcSlice<gimli::RunTimeEndian>>;
 
 pub struct DebugInfo {
     context: DebugContext,
+}
+
+/// Remove the kernel directory prefix from a path
+fn strip_prefix(kernel_dir: &Path, path: Option<&str>) -> String {
+    if let Some(path) = path {
+        if let Ok(path) = Path::new(path).strip_prefix(kernel_dir) {
+            if let Some(path) = path.to_str() {
+                return path.to_string();
+            }
+        }
+    }
+    path.unwrap_or("-").to_string()
 }
 
 /// Callback used by gimli to read debug sections
@@ -46,11 +59,11 @@ impl DebugInfo {
         })
     }
 
-    pub fn addr2line(&self, addr: Addr) -> Result<String> {
+    pub fn addr2line<P: AsRef<Path>>(&self, kernel_dir: P, addr: Addr) -> Result<String> {
         if let Some(loc) = self.context.find_location(addr.0)? {
             Ok(format!(
                 "{}:{}",
-                loc.file.or(Some("-")).unwrap(),
+                strip_prefix(kernel_dir.as_ref(), loc.file.or(Some("-"))),
                 loc.line.or(Some(0)).unwrap(),
             ))
         } else {
