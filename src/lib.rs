@@ -9,6 +9,7 @@ extern crate regex;
 extern crate thiserror;
 
 pub mod anymap;
+pub mod bench;
 pub mod block_manager;
 pub mod emulator;
 pub mod fixture;

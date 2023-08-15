@@ -21,7 +21,7 @@ use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::btree::*;
-use crate::tests::rtree::*;
+use crate::tests::rtree::{self, *};
 use crate::wrappers::thinp_metadata::*;
 
 //-------------------------------
@@ -197,7 +197,7 @@ impl ThinPool {
         let mut path = Vec::new();
         let roots = btree_to_map(&mut path, bm.clone(), false, sb.mapping_root)?;
         for (thin_id, root) in roots {
-            let mut stats = TreeStats::default();
+            let mut stats = rtree::TreeStats::default();
             let kr = KeyRange::new();
             rtree_check(&*bm, root, &kr, &mut stats)?;
             println!("thin id {}, stats {:?}", thin_id, stats);

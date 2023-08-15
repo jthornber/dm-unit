@@ -1,6 +1,7 @@
 extern crate dm_unit;
 extern crate log;
 
+use dm_unit::bench;
 use dm_unit::test_runner::*;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
@@ -30,7 +31,7 @@ fn register_tests(runner: &mut TestRunner) -> Result<()> {
 }
 
 fn register_bench(runner: &mut TestRunner) -> Result<()> {
-    btree::register_bench(runner)?;
+    bench::btree::register_bench(runner)?;
     rtree::register_bench(runner)?;
 
     Ok(())
