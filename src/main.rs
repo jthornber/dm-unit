@@ -32,7 +32,7 @@ fn register_tests(runner: &mut TestRunner) -> Result<()> {
 
 fn register_bench(runner: &mut TestRunner) -> Result<()> {
     bench::btree::register_bench(runner)?;
-    rtree::register_bench(runner)?;
+    bench::rtree::register_bench(runner)?;
 
     Ok(())
 }
