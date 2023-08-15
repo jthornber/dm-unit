@@ -348,7 +348,7 @@ impl<'a> RTreeTest<'a> {
 
         let mut m = v.clone();
         m.len = 1;
-        for i in 0..v.len {
+        for _i in 0..v.len {
             let (r, _) =
                 dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, &m).map_err(|e| {
                     println!("insert failed at {}: {:?}", m.thin_begin, e);
@@ -378,7 +378,7 @@ impl<'a> RTreeTest<'a> {
         m.thin_begin += m.len as u64 - 1;
         m.data_begin += m.len as u64 - 1;
         m.len = 1;
-        for i in 0..v.len {
+        for _i in 0..v.len {
             let (r, _) = dm_rtree_insert(self.fix, self.tm, self.data_sm, self.root, &m)?;
             self.root = r;
             m.thin_begin -= 1;
@@ -949,7 +949,6 @@ fn test_insert_with_merges(fix: &mut Fixture) -> Result<()> {
     }
 
     let mut mappings = Vec::new();
-    let mut data_begin = 0u64;
     for r in ranges {
         let len = r.end - r.start;
         mappings.push(Mapping {
@@ -958,7 +957,6 @@ fn test_insert_with_merges(fix: &mut Fixture) -> Result<()> {
             len: len as u32,
             time: 0,
         });
-        data_begin += len as u64;
     }
 
     // FIXME: factor out common code
@@ -2079,7 +2077,6 @@ fn test_overwrite_runs(fix: &mut Fixture) -> Result<()> {
     }
 
     let mut rtree = RTreeTest::new(fix, 1024)?;
-    let mut n = 0;
     rtree.stats_start();
 
     for m in &mappings {
@@ -2147,7 +2144,6 @@ fn test_overwrite_runs_descending(fix: &mut Fixture) -> Result<()> {
     }
 
     let mut rtree = RTreeTest::new(fix, 1024)?;
-    let mut n = 0;
     rtree.stats_start();
 
     for m in &mappings {
@@ -2203,9 +2199,8 @@ fn test_overwrite_random(fix: &mut Fixture) -> Result<()> {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     mappings.shuffle(&mut rng);
 
-    let mut n = 0;
-
     // populate
+    let mut n = 0;
     for m in &mappings {
         let _nr_inserted = rtree.insert(m)?;
         n += 1;
@@ -2220,13 +2215,11 @@ fn test_overwrite_random(fix: &mut Fixture) -> Result<()> {
 
     // overwrite
     n = 0;
-    let mut cnt = 0;
     for m in &mut mappings {
         m.data_begin += COUNT;
         m.time = 1;
         let _nr_inserted = rtree.insert(m)?;
         n += 1;
-        cnt += 1;
 
         // commit the transaction to prevent from holding too much shadows
         if n == COMMIT_INTERVAL {
@@ -2274,7 +2267,6 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     }
 
     let mut mappings = Vec::new();
-    let mut data_begin = 0u64;
     for r in ranges {
         let len = r.end - r.start;
         mappings.push(Mapping {
@@ -2283,7 +2275,6 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
             len: len as u32,
             time: 1,
         });
-        data_begin += len as u64;
     }
 
     // FIXME: factor out common code
@@ -2358,7 +2349,6 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
     }
 
     let mut mappings = Vec::new();
-    let mut data_begin = 0u64;
     for r in ranges {
         let len = r.end - r.start;
         mappings.push(Mapping {
@@ -2367,7 +2357,6 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
             len: len as u32,
             time: 0,
         });
-        data_begin += len as u64;
     }
 
     let mut rtree = RTreeTest::new(fix, 1024)?;

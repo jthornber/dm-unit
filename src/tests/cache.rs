@@ -68,10 +68,10 @@ fn test_create(fix: &mut Fixture) -> Result<()> {
 
 fn random_mapping(nr_cblocks: u64, nr_oblocks: u64, count: u64) -> Vec<(u64, u64)> {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
-    let mut cblocks: Vec<u64> = (0..nr_cblocks).into_iter().collect();
+    let mut cblocks: Vec<u64> = (0..nr_cblocks).collect();
     cblocks.shuffle(&mut rng);
 
-    let mut oblocks: Vec<u64> = (0..nr_oblocks).into_iter().collect();
+    let mut oblocks: Vec<u64> = (0..nr_oblocks).collect();
     oblocks.shuffle(&mut rng);
 
     let mut map = Vec::new();

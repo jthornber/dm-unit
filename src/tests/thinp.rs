@@ -157,7 +157,7 @@ impl ThinPool {
         dm_pool_get_free_metadata_block_count(fix, self.pmd).map(|n| n + 0x400)
     }
 
-    fn check(&mut self, fix: &Fixture) -> Result<()> {
+    fn _check(&mut self, fix: &Fixture) -> Result<()> {
         // let report = std::sync::Arc::new(Report::new(Box::new(DebugReportInner {})));
         let report = std::sync::Arc::new(mk_quiet_report());
         let engine = get_bm(fix, self.bm_ptr);
@@ -206,7 +206,7 @@ impl ThinPool {
         Ok(())
     }
 
-    fn show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
+    fn _show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
         let bm = get_bm(fix, self.bm_ptr);
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr);
         let sb = read_superblock(engine.as_ref(), 0)?;
@@ -320,7 +320,7 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
             pool.stats_report(fix, "provision", commit_interval)?;
             pool.stats_start(fix);
             pool.check_rtree(fix)?;
-            overall_tracker.end_with_iter(fix, &bm, commit_interval);
+            overall_tracker.end_in_iterations(fix, &bm, commit_interval)?;
             overall_tracker.begin(fix, &bm);
             insert_count = 0;
         }
@@ -337,12 +337,12 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
 const PROVISION_SINGLE_COUNT: u64 = 100000;
 
 fn test_provision_single_thin_linear(fix: &mut Fixture) -> Result<()> {
-    let thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).into_iter().collect();
+    let thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).collect();
     do_provision_single_thin(fix, &thin_blocks)
 }
 
 fn test_provision_single_thin_random(fix: &mut Fixture) -> Result<()> {
-    let mut thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).into_iter().collect();
+    let mut thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).collect();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     thin_blocks.shuffle(&mut rng);
     do_provision_single_thin(fix, &thin_blocks)

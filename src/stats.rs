@@ -62,10 +62,10 @@ impl CostTracker {
     }
 
     pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
-        self.end_with_iter(fix, bm, 1)
+        self.end_in_iterations(fix, bm, 1)
     }
 
-    pub fn end_with_iter(
+    pub fn end_in_iterations(
         &mut self,
         fix: &mut Fixture,
         bm: &BlockManager,

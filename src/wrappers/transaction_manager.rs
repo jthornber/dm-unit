@@ -140,7 +140,7 @@ pub fn dm_tm_load_stats(fix: &mut Fixture, tm: Addr) -> Result<(Vec<u32>, Vec<u3
         assert!(bytes.len() >= 32);
         let mut v = Vec::new();
         let mut r = Cursor::new(bytes);
-        for i in 0..8 {
+        for _i in 0..8 {
             v.push(r.read_u32::<LittleEndian>().unwrap());
         }
         v
@@ -150,7 +150,7 @@ pub fn dm_tm_load_stats(fix: &mut Fixture, tm: Addr) -> Result<(Vec<u32>, Vec<u3
         assert!(bytes.len() >= 32);
         let mut v = Vec::new();
         let mut r = Cursor::new(bytes);
-        for i in 0..8 {
+        for _i in 0..8 {
             v.push(r.read_u32::<LittleEndian>().unwrap());
         }
         v
