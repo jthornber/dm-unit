@@ -33,6 +33,7 @@ struct Header {
 
 pub const MAX_LEAF_ENTRIES: usize = (BLOCK_SIZE - 32) / (8 + 8);
 pub const MAX_INTERNAL_ENTRIES: usize = (BLOCK_SIZE - 32) / 16;
+pub const MAPPINGS_MAX_LEN: usize = 4095;
 
 #[allow(dead_code)]
 const INTERNAL_NODE: u32 = 1;
@@ -136,11 +137,20 @@ impl Unpack for Node {
     }
 }
 
+fn calc_max_sib_entries(max_entries: usize) -> usize {
+    let mut sib = max_entries / 2;
+    while max_entries - sib > 8 {
+        sib = (sib + max_entries) / 2;
+    }
+    sib
+}
+
 #[derive(Debug, Default)]
 pub struct TreeStats {
     pub nr_internal: u64,
     pub nr_leaves: u64,
     pub nr_entries: u64,
+    pub nr_mapped_blocks: u64,
 }
 
 fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRange>> {
@@ -181,6 +191,8 @@ pub fn rtree_check(
             for m in entries {
                 //debug!("  entry {:?}", m);
                 ensure!(m.thin_begin >= lowest_key);
+                ensure!(m.len > 0);
+                stats.nr_mapped_blocks += m.len as u64;
                 lowest_key = m.thin_begin + m.len as u64;
             }
             ensure!(lowest_key <= parent_key.end.unwrap_or(u64::MAX));
@@ -217,20 +229,23 @@ fn rtree_walk(engine: &dyn IoEngine, root: u64, visitor: &mut dyn NodeVisitor) -
 
 struct MappingCollector {
     entries: Vec<Mapping>,
+    nr_entries: Vec<u32>,
 }
 
 impl MappingCollector {
     fn new() -> Self {
         Self {
             entries: Vec::default(),
+            nr_entries: Vec::default(),
         }
     }
 }
 
 impl NodeVisitor for MappingCollector {
-    fn visit(&mut self, _header: Header, entries: Vec<Mapping>) -> Result<()> {
+    fn visit(&mut self, header: Header, entries: Vec<Mapping>) -> Result<()> {
         let mut other = entries;
         self.entries.append(&mut other);
+        self.nr_entries.push(header.nr_entries);
         Ok(())
     }
 }
@@ -631,10 +646,11 @@ fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
 
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
-    let mappings: Vec<Mapping> = (0..170)
+    // Create a tree with two or more leaves
+    let mappings: Vec<Mapping> = (0..MAX_LEAF_ENTRIES + 1)
         .map(|i| Mapping {
-            thin_begin: i * 2,
-            data_begin: i * 2,
+            thin_begin: i as u64 * 2,
+            data_begin: i as u64 * 2,
             len: 1,
             time: 0,
         })
@@ -644,11 +660,15 @@ fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
         let _nr_inserted = rtree.insert(v)?;
     }
 
+    let mut visitor = MappingCollector::new();
+    rtree.walk(&mut visitor)?;
+    let last = visitor.entries[visitor.nr_entries[0] as usize - 1].clone();
+
     // Insert a mapping that falls between two leaves,
     // and is adjacented to the last entry of the left one.
     let v = Mapping {
-        thin_begin: 167,
-        data_begin: 167,
+        thin_begin: last.thin_begin + 1,
+        data_begin: last.data_begin + 1,
         len: 1,
         time: 0,
     };
@@ -656,9 +676,14 @@ fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
 
     rtree.check()?;
 
+    // Ensure the last entry of the first leaf, rather than the first entry of the sibling,
+    // is expanded
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries.len() == 170);
+    let last_modified = visitor.entries[visitor.nr_entries[0] as usize - 1].clone();
+    ensure!(last_modified.thin_begin == last.thin_begin);
+    ensure!(last_modified.data_begin == last.data_begin);
+    ensure!(last_modified.len == 2);
 
     Ok(())
 }
@@ -698,17 +723,24 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
         let _nr_inserted = rtree.insert(m)?;
     }
 
-    // These mappings should have all been merged into a single
-    // large mapping.
-    let result = rtree.lookup(0)?;
-    let expected = Mapping {
-        thin_begin: 0,
-        data_begin: 1234,
-        len: COUNT as u32,
-        time: 0,
-    };
-    debug!("result = {:?}, expected = {:?}", result, expected);
-    ensure!(result == Some(expected));
+    // These mappings should have all been merged into several
+    // large mappings.
+    for i in (0..COUNT).step_by(MAPPINGS_MAX_LEN) {
+        let result = rtree.lookup(i)?;
+        let len = if i as u64 <= COUNT - MAPPINGS_MAX_LEN as u64 {
+            MAPPINGS_MAX_LEN as u64
+        } else {
+            COUNT - i as u64
+        };
+        let expected = Mapping {
+            thin_begin: i,
+            data_begin: i + 1234,
+            len: len as u32,
+            time: 0,
+        };
+        debug!("result = {:?}, expected = {:?}", result, expected);
+        ensure!(result == Some(expected));
+    }
 
     rtree.del()?;
     Ok(())
@@ -723,7 +755,7 @@ fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
     let mut mappings: Vec<Mapping> = (0..COUNT)
         .map(|i| Mapping {
             thin_begin: i,
-            data_begin: i + 1,
+            data_begin: i + 1234,
             len: 1,
             time: 0,
         })
@@ -734,15 +766,25 @@ fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
         let _nr_inserted = rtree.insert(v)?;
     }
 
-    let result = rtree.lookup(0)?;
-    let expected = Mapping {
-        thin_begin: 0,
-        data_begin: 1,
-        len: COUNT as u32,
-        time: 0,
-    };
-    debug!("result = {:?}, expected = {:?}", result, expected);
-    ensure!(result == Some(expected));
+    // These mappings should have all been merged into several
+    // large mappings.
+    for i in (0..COUNT).rev().step_by(MAPPINGS_MAX_LEN) {
+        let result = rtree.lookup(i)?;
+        let len = if i < MAPPINGS_MAX_LEN as u64 {
+            i as u64 + 1
+        } else {
+            MAPPINGS_MAX_LEN as u64
+        };
+        let thin_begin = i - (len - 1);
+        let expected = Mapping {
+            thin_begin,
+            data_begin: thin_begin + 1234,
+            len: len as u32,
+            time: 0,
+        };
+        debug!("{} result = {:?}, expected = {:?}", i, result, expected);
+        ensure!(result == Some(expected));
+    }
 
     rtree.del()?;
     Ok(())
@@ -984,18 +1026,13 @@ fn test_insert_with_merges(fix: &mut Fixture) -> Result<()> {
         rtree.insert(&gap)?;
     }
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries.len() == 1);
-    ensure!(
-        visitor.entries[0]
-            == Mapping {
-                thin_begin: 0,
-                data_begin: 0,
-                len: KEY_COUNT as u32,
-                time: 0,
-            }
-    );
+    let tree_stats = rtree.check()?;
+    ensure!(tree_stats.nr_entries >= thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
+    ensure!(tree_stats.nr_mapped_blocks == KEY_COUNT as u64);
+
+    // This test is optional. We might end up with more than twice number of entries
+    // due to the entries across the leaf boundaries won't be merged.
+    ensure!(tree_stats.nr_entries <= 2 * thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
 
     Ok(())
 }
@@ -1512,12 +1549,12 @@ fn test_split_middle_entry(fix: &mut Fixture) -> Result<()> {
 fn test_remove_leading_leaves(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 495; // 163+163+169 entries
+    let count: u64 = (calc_max_sib_entries(MAX_LEAF_ENTRIES) * 2 + MAX_LEAF_ENTRIES) as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 3;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1540,31 +1577,31 @@ fn test_remove_leading_leaves(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 3);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count as u64);
 
-    const REMOVE_END: usize = 200;
+    let remove_end: usize = MAX_LEAF_ENTRIES + 100;
 
     ensure!(rtree
-        .remove(mappings[0].thin_begin, mappings[REMOVE_END].thin_begin + 1)
+        .remove(mappings[0].thin_begin, mappings[remove_end].thin_begin + 1)
         .is_ok());
 
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 2);
-    ensure!(stats.nr_entries == (COUNT - REMOVE_END as u64));
+    ensure!(stats.nr_entries == (count - remove_end as u64));
 
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
     ensure!(
         visitor.entries[0]
             == Mapping {
-                thin_begin: mappings[REMOVE_END].thin_begin + 1,
-                data_begin: mappings[REMOVE_END].data_begin + 1,
-                len: mappings[REMOVE_END].len - 1,
+                thin_begin: mappings[remove_end].thin_begin + 1,
+                data_begin: mappings[remove_end].data_begin + 1,
+                len: mappings[remove_end].len - 1,
                 time: 0,
             }
     );
-    ensure!(visitor.entries[1..] == mappings[(REMOVE_END + 1)..]);
+    ensure!(visitor.entries[1..] == mappings[(remove_end + 1)..]);
 
     Ok(())
 }
@@ -1572,12 +1609,12 @@ fn test_remove_leading_leaves(fix: &mut Fixture) -> Result<()> {
 fn test_remove_trailing_leaves(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 495; // 163+163+169 entries
+    let count: u64 = (calc_max_sib_entries(MAX_LEAF_ENTRIES) * 2 + MAX_LEAF_ENTRIES) as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 3;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1600,15 +1637,15 @@ fn test_remove_trailing_leaves(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 3);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count as u64);
 
-    const REMOVE_BEGIN: usize = 200;
+    let remove_begin: usize = MAX_LEAF_ENTRIES + 100;
 
     // remove and trim trailing entries
     let last = mappings.last().unwrap();
     ensure!(rtree
         .remove(
-            mappings[REMOVE_BEGIN].thin_begin + 1,
+            mappings[remove_begin].thin_begin + 1,
             last.thin_begin + last.len as u64
         )
         .is_ok());
@@ -1616,16 +1653,16 @@ fn test_remove_trailing_leaves(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 2);
-    ensure!(stats.nr_entries == REMOVE_BEGIN as u64 + 1);
+    ensure!(stats.nr_entries == remove_begin as u64 + 1);
 
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..REMOVE_BEGIN] == mappings[..REMOVE_BEGIN]);
+    ensure!(visitor.entries[..remove_begin] == mappings[..remove_begin]);
     ensure!(
-        visitor.entries[REMOVE_BEGIN]
+        visitor.entries[remove_begin]
             == Mapping {
-                thin_begin: mappings[REMOVE_BEGIN].thin_begin,
-                data_begin: mappings[REMOVE_BEGIN].data_begin,
+                thin_begin: mappings[remove_begin].thin_begin,
+                data_begin: mappings[remove_begin].data_begin,
                 len: 1,
                 time: 0,
             }
@@ -1637,12 +1674,12 @@ fn test_remove_trailing_leaves(fix: &mut Fixture) -> Result<()> {
 fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 495; // 163+163+169 entries
+    let count: u64 = (calc_max_sib_entries(MAX_LEAF_ENTRIES) * 2 + MAX_LEAF_ENTRIES) as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 3;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1665,43 +1702,43 @@ fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 3);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count as u64);
 
-    const REMOVE_BEGIN: usize = 100;
-    const REMOVE_END: usize = 350;
-    const NR_REMOVED: usize = REMOVE_END - REMOVE_BEGIN - 1; // assume END > BEGIN
+    let remove_begin: usize = calc_max_sib_entries(MAX_LEAF_ENTRIES) - 100;
+    let remove_end: usize = calc_max_sib_entries(MAX_LEAF_ENTRIES) * 2 + 100;
+    let nr_removed: usize = remove_end - remove_begin - 1; // assume END > BEGIN
 
     ensure!(rtree
         .remove(
-            mappings[REMOVE_BEGIN].thin_begin + 1,
-            mappings[REMOVE_END].thin_begin + 1
+            mappings[remove_begin].thin_begin + 1,
+            mappings[remove_end].thin_begin + 1
         )
         .is_ok());
 
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 2);
-    ensure!(stats.nr_entries == (COUNT - NR_REMOVED as u64));
+    ensure!(stats.nr_entries == (count - nr_removed as u64));
 
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..REMOVE_BEGIN] == mappings[..REMOVE_BEGIN]);
-    ensure!(visitor.entries[(REMOVE_BEGIN + 2)..] == mappings[(REMOVE_END + 1)..]);
+    ensure!(visitor.entries[..remove_begin] == mappings[..remove_begin]);
+    ensure!(visitor.entries[(remove_begin + 2)..] == mappings[(remove_end + 1)..]);
     ensure!(
-        visitor.entries[REMOVE_BEGIN]
+        visitor.entries[remove_begin]
             == Mapping {
-                thin_begin: mappings[REMOVE_BEGIN].thin_begin,
-                data_begin: mappings[REMOVE_BEGIN].data_begin,
+                thin_begin: mappings[remove_begin].thin_begin,
+                data_begin: mappings[remove_begin].data_begin,
                 len: 1,
                 time: 0,
             }
     );
     ensure!(
-        visitor.entries[REMOVE_BEGIN + 1]
+        visitor.entries[remove_begin + 1]
             == Mapping {
-                thin_begin: mappings[REMOVE_END].thin_begin + 1,
-                data_begin: mappings[REMOVE_END].data_begin + 1,
-                len: mappings[REMOVE_END].len - 1,
+                thin_begin: mappings[remove_end].thin_begin + 1,
+                data_begin: mappings[remove_end].data_begin + 1,
+                len: mappings[remove_end].len - 1,
                 time: 0,
             }
     );
@@ -1712,12 +1749,12 @@ fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
 fn test_remove_all_leaves(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 495; // 163+163+169 entries
+    let count: u64 = (calc_max_sib_entries(MAX_LEAF_ENTRIES) * 2 + MAX_LEAF_ENTRIES) as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 3;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1740,7 +1777,7 @@ fn test_remove_all_leaves(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 3);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count as u64);
 
     let last = mappings.last().unwrap();
     ensure!(rtree
@@ -1759,12 +1796,12 @@ fn test_remove_all_leaves(fix: &mut Fixture) -> Result<()> {
 fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 169;
+    let count: u64 = MAX_LEAF_ENTRIES as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 3;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1787,7 +1824,7 @@ fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 0);
     ensure!(stats.nr_leaves == 1);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count as u64);
 
     // split an entry into two, causing splitting of the leaf
     ensure!(rtree
@@ -1797,7 +1834,7 @@ fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 2);
-    ensure!(stats.nr_entries == COUNT as u64 + 1);
+    ensure!(stats.nr_entries == count as u64 + 1);
 
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
@@ -1829,12 +1866,12 @@ fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
 fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 332; // 163+169 entries
+    let count: u64 = (calc_max_sib_entries(MAX_LEAF_ENTRIES) + MAX_LEAF_ENTRIES) as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 3;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1857,7 +1894,7 @@ fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 2);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count as u64);
 
     const RANGES_BEGIN: usize = 100;
     const RANGES_END: usize = 110;
@@ -1873,7 +1910,7 @@ fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 3);
-    ensure!(stats.nr_entries == COUNT as u64 + NR_INSERTED as u64);
+    ensure!(stats.nr_entries == count + NR_INSERTED as u64);
 
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
@@ -1910,12 +1947,12 @@ fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
 fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const COUNT: u64 = 332; // 163+169 entries
+    let count: u64 = (calc_max_sib_entries(MAX_LEAF_ENTRIES) + MAX_LEAF_ENTRIES) as u64;
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     let mut begin: u64 = 0;
     let mut len: u32 = 2;
-    let mappings: Vec<Mapping> = (0..COUNT)
+    let mappings: Vec<Mapping> = (0..count)
         .map(|_| {
             let thin_begin = begin;
             let map_len = len;
@@ -1938,7 +1975,7 @@ fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 2);
-    ensure!(stats.nr_entries == COUNT as u64);
+    ensure!(stats.nr_entries == count);
 
     const RANGES_BEGIN: usize = 200;
     const RANGES_END: usize = 210;
@@ -1954,7 +1991,7 @@ fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
     let stats = rtree.check()?;
     ensure!(stats.nr_internal == 1);
     ensure!(stats.nr_leaves == 3);
-    ensure!(stats.nr_entries == COUNT as u64 + NR_INSERTED as u64);
+    ensure!(stats.nr_entries == count + NR_INSERTED as u64);
 
     let mut visitor = MappingCollector::new();
     rtree.walk(&mut visitor)?;
@@ -2288,6 +2325,7 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
             rtree.insert(&m2)?;
         }
 
+        // the gaps have different time
         let gap = Mapping {
             thin_begin: m.thin_begin + m.len as u64 - 1,
             data_begin: m.data_begin + m.len as u64 - 1,
@@ -2310,18 +2348,13 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
         rtree.insert(&gap)?;
     }
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries.len() == 1);
-    ensure!(
-        visitor.entries[0]
-            == Mapping {
-                thin_begin: 0,
-                data_begin: 0,
-                len: KEY_COUNT as u32,
-                time: 1,
-            }
-    );
+    let tree_stats = rtree.check()?;
+    ensure!(tree_stats.nr_entries >= thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
+    ensure!(tree_stats.nr_mapped_blocks == KEY_COUNT as u64);
+
+    // This test is optional. We might end up with more than twice number of entries
+    // due to the entries across the leaf boundaries won't be merged.
+    ensure!(tree_stats.nr_entries <= 2 * thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
 
     Ok(())
 }
@@ -2330,34 +2363,17 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
 fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const KEY_COUNT: usize = 200000;
+    const KEY_COUNT: u64 = 200000;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
 
     let mut endpoints = BTreeSet::new();
     for _ in 0..(KEY_COUNT / 20) {
         endpoints.insert(rng.gen_range(0..KEY_COUNT));
     }
-    endpoints.insert(KEY_COUNT);
-
-    let mut ranges = Vec::new();
-    let mut last = 0;
-    for e in endpoints {
-        if e != last {
-            ranges.push(last..e);
-        }
-        last = e;
+    for i in (MAPPINGS_MAX_LEN as u64..KEY_COUNT).step_by(MAPPINGS_MAX_LEN) {
+        endpoints.insert(i);
     }
-
-    let mut mappings = Vec::new();
-    for r in ranges {
-        let len = r.end - r.start;
-        mappings.push(Mapping {
-            thin_begin: r.start as u64,
-            data_begin: r.start as u64,
-            len: len as u32,
-            time: 0,
-        });
-    }
+    let mut endpoints: Vec<u64> = endpoints.into_iter().collect();
 
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
@@ -2370,12 +2386,12 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
     })?;
     rtree.check()?;
 
-    // overwrite incompatible mappings to split the range
-    mappings.shuffle(&mut rng);
-    for (i, m) in mappings.iter().enumerate() {
+    // overwrite incompatible mappings to split the entries
+    endpoints.shuffle(&mut rng);
+    for (i, e) in endpoints.iter().enumerate() {
         let gap = Mapping {
-            thin_begin: m.thin_begin + m.len as u64 - 1,
-            data_begin: KEY_COUNT as u64 + i as u64,
+            thin_begin: *e,
+            data_begin: KEY_COUNT + i as u64,
             len: 1,
             time: 0,
         };
@@ -2383,27 +2399,42 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
     }
     rtree.check()?;
 
-    for m in &mappings {
-        if m.len == 1 {
-            // TODO: validate the gaps
+    // check the gaps
+    for (i, e) in endpoints.iter().enumerate() {
+        let result = rtree.lookup(*e)?;
+        let gap = Mapping {
+            thin_begin: *e,
+            data_begin: KEY_COUNT + i as u64,
+            len: 1,
+            time: 0,
+        };
+        ensure!(result == Some(gap));
+    }
+
+    // check the splitted entries
+    endpoints.sort();
+    let mut last = 0u64;
+    for e in endpoints {
+        if e == last {
+            last = e + 1;
             continue;
         }
 
-        let result = rtree.lookup(m.thin_begin)?;
-        let mut expected = m.clone();
-        expected.len -= 1;
+        let result = rtree.lookup(last)?;
+        let expected = Mapping {
+            thin_begin: last,
+            data_begin: last,
+            len: (e - last) as u32,
+            time: 0,
+        };
+        ensure!(result == Some(expected));
 
-        if result != Some(expected.clone()) {
-            debug!(
-                "lookup failed, expected {:?}, actual {:?}",
-                expected, result
-            );
-            ensure!(result == Some(expected));
-        }
+        last = e + 1;
     }
 
     Ok(())
 }
+
 //-------------------------------
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
