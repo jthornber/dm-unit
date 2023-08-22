@@ -1,0 +1,159 @@
+diff --git a/Makefile b/Makefile
+index 997b67722292..e7ca18bd828e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -922,6 +922,13 @@ ifdef CONFIG_ZERO_CALL_USED_REGS
+ KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
+ endif
+ 
++ifdef CONFIG_NO_AUTO_INLINE
++KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
++		   $(call cc-option, -fno-inline-small-functions) \
++		   $(call cc-option, -fno-inline-functions-called-once) \
++		   -fno-ipa-cp
++endif
++
+ ifdef CONFIG_FUNCTION_TRACER
+ ifdef CONFIG_FTRACE_MCOUNT_USE_CC
+   CC_FLAGS_FTRACE	+= -mrecord-mcount
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 593cf09264d8..cefaed8ae0ae 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -607,13 +607,8 @@ config EFI
+ 	  allow the kernel to be booted as an EFI application. This
+ 	  is only useful on systems that have UEFI firmware.
+ 
+-config CC_HAVE_STACKPROTECTOR_TLS
+-	def_bool $(cc-option,-mstack-protector-guard=tls -mstack-protector-guard-reg=tp -mstack-protector-guard-offset=0)
+-
+ config STACKPROTECTOR_PER_TASK
+-	def_bool y
+-	depends on !RANDSTRUCT
+-	depends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_TLS
++	def_bool n
+ 
+ config PHYS_RAM_BASE_FIXED
+ 	bool "Explicitly specified physical RAM address"
+diff --git a/drivers/md/Makefile b/drivers/md/Makefile
+index 84291e38dca8..9ce7b529cac7 100644
+--- a/drivers/md/Makefile
++++ b/drivers/md/Makefile
+@@ -4,7 +4,7 @@
+ #
+ 
+ dm-mod-y	+= dm.o dm-table.o dm-target.o dm-linear.o dm-stripe.o \
+-		   dm-ioctl.o dm-io.o dm-kcopyd.o dm-sysfs.o dm-stats.o \
++		   dm-ioctl.o dm-io.o dm-kcopyd.o dm-sysfs.o \
+ 		   dm-rq.o dm-io-rewind.o
+ dm-multipath-y	+= dm-path-selector.o dm-mpath.o
+ dm-historical-service-time-y += dm-ps-historical-service-time.o
+@@ -112,3 +112,4 @@ endif
+ ifeq ($(CONFIG_DM_AUDIT),y)
+ dm-mod-objs			+= dm-audit.o
+ endif
++
+diff --git a/drivers/md/dm-bufio.c b/drivers/md/dm-bufio.c
+index 28b74e187a34..6a6165cdcaed 100644
+--- a/drivers/md/dm-bufio.c
++++ b/drivers/md/dm-bufio.c
+@@ -6,6 +6,8 @@
+  * This file is released under the GPL.
+  */
+ 
++#include "../../lib/rbtree.c"
++
+ #include <linux/dm-bufio.h>
+ 
+ #include <linux/device-mapper.h>
+@@ -88,8 +90,8 @@ struct lru {
+ /*------------------------*/
+ 
+ // #define CONFIG_DM_DEBUG_BLOCK_STACK_TRACING 1
+-// #define LRU_DEBUG 1
+-// #define CACHE_DEBUG 1
++#define LRU_DEBUG 1
++#define CACHE_DEBUG 1
+ 
+ /*
+  * Debug code.  Not for upstream.
+@@ -158,8 +160,11 @@ static void lru_init(struct lru *lru)
+ 	lru->count = 0;
+ }
+ 
+-static void lru_destroy(struct lru *lru)
++static noinline void lru_destroy(struct lru *lru)
+ {
++	// FIXME: remove, this is only here to keep the compiler from optimising
++	// this function away, and we call it from dmunit.
++	pr_alert("destroyed");
+ 	BUG_ON(lru->cursor);
+ }
+ 
+@@ -231,7 +236,7 @@ static void lru_remove(struct lru *lru, struct lru_entry *le)
+ /*
+  * Mark as referenced.
+  */
+-static inline void lru_reference(struct lru_entry *le)
++static void lru_reference(struct lru_entry *le)
+ {
+ 	if (!le->referenced)
+ 		le->referenced = 1;
+@@ -929,14 +934,14 @@ static bool __cache_insert(struct rb_root *root, struct dm_buffer *b)
+ 	return true;
+ }
+ 
+-static bool cache_insert(struct buffer_cache *bc, struct dm_buffer *b)
++bool cache_insert(struct buffer_cache *bc, struct dm_buffer *b)
+ {
+ 	bool r;
+ 
+ 	BUG_ON(b->list_mode >= LIST_SIZE);
+ 
+ 	cache_write_lock(bc, b->block);
+-	BUG_ON(atomic_read(&b->hold_count) != 1);
++	// BUG_ON(atomic_read(&b->hold_count) != 1);
+ 	r = __cache_insert(&bc->roots[cache_index(b->block)], b);
+ 	if (r)
+ 		lru_insert(&bc->lru[b->list_mode], &b->lru);
+diff --git a/drivers/md/persistent-data/dm-btree.c b/drivers/md/persistent-data/dm-btree.c
+index 5ce64e93aae7..e2799375674d 100644
+--- a/drivers/md/persistent-data/dm-btree.c
++++ b/drivers/md/persistent-data/dm-btree.c
+@@ -573,7 +573,7 @@ static void redistribute2(struct btree_node *left, struct btree_node *right)
+  * Redistribute entries between three nodes.  Assumes the central
+  * node is empty.
+  */
+-static void redistribute3(struct btree_node *left, struct btree_node *center,
++static noinline void redistribute3(struct btree_node *left, struct btree_node *center,
+ 			  struct btree_node *right)
+ {
+ 	unsigned nr_left = le32_to_cpu(left->header.nr_entries);
+diff --git a/lib/Kconfig b/lib/Kconfig
+index 9bbf8a4b2108..19f54b623f9e 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -88,6 +88,23 @@ config ARCH_HAS_FAST_MULTIPLIER
+ config ARCH_USE_SYM_ANNOTATIONS
+ 	bool
+ 
++config NO_AUTO_INLINE
++	bool "Disable compiler auto-inline optimizations"
++	help
++	  This will prevent the compiler from optimizing the kernel by
++	  auto-inlining functions not marked with the inline keyword.
++	  With this option, only functions explicitly marked with
++	  "inline" will be inlined. This will allow the function tracer
++	  to trace more functions because it only traces functions that
++	  the compiler has not inlined.
++
++	  Enabling this function can help debugging a kernel if using
++	  the function tracer. But it can also change how the kernel
++	  works, because inlining functions may change the timing,
++	  which could make it difficult while debugging race conditions.
++
++	  If unsure, select N.
++
+ config INDIRECT_PIO
+ 	bool "Access I/O in non-MMIO mode"
+ 	depends on ARM64

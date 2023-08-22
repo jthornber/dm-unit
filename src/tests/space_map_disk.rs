@@ -93,23 +93,33 @@ fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
 
 pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
     let kmodules = vec![PDATA_MOD];
+    let mut prefix: Vec<&'static str> = Vec::new();
 
-    runner.register(
-        "/pdata/space-map/disk/boundary-size",
-        Test::new(kmodules.clone(), Box::new(test_boundary_size_)),
-    );
-    runner.register(
-        "/pdata/space-map/disk/commit-cost",
-        Test::new(kmodules.clone(), Box::new(test_commit_cost_)),
-    );
-    runner.register(
-        "/pdata/space-map/disk/inc-cost",
-        Test::new(kmodules.clone(), Box::new(test_inc_cost_)),
-    );
-    runner.register(
-        "/pdata/space-map/disk/wrapping-around",
-        Test::new(kmodules, Box::new(test_wrapping_around_)),
-    );
+    macro_rules! test_section {
+        ($path:expr, $($s:stmt)*) => {{
+            prefix.push($path);
+            $($s)*
+            prefix.pop().unwrap();
+        }}
+    }
+
+    macro_rules! test {
+        ($path:expr, $func:expr) => {{
+            prefix.push($path);
+            let p = prefix.concat();
+            prefix.pop().unwrap();
+            runner.register(&p, Test::new(kmodules.clone(), Box::new($func)));
+        }};
+    }
+
+    test_section! {
+        "/pdata/space-map/disk/",
+        test!("boundary-size", test_boundary_size_)
+        test!("commit-cost", test_commit_cost_)
+        test!("inc-cost", test_inc_cost_)
+        test!("wrapping-around", test_wrapping_around_)
+    };
+
     Ok(())
 }
 

@@ -2,7 +2,6 @@
 #![feature(trait_alias)]
 
 extern crate clap;
-extern crate elf;
 extern crate log;
 extern crate nom;
 extern crate regex;

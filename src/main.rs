@@ -5,24 +5,28 @@ use dm_unit::bench;
 use dm_unit::test_runner::*;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
+use dm_unit::tests::bufio;
 use dm_unit::tests::cache;
+use dm_unit::tests::extent_allocator;
 use dm_unit::tests::rtree;
 use dm_unit::tests::space_map_disk;
 use dm_unit::tests::space_map_metadata;
 use dm_unit::tests::thinp;
 
 use anyhow::Result;
-use clap::{App, Arg};
+use clap::{arg, value_parser, Arg, ArgAction, Command};
 use regex::Regex;
 use std::path::Path;
 
 //-------------------------------
 
 fn register_tests(runner: &mut TestRunner) -> Result<()> {
+    bufio::register_tests(runner)?;
     block_manager::register_tests(runner)?;
     btree::register_tests(runner)?;
     cache::register_tests(runner)?;
     rtree::register_tests(runner)?;
+    extent_allocator::register_tests(runner)?;
     space_map_disk::register_tests(runner)?;
     space_map_metadata::register_tests(runner)?;
     thinp::register_tests(runner)?;
@@ -40,60 +44,58 @@ fn register_bench(runner: &mut TestRunner) -> Result<()> {
 fn main() -> Result<()> {
     env_logger::init();
 
-    let parser = App::new("dm-unit")
+    let parser = Command::new("dm-unit")
         .version("0")
         .about("Unit test framework for device mapper kernel modules")
         .arg(
-            Arg::with_name("KERNEL_DIR")
-                .short("k")
-                .long("kernel-dir")
+            arg!(-k --"kernel-dir" <KERNEL_DIR>)
                 .help("Location of kernel source that contains built kernel modules to be tested.")
-                .required(true)
-                .value_name("KERNEL_DIR"),
+                .required(true),
         )
         .arg(
-            Arg::with_name("JOBS")
-                .short("j")
+            arg!(-j <JOBS>)
+                .value_parser(value_parser!(usize))
                 .help("Number of tests to run concurrently.")
-                .required(false)
-                .value_name("JOBS"),
+                .required(false),
         )
+        .arg(arg!(-t <FILTER>).help("regex filter to select which tests to run"))
         .arg(
-            Arg::with_name("FILTER")
-                .short("t")
-                .help("regex filter to select which tests to run")
-                .value_name("FILTER"),
-        )
-        .arg(
-            Arg::with_name("JIT")
+            Arg::new("JIT")
                 .long("jit")
+                .action(ArgAction::SetTrue)
                 .help("Turn on the experimental jit compiler"),
         )
-        .arg(Arg::with_name("BENCH").long("bench").help("Run benchmarks"));
+        .arg(
+            Arg::new("BENCH")
+                .long("bench")
+                .action(ArgAction::SetTrue)
+                .help("Run benchmarks"),
+        );
 
     let matches = parser.get_matches();
-    let kernel_dir = Path::new(matches.value_of("KERNEL_DIR").unwrap());
+    let kernel_dir = Path::new(matches.get_one::<String>("kernel-dir").unwrap());
 
     let mut runner = TestRunner::new(kernel_dir)?;
 
-    if let Some(pattern) = matches.value_of("FILTER") {
-        let rx = Regex::new(pattern)?;
-        runner.set_filter(rx);
+    let empty_pattern = "".to_string();
+    let pattern = matches
+        .get_one::<String>("FILTER")
+        .unwrap_or(&empty_pattern);
+    let rx = Regex::new(pattern)?;
+    runner.set_filter(rx);
+    let rx = Regex::new(pattern)?;
+    runner.set_filter(rx);
+
+    if let Some(jobs) = matches.get_one::<usize>("JOBS") {
+        runner.set_jobs(*jobs);
     }
 
-    if let Some(job_str) = matches.value_of("JOBS") {
-        let jobs = job_str
-            .to_string()
-            .parse::<usize>()
-            .expect("couldn't parse jobs");
-        runner.set_jobs(jobs);
-    }
-
-    if matches.is_present("JIT") {
+    // See if the jit flag is present
+    if *matches.get_one::<bool>("JIT").unwrap_or(&false) {
         runner.set_jit();
     }
 
-    if matches.is_present("BENCH") {
+    if *matches.get_one::<bool>("BENCH").unwrap_or(&false) {
         register_bench(&mut runner)?;
     } else {
         register_tests(&mut runner)?;

@@ -1,5 +1,5 @@
 use crate::emulator::memory::*;
-use crate::emulator::riscv;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
@@ -173,7 +173,7 @@ impl BMInner {
     }
 
     fn v_prep(&mut self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
-        use riscv::Reg::*;
+        use Reg::*;
 
         if v_ptr.is_null() {
             return Ok(());
@@ -605,7 +605,7 @@ impl BMInner {
             file.seek(io::SeekFrom::Start(b * BLOCK_SIZE as u64))?;
             match self.locks.get(&b) {
                 Some(Lock::Clean { data, .. }) => {
-                    file.write_all(data)?;
+                    file.write_all(&data)?;
                 }
                 Some(_) => {
                     return Err(anyhow!(
@@ -698,7 +698,7 @@ impl BMInner {
                 "block has not been flushed".to_string(),
             )),
             Some(Lock::Clean { data, .. }) => {
-                data.copy_from_slice(block.get_data());
+                data.copy_from_slice(&block.get_data());
                 Ok(())
             }
             None => {
@@ -820,10 +820,6 @@ impl BlockManager {
 }
 
 impl IoEngine for BlockManager {
-    fn suggest_nr_threads(&self) -> usize {
-        1
-    }
-
     fn get_nr_blocks(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
         inner.nr_blocks
@@ -831,6 +827,10 @@ impl IoEngine for BlockManager {
 
     fn get_batch_size(&self) -> usize {
         1024
+    }
+
+    fn suggest_nr_threads(&self) -> usize {
+        1
     }
 
     fn read(&self, b: u64) -> io::Result<io_engine::Block> {

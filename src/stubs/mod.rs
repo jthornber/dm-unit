@@ -84,12 +84,9 @@ pub fn memset(fix: &mut Fixture) -> Result<()> {
     let base = Addr(fix.vm.reg(A0));
     let v = fix.vm.reg(A1) as u8;
     let len = fix.vm.reg(A2) as usize;
-    let mut bytes = vec![0u8; len];
-    for b in &mut bytes {
-        *b = v;
-    }
+    let bytes = vec![v; len];
     fix.vm.mem.write(base, &bytes, PERM_WRITE)?;
-    fix.vm.ret(0);
+    fix.vm.ret(base.0);
     Ok(())
 }
 
@@ -140,6 +137,8 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.stub("mutex_lock", 0);
     let _ = fix.stub("mutex_unlock", 0);
     let _ = fix.stub("___ratelimit", 0);
+    let _ = fix.stub("__might_resched", 0);
+    let _ = fix.stub("__cond_resched", 0);
 
     let _ = fix.at_func("dm_block_data", Box::new(bm_block_data));
     let _ = fix.at_func("dm_block_location", Box::new(bm_block_location));
@@ -164,13 +163,23 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.at_func("__kmalloc", Box::new(kmalloc));
     let _ = fix.at_func("kmalloc_large", Box::new(kmalloc));
     let _ = fix.at_func("kmalloc_order", Box::new(kmalloc));
+    let _ = fix.at_func("kmalloc_large", Box::new(kmalloc));
     let _ = fix.at_func("memcpy", Box::new(memcpy));
     let _ = fix.at_func("memmove", Box::new(memcpy));
     let _ = fix.at_func("memcmp", Box::new(memcmp));
     let _ = fix.at_func("memset", Box::new(memset));
     let _ = fix.at_func("printk", Box::new(printk));
+    let _ = fix.at_func("_printk", Box::new(printk));
     let _ = fix.at_func("strncpy", Box::new(strncpy));
 
     rw_semaphore::rw_sem_stubs(fix)?;
+    Ok(())
+}
+
+pub fn disable_kmalloc(fix: &mut Fixture) -> Result<()> {
+    let _ = fix.stub("__kmalloc", 0);
+    let _ = fix.stub("kmalloc_order", 0);
+    let _ = fix.stub("kmalloc_large", 0);
+
     Ok(())
 }

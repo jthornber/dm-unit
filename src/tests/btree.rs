@@ -264,7 +264,7 @@ impl Unpack for Value64 {
         8
     }
 
-    fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
+    fn unpack(data: &[u8]) -> nom::IResult<&[u8], Self> {
         let (i, v) = le_u64(data)?;
         Ok((i, Value64(v)))
     }

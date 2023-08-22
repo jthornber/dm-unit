@@ -216,12 +216,12 @@ pub fn dm_thin_find_mapped_range(
     })
 }
 
-pub fn dm_pool_alloc_data_block(fix: &mut Fixture, pmd: Addr) -> Result<u64> {
+pub fn dm_thin_alloc_data_block(fix: &mut Fixture, td: Addr) -> Result<u64> {
     let (mut fix, result_ptr) = auto_guest::<u64>(fix, &0, PERM_READ | PERM_WRITE)?;
 
-    fix.vm.set_reg(A0, pmd.0);
+    fix.vm.set_reg(A0, td.0);
     fix.vm.set_reg(A1, result_ptr.0);
-    fix.call_with_errno("dm_pool_alloc_data_block")?;
+    fix.call_with_errno("dm_thin_alloc_data_block")?;
     read_guest::<u64>(&fix.vm.mem, result_ptr)
 }
 
