@@ -103,7 +103,7 @@ impl ThinPool {
         })
     }
 
-    fn stats_start(&mut self, fix: &mut Fixture) {
+    fn stats_start(&mut self, fix: &Fixture) {
         let bm = get_bm(fix, self.bm_ptr);
         self.baseline = Stats::collect_stats(fix, &bm);
     }

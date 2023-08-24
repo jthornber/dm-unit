@@ -647,7 +647,7 @@ fn mk_node(fix: &mut Fixture, key_begin: u64, nr_entries: usize) -> Result<(Auto
     Ok((fix, block))
 }
 
-fn get_node<V: Unpack>(fix: &mut Fixture, block: Addr, ignore_non_fatal: bool) -> Result<Node<V>> {
+fn get_node<V: Unpack>(fix: &Fixture, block: Addr, ignore_non_fatal: bool) -> Result<Node<V>> {
     let node = fix.vm.mem.read_some(block, PERM_READ, |bytes| {
         unpack_node(&[0], bytes, ignore_non_fatal, false)
     })??;
@@ -795,8 +795,8 @@ fn test_redistribute_2(fix: &mut Fixture, nr_left: usize, nr_right: usize) -> Re
     let (mut fix, right_ptr) = mk_node(&mut fix, nr_left as u64, nr_right)?;
     redistribute2(&mut fix, left_ptr, right_ptr)?;
 
-    let left = get_node::<Value64>(&mut fix, left_ptr, true)?;
-    let right = get_node::<Value64>(&mut fix, right_ptr, true)?;
+    let left = get_node::<Value64>(&fix, left_ptr, true)?;
+    let right = get_node::<Value64>(&fix, right_ptr, true)?;
     check_node(&left, 0u64, target_left)?;
     check_node(&right, target_left as u64, target_right)?;
 
@@ -843,9 +843,9 @@ fn test_redistribute_3(
     let (mut fix, right_ptr) = mk_node(&mut fix, (nr_left + nr_center) as u64, nr_right)?;
     redistribute3(&mut fix, left_ptr, center_ptr, right_ptr)?;
 
-    let left = get_node::<Value64>(&mut fix, left_ptr, true)?;
-    let center = get_node::<Value64>(&mut fix, center_ptr, true)?;
-    let right = get_node::<Value64>(&mut fix, right_ptr, true)?;
+    let left = get_node::<Value64>(&fix, left_ptr, true)?;
+    let center = get_node::<Value64>(&fix, center_ptr, true)?;
+    let right = get_node::<Value64>(&fix, right_ptr, true)?;
     check_node(&left, 0u64, target_left)?;
     check_node(&center, target_left as u64, target_center)?;
     check_node(&right, (target_left + target_center) as u64, target_right)?;

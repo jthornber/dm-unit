@@ -605,7 +605,7 @@ impl BMInner {
             file.seek(io::SeekFrom::Start(b * BLOCK_SIZE as u64))?;
             match self.locks.get(&b) {
                 Some(Lock::Clean { data, .. }) => {
-                    file.write_all(&data)?;
+                    file.write_all(data)?;
                 }
                 Some(_) => {
                     return Err(anyhow!(
@@ -698,7 +698,7 @@ impl BMInner {
                 "block has not been flushed".to_string(),
             )),
             Some(Lock::Clean { data, .. }) => {
-                data.copy_from_slice(&block.get_data());
+                data.copy_from_slice(block.get_data());
                 Ok(())
             }
             None => {

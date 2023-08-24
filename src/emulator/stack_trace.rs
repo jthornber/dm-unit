@@ -64,7 +64,7 @@ impl DebugInfo {
             Ok(format!(
                 "{}:{}",
                 strip_prefix(kernel_dir.as_ref(), loc.file.or(Some("-"))),
-                loc.line.or(Some(0)).unwrap(),
+                loc.line.unwrap_or(0),
             ))
         } else {
             Ok("no location info".to_string())

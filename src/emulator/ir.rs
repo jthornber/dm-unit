@@ -348,7 +348,7 @@ impl Builder {
 
     /// Returns the IR register that contains the guest reg
     fn ref_greg(&self, greg: &riscv::Reg) -> IReg {
-        self.guest_regs.get(greg).unwrap().clone()
+        *self.guest_regs.get(greg).unwrap()
     }
 
     /// Call this when you want to mutate the value of a guest register.
@@ -1189,7 +1189,7 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-fn simplify(rval: &RValue, defs: &mut BTreeMap<IReg, RValue>) -> RValue {
+fn simplify(rval: &RValue, defs: &BTreeMap<IReg, RValue>) -> RValue {
     match rval {
         Imm { op: Addi, rs, imm } => {
             let rval2 = defs.get(rs).unwrap();
@@ -1368,11 +1368,7 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     for r in &ranges {
         by_base.insert(
             r.base,
-            (
-                IReg(highest_reg, None),
-                IReg(highest_reg + 1, None),
-                r.clone(),
-            ),
+            (IReg(highest_reg, None), IReg(highest_reg + 1, None), *r),
         );
         highest_reg += 2;
     }

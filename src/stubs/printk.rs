@@ -434,9 +434,9 @@ fn do_printk(vm: &VM) -> Result<String> {
 // Trim trailing whitespace from a string.
 fn trim_trailing(s: &str) -> String {
     let mut result = String::new();
-    let mut chars = s.chars().rev();
+    let chars = s.chars().rev();
     let mut found_non_whitespace = false;
-    while let Some(c) = chars.next() {
+    for c in chars {
         if c.is_whitespace() && !found_non_whitespace {
             continue;
         }

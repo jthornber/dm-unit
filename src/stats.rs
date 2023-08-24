@@ -57,17 +57,17 @@ impl CostTracker {
         })
     }
 
-    pub fn begin(&mut self, fix: &mut Fixture, bm: &BlockManager) {
+    pub fn begin(&mut self, fix: &Fixture, bm: &BlockManager) {
         self.baseline = Stats::collect_stats(fix, bm);
     }
 
-    pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
+    pub fn end(&mut self, fix: &Fixture, bm: &BlockManager) -> Result<()> {
         self.end_in_iterations(fix, bm, 1)
     }
 
     pub fn end_in_iterations(
         &mut self,
-        fix: &mut Fixture,
+        fix: &Fixture,
         bm: &BlockManager,
         iters: u64,
     ) -> Result<()> {

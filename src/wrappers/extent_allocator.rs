@@ -88,7 +88,7 @@ fn alloc_callback(fix: &mut Fixture) -> Result<()> {
 
     // Out of space
     fix.vm.ret(-ENOSPC as u64);
-    return Ok(());
+    Ok(())
 }
 
 pub fn alloc_context_alloc(

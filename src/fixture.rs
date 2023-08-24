@@ -502,7 +502,6 @@ pub fn auto_alloc_vec<'a, G: Guest>(
     }
 
     let ptrs = (0..vals.len())
-        .into_iter()
         .map(|i| Addr(ptr.0 + (G::guest_len() * i) as u64))
         .collect();
 

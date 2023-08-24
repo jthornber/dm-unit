@@ -505,10 +505,10 @@ fn test_insert_ascending(fix: &mut Fixture) -> Result<()> {
     // large mappings.
     for i in (0..COUNT).step_by(MAPPINGS_MAX_LEN) {
         let result = rtree.lookup(i)?;
-        let len = if i as u64 <= COUNT - MAPPINGS_MAX_LEN as u64 {
+        let len = if i <= COUNT - MAPPINGS_MAX_LEN as u64 {
             MAPPINGS_MAX_LEN as u64
         } else {
-            COUNT - i as u64
+            COUNT - i
         };
         let expected = Mapping {
             thin_begin: i,
@@ -549,7 +549,7 @@ fn test_insert_descending(fix: &mut Fixture) -> Result<()> {
     for i in (0..COUNT).rev().step_by(MAPPINGS_MAX_LEN) {
         let result = rtree.lookup(i)?;
         let len = if i < MAPPINGS_MAX_LEN as u64 {
-            i as u64 + 1
+            i + 1
         } else {
             MAPPINGS_MAX_LEN as u64
         };

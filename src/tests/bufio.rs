@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 //-------------------------------
 
-fn auto_lru<'a>(fix: &'a mut Fixture) -> Result<(AutoGPtr<'a>, Addr)> {
+fn auto_lru(fix: &mut Fixture) -> Result<(AutoGPtr<'_>, Addr)> {
     let lru = Lru {
         cursor: Addr(0),
         count: 0,
@@ -30,7 +30,7 @@ fn list_to_entry(l: Addr) -> Addr {
     l
 }
 
-fn lru_read_buffers(fix: &mut Fixture, lru: Addr) -> Result<Vec<Buffer>> {
+fn lru_read_buffers(fix: &Fixture, lru: Addr) -> Result<Vec<Buffer>> {
     let mut bufs = Vec::new();
 
     let lru = read_guest::<Lru>(&fix.vm.mem, lru)?;
@@ -83,7 +83,7 @@ fn test_lru_inserts(fix: &mut Fixture, blocks: &[u64]) -> Result<()> {
         lru_insert(&mut fix, lru, *b)?;
     }
 
-    let count = lru_count(&mut fix, lru)?;
+    let count = lru_count(&fix, lru)?;
 
     if count != blocks.len() as u64 {
         return Err(anyhow!(
@@ -93,7 +93,7 @@ fn test_lru_inserts(fix: &mut Fixture, blocks: &[u64]) -> Result<()> {
         ));
     }
 
-    let bufs = lru_read_buffers(&mut fix, lru)?;
+    let bufs = lru_read_buffers(&fix, lru)?;
     if bufs.len() != blocks.len() {
         return Err(anyhow!("too few buffers"));
     }
@@ -112,13 +112,12 @@ fn test_lru_insert_1(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_lru_insert_many(fix: &mut Fixture) -> Result<()> {
-    let blocks: Vec<u64> = (0..1024).into_iter().collect();
+    let blocks: Vec<u64> = (0..1024).collect();
     test_lru_inserts(fix, &blocks)
 }
 
 fn seq_buffers(b: usize, e: usize) -> Vec<Buffer> {
     (b..e)
-        .into_iter()
         .map({
             |b| Buffer {
                 lru: LruEntry::default(),
@@ -148,7 +147,7 @@ fn test_lru_evict(fix: &mut Fixture) -> Result<()> {
         }
     }
 
-    let pred = (&mut fix).const_callback(0)?; // ER_EVICT
+    let pred = fix.const_callback(0)?; // ER_EVICT
 
     // evict half the buffers, and check they aren't the
     // ones that were referenced.
@@ -226,7 +225,7 @@ fn test_lru_evict(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-fn auto_cache<'a>(fix: &'a mut Fixture) -> Result<(AutoGPtr<'a>, Addr)> {
+fn auto_cache(fix: &mut Fixture) -> Result<(AutoGPtr<'_>, Addr)> {
     auto_alloc(fix, BUFFER_CACHE_SIZE)
 }
 
@@ -290,7 +289,7 @@ fn test_cache_mark(fix: &mut Fixture) -> Result<()> {
     // check they are indeed dirty
     let mut dirty2 = BTreeSet::new();
     loop {
-        let pred = (&mut fix).const_callback(0)?; // ER_EVICT
+        let pred = fix.const_callback(0)?; // ER_EVICT
         let b = cache_evict(&mut fix, cache, LruKind::Dirty, pred, Addr(0))?;
         if b.0 == 0 {
             break;
@@ -304,8 +303,8 @@ fn test_cache_mark(fix: &mut Fixture) -> Result<()> {
     }
 
     // Remove them all, this time using remove_range
-    let pred = (&mut fix).const_callback(0)?; // ER_EVICT
-    let release = (&mut fix).const_callback(0)?;
+    let pred = fix.const_callback(0)?; // ER_EVICT
+    let release = fix.const_callback(0)?;
     cache_remove_range(&mut fix, cache, 0, 1024, pred, release)?;
 
     cache_exit(&mut fix, cache)?;

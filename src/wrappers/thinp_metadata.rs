@@ -27,7 +27,7 @@ pub fn dm_pool_metadata_open(
     Ok(Addr(fix.vm.reg(A0)))
 }
 
-pub fn dm_pool_get_block_manager(fix: &mut Fixture, pmd: Addr) -> Result<Addr> {
+pub fn dm_pool_get_block_manager(fix: &Fixture, pmd: Addr) -> Result<Addr> {
     let bm_ptr = Addr(fix.vm.mem.read_some(pmd, PERM_READ, |bytes| {
         let mut r = Cursor::new(bytes);
         r.set_position(24);

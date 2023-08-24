@@ -64,29 +64,29 @@ impl space_map::SpaceMap for DiskSpaceMap {
 fn test_boundary_size_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = DiskSMBuilder;
-    test_boundary_size(fix, &mut builder)
+    let builder = DiskSMBuilder;
+    test_boundary_size(fix, &builder)
 }
 
 fn test_commit_cost_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = DiskSMBuilder;
-    test_commit_cost(fix, &mut builder)
+    let builder = DiskSMBuilder;
+    test_commit_cost(fix, &builder)
 }
 
 fn test_inc_cost_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = DiskSMBuilder;
-    test_inc_cost(fix, &mut builder)
+    let builder = DiskSMBuilder;
+    test_inc_cost(fix, &builder)
 }
 
 fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = DiskSMBuilder;
-    test_wrapping_around(fix, &mut builder)
+    let builder = DiskSMBuilder;
+    test_wrapping_around(fix, &builder)
 }
 
 //-------------------------------
