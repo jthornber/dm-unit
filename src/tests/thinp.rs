@@ -10,7 +10,6 @@ use thinp::pdata::btree_walker::*;
 use thinp::pdata::space_map::common::{IndexEntry, SMRoot};
 use thinp::pdata::unpack::*;
 use thinp::report::*;
-use thinp::thin::block_time::*;
 use thinp::thin::check::*;
 use thinp::thin::superblock::*;
 
@@ -248,6 +247,8 @@ impl ThinPool {
     }
 
     fn build_run_histogram(&self, fix: &Fixture) -> Result<BTreeMap<usize, usize>> {
+        use crate::pdata::rtree::Mapping;
+
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
         let sb = read_superblock(engine.as_ref(), 0)?;
 
@@ -256,20 +257,21 @@ impl ThinPool {
 
         let mut histogram = BTreeMap::new();
         for (_thin_id, root) in roots {
-            let blocks: BTreeMap<u64, BlockTime> =
-                btree_to_map(&mut path, engine.clone(), false, root)?;
+            let mut visitor = MappingCollector::new();
+            rtree_walk(engine.as_ref(), root, &mut visitor)?;
 
             // Build a histogram of run lengths
-            let mut last_entry: Option<(u64, BlockTime)> = None;
-            let mut run_length = 0;
+            let mut last_entry: Option<Mapping> = None;
+            let mut run_length: usize = 0;
 
-            for (k, v) in &blocks {
+            for m in visitor.entries {
                 match last_entry {
-                    Some((last_key, last_value))
-                        if last_key + 1 == *k && last_value.block + 1 == v.block =>
+                    Some(last)
+                        if last.thin_begin + last.len as u64 == m.thin_begin
+                            && last.data_begin + last.len as u64 == m.data_begin =>
                     {
                         // Blocks and keys are both adjacent, increment run length
-                        run_length += 1;
+                        run_length += m.len as usize;
                     }
                     _ => {
                         // Blocks or keys are not adjacent or this is the first entry,
@@ -277,10 +279,10 @@ impl ThinPool {
                         if let Some(_last) = last_entry {
                             *histogram.entry(run_length).or_insert(0) += 1;
                         }
-                        run_length = 1;
+                        run_length = m.len as usize;
                     }
                 }
-                last_entry = Some((*k, v.clone()));
+                last_entry = Some(m);
             }
 
             // Record the last run
