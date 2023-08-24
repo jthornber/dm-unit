@@ -7,18 +7,11 @@ use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
+use crate::pdata::rtree::*;
 
 use Reg::*;
 
 //-------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Mapping {
-    pub thin_begin: u64,
-    pub data_begin: u64,
-    pub len: u32,
-    pub time: u32,
-}
 
 impl Guest for Mapping {
     fn guest_len() -> usize {

@@ -1,5 +1,7 @@
 use crate::emulator::memory::*;
 use crate::fixture::*;
+use crate::pdata::rtree::*;
+use crate::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
@@ -12,130 +14,11 @@ use crate::wrappers::transaction_manager::*;
 
 use anyhow::{ensure, Result};
 use log::*;
-use nom::{number::complete::*, IResult};
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
-use thinp::io_engine::{IoEngine, BLOCK_SIZE};
-use thinp::pdata::btree_error::{split_key_ranges, KeyRange};
-use thinp::pdata::unpack::Unpack;
 
 //-------------------------------
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
-struct Header {
-    pub block: u64,
-    pub is_leaf: bool,
-    pub node_end: u64,
-    pub nr_entries: u32,
-}
-
-pub const MAX_LEAF_ENTRIES: usize = (BLOCK_SIZE - 32) / (8 + 8);
-pub const MAX_INTERNAL_ENTRIES: usize = (BLOCK_SIZE - 32) / 16;
-pub const MAPPINGS_MAX_LEN: usize = 4095;
-
-#[allow(dead_code)]
-const INTERNAL_NODE: u32 = 1;
-const LEAF_NODE: u32 = 2;
-
-impl Unpack for Header {
-    fn disk_size() -> u32 {
-        32
-    }
-
-    fn unpack(data: &[u8]) -> IResult<&[u8], Header> {
-        let (i, _csum) = le_u32(data)?;
-        let (i, flags) = le_u32(i)?;
-        let (i, block) = le_u64(i)?;
-        let (i, node_end) = le_u64(i)?;
-        let (i, nr_entries) = le_u32(i)?;
-        let (i, _padding) = le_u32(i)?;
-
-        Ok((
-            i,
-            Header {
-                block,
-                is_leaf: flags == LEAF_NODE,
-                node_end,
-                nr_entries,
-            },
-        ))
-    }
-}
-
-enum Node {
-    Internal {
-        header: Header,
-        entries: Vec<(u64, u64)>,
-    },
-    Leaf {
-        header: Header,
-        entries: Vec<Mapping>,
-    },
-}
-
-struct DiskMapping {
-    data_begin: u64, // FIXME: shrink to u32
-    len: u32,
-    time: u32,
-}
-
-fn disk_mapping(data: &[u8]) -> IResult<&[u8], DiskMapping> {
-    let (i, data_begin) = le_u32(data)?;
-    let (i, len_time) = le_u32(i)?;
-
-    Ok((
-        i,
-        DiskMapping {
-            data_begin: data_begin as u64,
-            len: len_time >> 20,
-            time: len_time & ((1 << 20) - 1),
-        },
-    ))
-}
-
-impl Unpack for Node {
-    fn disk_size() -> u32 {
-        BLOCK_SIZE as u32
-    }
-
-    fn unpack(data: &[u8]) -> IResult<&[u8], Node> {
-        use nom::multi::count;
-
-        let (i, header) = Header::unpack(data)?;
-        if header.is_leaf {
-            let (i, keys) = count(le_u64, header.nr_entries as usize)(i)?;
-            let (i, _unused_keys) =
-                count(le_u64, MAX_LEAF_ENTRIES - header.nr_entries as usize)(i)?;
-            let (i, values) = count(disk_mapping, header.nr_entries as usize)(i)?;
-
-            let entries = keys
-                .iter()
-                .zip(values)
-                .map(|(thin_begin, dm)| Mapping {
-                    thin_begin: *thin_begin,
-                    data_begin: dm.data_begin,
-                    len: dm.len,
-                    time: dm.time,
-                })
-                .collect();
-            Ok((i, Node::Leaf { header, entries }))
-        } else {
-            let (i, keys) = count(le_u64, header.nr_entries as usize)(i)?;
-            let (i, _unused_keys) =
-                count(le_u64, MAX_INTERNAL_ENTRIES - header.nr_entries as usize)(i)?;
-            let (i, values) = count(le_u64, header.nr_entries as usize)(i)?;
-            Ok((
-                i,
-                Node::Internal {
-                    header,
-                    entries: keys.iter().copied().zip(values).collect(),
-                },
-            ))
-        }
-    }
-}
 
 fn calc_max_sib_entries(max_entries: usize) -> usize {
     let mut sib = max_entries / 2;
@@ -143,111 +26,6 @@ fn calc_max_sib_entries(max_entries: usize) -> usize {
         sib = (sib + max_entries) / 2;
     }
     sib
-}
-
-#[derive(Debug, Default)]
-pub struct TreeStats {
-    pub nr_internal: u64,
-    pub nr_leaves: u64,
-    pub nr_entries: u64,
-    pub nr_mapped_blocks: u64,
-}
-
-fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRange>> {
-    let keys: Vec<u64> = entries.iter().map(|m| m.0).collect();
-    split_key_ranges(&[], parent_key, &keys[..]).map_err(|e| e.into())
-}
-
-pub fn rtree_check(
-    engine: &dyn IoEngine,
-    root: u64,
-    parent_key: &KeyRange,
-    stats: &mut TreeStats,
-) -> Result<()> {
-    let b = engine.read(root)?;
-    let data = b.get_data();
-    let (_, node) = Node::unpack(data)?;
-
-    match node {
-        Node::Internal { header, entries } => {
-            //debug!("internal node {}", root);
-            stats.nr_internal += 1;
-            ensure!(header.block == root);
-
-            let child_keys = split_keys(parent_key, &entries[..])?;
-
-            for (kr, (_, val)) in child_keys.iter().zip(entries) {
-                ensure!(val != 0);
-                rtree_check(engine, val, kr, stats)?;
-            }
-        }
-        Node::Leaf { header, entries } => {
-            //debug!("leaf node {} entries {}", root, entries.len());
-            stats.nr_leaves += 1;
-            stats.nr_entries += entries.len() as u64;
-            ensure!(header.block == root);
-
-            let mut lowest_key = parent_key.start.unwrap_or(0);
-            for m in entries {
-                //debug!("  entry {:?}", m);
-                ensure!(m.thin_begin >= lowest_key);
-                ensure!(m.len > 0);
-                stats.nr_mapped_blocks += m.len as u64;
-                lowest_key = m.thin_begin + m.len as u64;
-            }
-            ensure!(lowest_key <= parent_key.end.unwrap_or(u64::MAX));
-        }
-    }
-
-    Ok(())
-}
-
-//-------------------------------
-
-trait NodeVisitor {
-    fn visit(&mut self, header: Header, entries: Vec<Mapping>) -> Result<()>;
-}
-
-fn rtree_walk(engine: &dyn IoEngine, root: u64, visitor: &mut dyn NodeVisitor) -> Result<()> {
-    let b = engine.read(root)?;
-    let data = b.get_data();
-    let (_, node) = Node::unpack(data)?;
-
-    match node {
-        Node::Internal { header: _, entries } => {
-            for (_key, val) in entries {
-                rtree_walk(engine, val, visitor)?;
-            }
-        }
-        Node::Leaf { header, entries } => {
-            visitor.visit(header, entries)?;
-        }
-    }
-
-    Ok(())
-}
-
-struct MappingCollector {
-    entries: Vec<Mapping>,
-    nr_entries: Vec<u32>,
-}
-
-impl MappingCollector {
-    fn new() -> Self {
-        Self {
-            entries: Vec::default(),
-            nr_entries: Vec::default(),
-        }
-    }
-}
-
-impl NodeVisitor for MappingCollector {
-    fn visit(&mut self, header: Header, entries: Vec<Mapping>) -> Result<()> {
-        let mut other = entries;
-        self.entries.append(&mut other);
-        self.nr_entries.push(header.nr_entries);
-        Ok(())
-    }
 }
 
 //-------------------------------

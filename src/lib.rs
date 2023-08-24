@@ -13,6 +13,7 @@ pub mod block_manager;
 pub mod emulator;
 pub mod fixture;
 pub mod guest;
+pub mod pdata;
 pub mod primitive;
 pub mod stats;
 pub mod stubs;
