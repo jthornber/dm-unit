@@ -1,9 +1,12 @@
-use thinp::io_engine::BLOCK_SIZE;
+use nom::{number::complete::*, IResult};
+use thinp::io_engine::{Block, BLOCK_SIZE};
 use thinp::pdata::unpack::Unpack;
 
-use nom::{number::complete::*, IResult};
+use crate::pdata::rtree_error::NodeError;
+
 //-------------------------------
 
+// FIXME: round down to a multiple of 3?
 pub const MAX_LEAF_ENTRIES: usize = (BLOCK_SIZE - 32) / (8 + 8);
 pub const MAX_INTERNAL_ENTRIES: usize = (BLOCK_SIZE - 32) / 16;
 pub const MAPPINGS_MAX_LEN: usize = 4095;
@@ -87,6 +90,15 @@ pub enum Node {
     },
 }
 
+impl Node {
+    fn get_header(&self) -> &Header {
+        match self {
+            Self::Internal { header, .. } => header,
+            Self::Leaf { header, .. } => header,
+        }
+    }
+}
+
 impl Unpack for Node {
     fn disk_size() -> u32 {
         BLOCK_SIZE as u32
@@ -127,6 +139,56 @@ impl Unpack for Node {
             ))
         }
     }
+}
+
+fn ensure_ordered_keys(entries: &[(u64, u64)]) -> Result<(), NodeError> {
+    let last = entries[0].0;
+    for (key, _) in &entries[1..] {
+        if *key <= last {
+            return Err(NodeError::KeysOutOfOrder);
+        }
+    }
+    Ok(())
+}
+
+fn ensure_non_overlapped_entries(entries: &[Mapping]) -> Result<(), NodeError> {
+    let mut last = entries[0].clone();
+    if last.len == 0 {
+        return Err(NodeError::EmptyEntries);
+    }
+
+    for m in &entries[1..] {
+        if m.len == 0 {
+            return Err(NodeError::EmptyEntries);
+        }
+
+        if m.thin_begin < last.thin_begin + last.len as u64 {
+            return Err(NodeError::EntriesOverlapped);
+        }
+
+        last = m.clone();
+    }
+
+    Ok(())
+}
+
+pub fn unpack_node_checked(b: &Block) -> Result<Node, NodeError> {
+    let data = b.get_data();
+    let (_, node) = Node::unpack(data).map_err(|_| NodeError::IncompleteData)?;
+
+    let header = node.get_header();
+    if header.block != b.loc {
+        return Err(NodeError::BlockNrMismatch);
+    }
+
+    if header.nr_entries > 1 {
+        match node {
+            Node::Internal { ref entries, .. } => ensure_ordered_keys(entries)?,
+            Node::Leaf { ref entries, .. } => ensure_non_overlapped_entries(entries)?,
+        }
+    }
+
+    Ok(node)
 }
 
 //-------------------------------

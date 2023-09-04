@@ -1,9 +1,10 @@
-use anyhow::{ensure, Result};
-use thinp::io_engine::IoEngine;
+use anyhow::Result;
+use std::sync::{Arc, Mutex};
+use thinp::io_engine::{Block, IoEngine};
 use thinp::pdata::btree::split_key_ranges;
-use thinp::pdata::unpack::Unpack;
 
 use crate::pdata::rtree::*;
+use crate::pdata::rtree_error::*;
 
 pub use thinp::pdata::btree::KeyRange;
 
@@ -17,103 +18,213 @@ pub struct TreeStats {
     pub nr_mapped_blocks: u64,
 }
 
-fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRange>> {
+fn split_keys(parent_key: &KeyRange, entries: &[(u64, u64)]) -> Result<Vec<KeyRange>, RTreeError> {
+    // FIXME: avoid collect
     let keys: Vec<u64> = entries.iter().map(|m| m.0).collect();
-    split_key_ranges(&[], parent_key, &keys[..]).map_err(|e| e.into())
-}
-
-pub fn rtree_check(
-    engine: &dyn IoEngine,
-    root: u64,
-    parent_key: &KeyRange,
-    stats: &mut TreeStats,
-) -> Result<()> {
-    let b = engine.read(root)?;
-    let data = b.get_data();
-    let (_, node) = Node::unpack(data)?;
-
-    match node {
-        Node::Internal { header, entries } => {
-            //debug!("internal node {}", root);
-            stats.nr_internal += 1;
-            ensure!(header.block == root);
-
-            let child_keys = split_keys(parent_key, &entries[..])?;
-
-            for (kr, (_, val)) in child_keys.iter().zip(entries) {
-                ensure!(val != 0);
-                rtree_check(engine, val, kr, stats)?;
-            }
-        }
-        Node::Leaf { header, entries } => {
-            //debug!("leaf node {} entries {}", root, entries.len());
-            stats.nr_leaves += 1;
-            stats.nr_entries += entries.len() as u64;
-            ensure!(header.block == root);
-
-            let mut lowest_key = parent_key.start.unwrap_or(0);
-            for m in entries {
-                //debug!("  entry {:?}", m);
-                ensure!(m.thin_begin >= lowest_key);
-                ensure!(m.len > 0);
-                stats.nr_mapped_blocks += m.len as u64;
-                lowest_key = m.thin_begin + m.len as u64;
-            }
-            ensure!(lowest_key <= parent_key.end.unwrap_or(u64::MAX));
-        }
-    }
-
-    Ok(())
+    // FIXME: remove the path parameter from split_key_ranges()
+    split_key_ranges(&[], parent_key, &keys[..])
+        .map_err(|_| RTreeError::ContextError("couldn't split key range".to_string()))
 }
 
 //-------------------------------
 
 pub trait NodeVisitor {
-    fn visit(&mut self, header: Header, entries: Vec<Mapping>) -> Result<()>;
-}
-
-pub fn rtree_walk(engine: &dyn IoEngine, root: u64, visitor: &mut dyn NodeVisitor) -> Result<()> {
-    let b = engine.read(root)?;
-    let data = b.get_data();
-    let (_, node) = Node::unpack(data)?;
-
-    match node {
-        Node::Internal { header: _, entries } => {
-            for (_key, val) in entries {
-                rtree_walk(engine, val, visitor)?;
-            }
-        }
-        Node::Leaf { header, entries } => {
-            visitor.visit(header, entries)?;
-        }
+    fn visit_internal(&self, _header: &Header, _entries: &[(u64, u64)]) -> Result<(), RTreeError> {
+        Ok(())
     }
 
-    Ok(())
+    fn visit(&self, header: &Header, entries: &[Mapping]) -> Result<(), RTreeError>;
 }
 
 //-------------------------------
 
+pub struct RTreeWalker {
+    engine: Arc<dyn IoEngine>,
+}
+
+impl RTreeWalker {
+    pub fn new(engine: Arc<dyn IoEngine>) -> Self {
+        Self { engine }
+    }
+
+    pub fn walk(&self, visitor: &dyn NodeVisitor, root: u64) -> Result<(), RTreeError> {
+        let b = self.engine.read(root).map_err(|_| io_err(&[root]))?;
+        let kr = KeyRange {
+            start: None,
+            end: None,
+        };
+        let mut path = Vec::new();
+        self.visit_node(&mut path, visitor, &kr, &b)
+    }
+
+    fn visit_node(
+        &self,
+        path: &mut Vec<u64>,
+        visitor: &dyn NodeVisitor,
+        parent_key: &KeyRange,
+        b: &Block,
+    ) -> Result<(), RTreeError> {
+        path.push(b.loc);
+        let r = self.visit_node_(path, visitor, parent_key, b);
+        path.pop();
+        r
+    }
+
+    fn visit_node_(
+        &self,
+        path: &mut Vec<u64>,
+        visitor: &dyn NodeVisitor,
+        parent_key: &KeyRange,
+        b: &Block,
+    ) -> Result<(), RTreeError> {
+        let node = unpack_node_checked(b).map_err(RTreeError::NodeError)?;
+
+        match node {
+            Node::Internal {
+                ref header,
+                ref entries,
+            } => {
+                let child_keys = split_keys(parent_key, entries)?;
+                let bs: Vec<u64> = entries.iter().map(|m| m.1).collect();
+                visitor.visit_internal(header, entries)?;
+                self.visit_children(path, visitor, &child_keys, &bs)
+            }
+            Node::Leaf {
+                ref header,
+                ref entries,
+            } => {
+                if !entries.is_empty() {
+                    let last = entries.last().unwrap();
+                    if entries[0].thin_begin < parent_key.start.unwrap_or(0)
+                        || last.thin_begin + last.len as u64 > parent_key.end.unwrap_or(u64::MAX)
+                    {
+                        return Err(RTreeError::ContextError("keys out of range".to_string()));
+                    }
+                }
+                visitor.visit(header, entries)
+            }
+        }
+    }
+
+    fn visit_children(
+        &self,
+        path: &mut Vec<u64>,
+        visitor: &dyn NodeVisitor,
+        krs: &[KeyRange],
+        bs: &[u64],
+    ) -> Result<(), RTreeError> {
+        let mut errs = Vec::new();
+
+        // TODO: ignore shared blocks
+
+        let rblocks = match self.engine.read_many(bs) {
+            Ok(blocks) => blocks,
+            Err(_) => {
+                // IO completely failed
+                for b in bs {
+                    path.push(*b);
+                    errs.push(io_err(path));
+                    path.pop();
+                }
+                return aggregate_err(errs);
+            }
+        };
+
+        for (i, rb) in rblocks.iter().enumerate() {
+            if let Ok(b) = rb {
+                if let Err(e) = self.visit_node(path, visitor, &krs[i], b) {
+                    errs.push(e);
+                }
+            } else {
+                path.push(bs[i]);
+                errs.push(io_err(path));
+                path.pop();
+            }
+        }
+
+        aggregate_err(errs)
+    }
+}
+
+//-------------------------------
+
+#[derive(Default)]
+struct RTreeCounter {
+    stats: Mutex<TreeStats>,
+}
+
+impl RTreeCounter {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl NodeVisitor for RTreeCounter {
+    fn visit_internal(&self, _header: &Header, _entries: &[(u64, u64)]) -> Result<(), RTreeError> {
+        let mut stats = self.stats.lock().unwrap();
+        stats.nr_internal += 1;
+        Ok(())
+    }
+
+    fn visit(&self, _header: &Header, entries: &[Mapping]) -> Result<(), RTreeError> {
+        let mut stats = self.stats.lock().unwrap();
+        stats.nr_leaves += 1;
+        stats.nr_entries += entries.len() as u64;
+
+        // count the number of mapped blocks
+        for m in entries {
+            stats.nr_mapped_blocks += m.len as u64;
+        }
+
+        Ok(())
+    }
+}
+
+pub fn rtree_stat(engine: Arc<dyn IoEngine>, root: u64) -> Result<TreeStats, RTreeError> {
+    let w = RTreeWalker::new(engine);
+    let v = RTreeCounter::new();
+    w.walk(&v, root)?;
+    let stats = v.stats.into_inner().unwrap();
+    Ok(stats)
+}
+
+//-------------------------------
+
+#[derive(Default)]
+struct Inner {
+    entries: Vec<Mapping>,
+    nr_entries: Vec<u32>,
+}
+
+#[derive(Default)]
 pub struct MappingCollector {
-    pub entries: Vec<Mapping>,
-    pub nr_entries: Vec<u32>,
+    inner: Mutex<Inner>,
 }
 
 impl MappingCollector {
     pub fn new() -> Self {
-        Self {
-            entries: Vec::default(),
-            nr_entries: Vec::default(),
-        }
+        Self::default()
     }
 }
 
 impl NodeVisitor for MappingCollector {
-    fn visit(&mut self, header: Header, entries: Vec<Mapping>) -> Result<()> {
-        let mut other = entries;
-        self.entries.append(&mut other);
-        self.nr_entries.push(header.nr_entries);
+    fn visit(&self, header: &Header, entries: &[Mapping]) -> Result<(), RTreeError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.entries.extend_from_slice(entries);
+        inner.nr_entries.push(header.nr_entries);
         Ok(())
     }
+}
+
+pub fn extract_rtree_entries(
+    engine: Arc<dyn IoEngine>,
+    root: u64,
+) -> Result<(Vec<Mapping>, Vec<u32>), RTreeError> {
+    let w = RTreeWalker::new(engine);
+    let v = MappingCollector::new();
+    w.walk(&v, root)?;
+    let inner = v.inner.into_inner().unwrap();
+    Ok((inner.entries, inner.nr_entries))
 }
 
 //-------------------------------

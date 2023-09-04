@@ -5,7 +5,7 @@ use rand::SeedableRng;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use thinp::io_engine::*;
-use thinp::pdata::btree_error::KeyRange;
+
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::space_map::common::{IndexEntry, SMRoot};
 use thinp::pdata::unpack::*;
@@ -15,13 +15,14 @@ use thinp::thin::superblock::*;
 
 use crate::emulator::memory::*;
 use crate::fixture::*;
-use crate::pdata::rtree_walker::{self, *};
+use crate::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::btree::*;
+use crate::utils::rtree;
 use crate::wrappers::thinp_metadata::*;
 
 //-------------------------------
@@ -197,6 +198,7 @@ impl ThinPool {
         Ok(())
     }
 
+    // TODO: check space maps
     fn check_rtree(&self, fix: &Fixture) -> Result<()> {
         let bm = get_bm(fix, self.bm_ptr);
         let sb = read_superblock(bm.as_ref(), 0)?;
@@ -204,16 +206,14 @@ impl ThinPool {
         let mut path = Vec::new();
         let roots = btree_to_map(&mut path, bm.clone(), false, sb.mapping_root)?;
         for (thin_id, root) in roots {
-            let mut stats = rtree_walker::TreeStats::default();
-            let kr = KeyRange::new();
-            rtree_check(&*bm, root, &kr, &mut stats)?;
+            let stats = rtree_stat(bm.clone(), root)?;
             println!("thin id {}, stats {:?}", thin_id, stats);
         }
 
         Ok(())
     }
 
-    fn _show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
+    fn show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
         let bm = get_bm(fix, self.bm_ptr);
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr);
         let sb = read_superblock(engine.as_ref(), 0)?;
@@ -224,7 +224,7 @@ impl ThinPool {
             debug!(
                 "residency of thin {} = {}",
                 thin_id,
-                calc_residency::<Value64>(&bm, root)?
+                rtree::calc_residency(bm.clone(), root)?
             );
         }
 
@@ -257,14 +257,13 @@ impl ThinPool {
 
         let mut histogram = BTreeMap::new();
         for (_thin_id, root) in roots {
-            let mut visitor = MappingCollector::new();
-            rtree_walk(engine.as_ref(), root, &mut visitor)?;
+            let (entries, _) = extract_rtree_entries(engine.clone(), root)?;
 
             // Build a histogram of run lengths
             let mut last_entry: Option<Mapping> = None;
             let mut run_length: usize = 0;
 
-            for m in visitor.entries {
+            for m in entries {
                 match last_entry {
                     Some(last)
                         if last.thin_begin + last.len as u64 == m.thin_begin
@@ -552,7 +551,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     }
 
     pool.close_thin(fix, td)?;
-    //pool.show_mapping_residency(fix)?; // TODO: rtree version
+    pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())
@@ -611,6 +610,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
 
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
+    pool.check_rtree(fix)?;
 
     Ok(())
 }
@@ -661,7 +661,7 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
     }
 
     pool.close_thin(fix, td)?;
-    //pool.show_mapping_residency(fix)?; // TODO: rtree version
+    pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
     Ok(())

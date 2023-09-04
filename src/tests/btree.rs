@@ -112,14 +112,6 @@ fn get_tree_stats<V: Unpack>(bm: &Arc<BlockManager>, root: u64) -> Result<TreeSt
     let nr_entries = visitor.nr_entries.load(Ordering::SeqCst) as u64;
     let nr_leaves = visitor.nr_leaves.load(Ordering::SeqCst) as u64;
 
-    let mut info = String::new();
-    info.push_str(&format!("btree root={}, leaves=", root));
-    let leaves = visitor.leaves.lock().unwrap();
-    for leaf in leaves.iter() {
-        info.push_str(&format!("{}, ", leaf));
-    }
-    println!("{}", info);
-
     Ok(TreeStats {
         nr_entries,
         nr_leaves,

@@ -200,18 +200,14 @@ impl<'a> RTreeTest<'a> {
         self.commit()?;
 
         let bm = get_bm(self.fix, self.bm);
-        let mut stats = TreeStats::default();
-        let kr = KeyRange::new();
-        rtree_check(&*bm, self.root, &kr, &mut stats)?;
+        let stats = rtree_stat(bm, self.root)?;
         Ok(stats)
     }
 
-    fn walk(&mut self, visitor: &mut dyn NodeVisitor) -> Result<()> {
+    pub fn get_entries(&mut self) -> Result<(Vec<Mapping>, Vec<u32>)> {
         self.commit()?;
-
         let bm = get_bm(self.fix, self.bm);
-        rtree_walk(&*bm, self.root, visitor)?;
-        Ok(())
+        extract_rtree_entries(bm, self.root).map_err(|e| e.into())
     }
 
     pub fn lookup(&mut self, thin_begin: u64) -> Result<Option<Mapping>> {
@@ -438,9 +434,8 @@ fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
         let _nr_inserted = rtree.insert(v)?;
     }
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    let last = visitor.entries[visitor.nr_entries[0] as usize - 1].clone();
+    let (entries, nr_entries) = rtree.get_entries()?;
+    let last = entries[nr_entries[0] as usize - 1].clone();
 
     // Insert a mapping that falls between two leaves,
     // and is adjacented to the last entry of the left one.
@@ -456,9 +451,8 @@ fn test_insert_tail_adjacented(fix: &mut Fixture) -> Result<()> {
 
     // Ensure the last entry of the first leaf, rather than the first entry of the sibling,
     // is expanded
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    let last_modified = visitor.entries[visitor.nr_entries[0] as usize - 1].clone();
+    let (entries, nr_entries) = rtree.get_entries()?;
+    let last_modified = entries[nr_entries[0] as usize - 1].clone();
     ensure!(last_modified.thin_begin == last.thin_begin);
     ensure!(last_modified.data_begin == last.data_begin);
     ensure!(last_modified.len == 2);
@@ -1041,10 +1035,9 @@ fn test_remove_leading_entries(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 1);
     ensure!(stats.nr_entries == COUNT - 9);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
+    let (entries, _nr_entries) = rtree.get_entries()?;
     ensure!(
-        visitor.entries[0]
+        entries[0]
             == Mapping {
                 thin_begin: mappings[9].thin_begin + 1,
                 data_begin: mappings[9].data_begin + 1,
@@ -1052,7 +1045,7 @@ fn test_remove_leading_entries(fix: &mut Fixture) -> Result<()> {
                 time: 0,
             }
     );
-    ensure!(visitor.entries[1..] == mappings[10..]);
+    ensure!(entries[1..] == mappings[10..]);
 
     Ok(())
 }
@@ -1104,11 +1097,10 @@ fn test_remove_trailing_entries(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 1);
     ensure!(stats.nr_entries == COUNT as u64 - 9);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..14] == mappings[..14]);
+    let (entries, _nr_entries) = rtree.get_entries()?;
+    ensure!(entries[..14] == mappings[..14]);
     ensure!(
-        visitor.entries[15]
+        entries[15]
             == Mapping {
                 thin_begin: mappings[15].thin_begin,
                 data_begin: mappings[15].data_begin,
@@ -1162,12 +1154,11 @@ fn test_remove_middle_entries(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 1);
     ensure!(stats.nr_entries == COUNT as u64 - 3);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..10] == mappings[..10]);
-    ensure!(visitor.entries[12..] == mappings[15..]);
+    let (entries, _nr_entries) = rtree.get_entries()?;
+    ensure!(entries[..10] == mappings[..10]);
+    ensure!(entries[12..] == mappings[15..]);
     ensure!(
-        visitor.entries[10]
+        entries[10]
             == Mapping {
                 thin_begin: mappings[10].thin_begin,
                 data_begin: mappings[10].data_begin,
@@ -1176,7 +1167,7 @@ fn test_remove_middle_entries(fix: &mut Fixture) -> Result<()> {
             }
     );
     ensure!(
-        visitor.entries[11]
+        entries[11]
             == Mapping {
                 thin_begin: mappings[14].thin_begin + 1,
                 data_begin: mappings[14].data_begin + 1,
@@ -1277,13 +1268,12 @@ fn test_split_middle_entry(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 1);
     ensure!(stats.nr_entries == COUNT as u64 + 2);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..10] == mappings[..10]);
-    ensure!(visitor.entries[12..21] == mappings[11..20]);
-    ensure!(visitor.entries[23..] == mappings[21..]);
+    let (entries, _nr_entries) = rtree.get_entries()?;
+    ensure!(entries[..10] == mappings[..10]);
+    ensure!(entries[12..21] == mappings[11..20]);
+    ensure!(entries[23..] == mappings[21..]);
     ensure!(
-        visitor.entries[10]
+        entries[10]
             == Mapping {
                 thin_begin: mappings[10].thin_begin,
                 data_begin: mappings[10].data_begin,
@@ -1292,7 +1282,7 @@ fn test_split_middle_entry(fix: &mut Fixture) -> Result<()> {
             }
     );
     ensure!(
-        visitor.entries[11]
+        entries[11]
             == Mapping {
                 thin_begin: mappings[10].thin_begin + 2,
                 data_begin: mappings[10].data_begin + 2,
@@ -1301,7 +1291,7 @@ fn test_split_middle_entry(fix: &mut Fixture) -> Result<()> {
             }
     );
     ensure!(
-        visitor.entries[21]
+        entries[21]
             == Mapping {
                 thin_begin: mappings[20].thin_begin,
                 data_begin: mappings[20].data_begin,
@@ -1310,7 +1300,7 @@ fn test_split_middle_entry(fix: &mut Fixture) -> Result<()> {
             }
     );
     ensure!(
-        visitor.entries[22]
+        entries[22]
             == Mapping {
                 thin_begin: mappings[20].thin_begin + 2,
                 data_begin: mappings[20].data_begin + 2,
@@ -1368,10 +1358,9 @@ fn test_remove_leading_leaves(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 2);
     ensure!(stats.nr_entries == (count - remove_end as u64));
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
+    let (entries, _nr_entries) = rtree.get_entries()?;
     ensure!(
-        visitor.entries[0]
+        entries[0]
             == Mapping {
                 thin_begin: mappings[remove_end].thin_begin + 1,
                 data_begin: mappings[remove_end].data_begin + 1,
@@ -1379,7 +1368,7 @@ fn test_remove_leading_leaves(fix: &mut Fixture) -> Result<()> {
                 time: 0,
             }
     );
-    ensure!(visitor.entries[1..] == mappings[(remove_end + 1)..]);
+    ensure!(entries[1..] == mappings[(remove_end + 1)..]);
 
     Ok(())
 }
@@ -1433,11 +1422,10 @@ fn test_remove_trailing_leaves(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 2);
     ensure!(stats.nr_entries == remove_begin as u64 + 1);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..remove_begin] == mappings[..remove_begin]);
+    let (entries, _nr_entries) = rtree.get_entries()?;
+    ensure!(entries[..remove_begin] == mappings[..remove_begin]);
     ensure!(
-        visitor.entries[remove_begin]
+        entries[remove_begin]
             == Mapping {
                 thin_begin: mappings[remove_begin].thin_begin,
                 data_begin: mappings[remove_begin].data_begin,
@@ -1498,12 +1486,11 @@ fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 2);
     ensure!(stats.nr_entries == (count - nr_removed as u64));
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
-    ensure!(visitor.entries[..remove_begin] == mappings[..remove_begin]);
-    ensure!(visitor.entries[(remove_begin + 2)..] == mappings[(remove_end + 1)..]);
+    let (entries, _nr_entries) = rtree.get_entries()?;
+    ensure!(entries[..remove_begin] == mappings[..remove_begin]);
+    ensure!(entries[(remove_begin + 2)..] == mappings[(remove_end + 1)..]);
     ensure!(
-        visitor.entries[remove_begin]
+        entries[remove_begin]
             == Mapping {
                 thin_begin: mappings[remove_begin].thin_begin,
                 data_begin: mappings[remove_begin].data_begin,
@@ -1512,7 +1499,7 @@ fn test_remove_middle_leaves(fix: &mut Fixture) -> Result<()> {
             }
     );
     ensure!(
-        visitor.entries[remove_begin + 1]
+        entries[remove_begin + 1]
             == Mapping {
                 thin_begin: mappings[remove_end].thin_begin + 1,
                 data_begin: mappings[remove_end].data_begin + 1,
@@ -1614,13 +1601,12 @@ fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 2);
     ensure!(stats.nr_entries == count as u64 + 1);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
+    let (entries, _nr_entries) = rtree.get_entries()?;
 
-    ensure!(visitor.entries[..100] == mappings[..100]);
-    ensure!(visitor.entries[102..] == mappings[101..]);
+    ensure!(entries[..100] == mappings[..100]);
+    ensure!(entries[102..] == mappings[101..]);
     ensure!(
-        visitor.entries[100]
+        entries[100]
             == Mapping {
                 thin_begin: mappings[100].thin_begin,
                 data_begin: mappings[100].data_begin,
@@ -1629,7 +1615,7 @@ fn test_remove_split_root(fix: &mut Fixture) -> Result<()> {
             }
     );
     ensure!(
-        visitor.entries[101]
+        entries[101]
             == Mapping {
                 thin_begin: mappings[100].thin_begin + 2,
                 data_begin: mappings[100].data_begin + 2,
@@ -1690,17 +1676,16 @@ fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 3);
     ensure!(stats.nr_entries == count + NR_INSERTED as u64);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
+    let (entries, _nr_entries) = rtree.get_entries()?;
 
-    ensure!(visitor.entries[..RANGES_BEGIN] == mappings[..RANGES_BEGIN]);
-    ensure!(visitor.entries[RANGES_END + NR_INSERTED..] == mappings[RANGES_END..]);
+    ensure!(entries[..RANGES_BEGIN] == mappings[..RANGES_BEGIN]);
+    ensure!(entries[RANGES_END + NR_INSERTED..] == mappings[RANGES_END..]);
 
     // verify splitted ranges
     for (pos, i) in (RANGES_BEGIN..RANGES_END).enumerate() {
         let idx = RANGES_BEGIN + pos * 2;
         ensure!(
-            visitor.entries[idx]
+            entries[idx]
                 == Mapping {
                     thin_begin: mappings[i].thin_begin,
                     data_begin: mappings[i].data_begin,
@@ -1709,7 +1694,7 @@ fn test_remove_split_first_leaf(fix: &mut Fixture) -> Result<()> {
                 }
         );
         ensure!(
-            visitor.entries[idx + 1]
+            entries[idx + 1]
                 == Mapping {
                     thin_begin: mappings[i].thin_begin + 2,
                     data_begin: mappings[i].data_begin + 2,
@@ -1771,17 +1756,16 @@ fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 3);
     ensure!(stats.nr_entries == count + NR_INSERTED as u64);
 
-    let mut visitor = MappingCollector::new();
-    rtree.walk(&mut visitor)?;
+    let (entries, _nr_entries) = rtree.get_entries()?;
 
-    ensure!(visitor.entries[..RANGES_BEGIN] == mappings[..RANGES_BEGIN]);
-    ensure!(visitor.entries[RANGES_END + NR_INSERTED..] == mappings[RANGES_END..]);
+    ensure!(entries[..RANGES_BEGIN] == mappings[..RANGES_BEGIN]);
+    ensure!(entries[RANGES_END + NR_INSERTED..] == mappings[RANGES_END..]);
 
     // verify splitted ranges
     for (pos, i) in (RANGES_BEGIN..RANGES_END).enumerate() {
         let idx = RANGES_BEGIN + pos * 2;
         ensure!(
-            visitor.entries[idx]
+            entries[idx]
                 == Mapping {
                     thin_begin: mappings[i].thin_begin,
                     data_begin: mappings[i].data_begin,
@@ -1790,7 +1774,7 @@ fn test_remove_split_last_leaf(fix: &mut Fixture) -> Result<()> {
                 }
         );
         ensure!(
-            visitor.entries[idx + 1]
+            entries[idx + 1]
                 == Mapping {
                     thin_begin: mappings[i].thin_begin + 2,
                     data_begin: mappings[i].data_begin + 2,

@@ -20,4 +20,5 @@ pub mod stubs;
 pub mod test_runner;
 pub mod tests;
 pub mod user_data;
+pub mod utils;
 pub mod wrappers;
