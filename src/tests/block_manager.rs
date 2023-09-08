@@ -1,6 +1,6 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
-use crate::emulator::memory::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
@@ -115,30 +115,30 @@ fn test_write_lock(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
+pub fn register_tests(tests: &mut TestSet) -> Result<()> {
     let kmodules = vec![PDATA_MOD];
 
-    runner.register(
+    tests.register(
         "/pdata/block-manager/create/nomem",
         Test::new(kmodules.clone(), Box::new(test_create_nomem)),
     );
-    runner.register(
+    tests.register(
         "/pdata/block-manager/create/success",
         Test::new(kmodules.clone(), Box::new(test_create_success)),
     );
-    runner.register(
+    tests.register(
         "/pdata/block-manager/block-size",
         Test::new(kmodules.clone(), Box::new(test_block_size)),
     );
-    runner.register(
+    tests.register(
         "/pdata/block-manager/nr-blocks",
         Test::new(kmodules.clone(), Box::new(test_nr_blocks)),
     );
-    runner.register(
+    tests.register(
         "/pdata/block-manager/read-lock",
         Test::new(kmodules.clone(), Box::new(test_read_lock)),
     );
-    runner.register(
+    tests.register(
         "/pdata/block-manager/write-lock",
         Test::new(kmodules.clone(), Box::new(test_write_lock)),
     );

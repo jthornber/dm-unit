@@ -396,7 +396,7 @@ fn test_shared_contexts(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
+pub fn register_tests(tests: &mut TestSet) -> Result<()> {
     let kmodules = vec![PDATA_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
 
@@ -413,7 +413,7 @@ pub fn register_tests(runner: &mut TestRunner) -> Result<()> {
             prefix.push($path);
             let p = prefix.concat();
             prefix.pop().unwrap();
-            runner.register(&p, Test::new(kmodules.clone(), Box::new($func)));
+            tests.register(&p, Test::new(kmodules.clone(), Box::new($func)));
         }};
     }
 

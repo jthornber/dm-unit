@@ -6,76 +6,12 @@ use std::fs::OpenOptions;
 use std::io::{prelude::*, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use threadpool::ThreadPool;
 
+use crate::capture_log::*;
+use crate::db::TestResult;
 use crate::emulator::loader::*;
 use crate::emulator::memory::*;
 use crate::fixture::*;
-
-//-------------------------------
-
-fn path_components(path: &str) -> Vec<String> {
-    path.trim_start_matches('/')
-        .split('/')
-        .map(|s| s.to_string())
-        .collect()
-}
-
-struct PathFormatter {
-    last_path: Vec<String>,
-}
-
-impl PathFormatter {
-    fn new() -> Self {
-        PathFormatter {
-            last_path: Vec::new(),
-        }
-    }
-
-    fn indent(&self, count: usize) {
-        let mut space = String::new();
-        for _ in 0..count {
-            space.push_str("  ");
-        }
-        print!("{}", space);
-    }
-
-    fn dots(&self, count: usize) {
-        let mut space = String::new();
-        for _ in 0..count {
-            space.push('.');
-        }
-        print!("{}", space);
-    }
-
-    fn print(&mut self, components: &[String]) {
-        let mut last_path = Vec::new();
-        let mut common = true;
-        let mut width = 0;
-        for (index, c) in components.iter().enumerate() {
-            let last = self.last_path.get(index);
-            if last.is_none() || last.unwrap() != c {
-                common = false;
-            }
-
-            if !common {
-                self.indent(index);
-                if index == components.len() - 1 {
-                    print!("{} ", c);
-                } else {
-                    println!("{} ", c);
-                }
-            }
-
-            last_path.push(c.clone());
-            width = (index * 2) + c.len();
-        }
-        self.dots(60 - width);
-
-        // Inefficient, but I don't think it will be significant.
-        self.last_path = last_path;
-    }
-}
 
 //-------------------------------
 
@@ -172,6 +108,33 @@ fn check_kernel_version<P: AsRef<Path>>(kernel_dir: P) -> Result<()> {
 trait TestFn_ = FnOnce(&mut Fixture) -> Result<()> + Send + 'static;
 pub type TestFn = Box<dyn TestFn_>;
 
+#[derive(Default)]
+pub struct TestSet {
+    tests: BTreeMap<String, Test>,
+}
+
+impl TestSet {
+    pub fn register(&mut self, path: &str, test: Test) {
+        self.tests.insert(path.to_string(), test);
+    }
+
+    pub fn filter(&mut self, rx: &Regex) {
+        let mut to_remove = Vec::new();
+        for p in self.tests.keys() {
+            if !rx.is_match(p) {
+                to_remove.push(p.clone());
+            }
+        }
+        for p in to_remove {
+            self.tests.remove(&p);
+        }
+    }
+
+    pub fn into_inner(self) -> BTreeMap<String, Test> {
+        self.tests
+    }
+}
+
 pub struct Test {
     kmodules: Vec<KernelModule>,
     func: TestFn,
@@ -196,12 +159,41 @@ pub struct TestRunner<'a> {
 }
 
 /// Wraps a test so we can run it in a thread.
-fn run_test(mut fix: Fixture, t: Test) -> Result<()> {
-    (t.func)(&mut fix)
+fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestResult {
+    {
+        let mut log = log_lines.lock().unwrap();
+        let _ = log.get_lines();
+    }
+
+    let icount_begin = fix.vm.stats.instrs;
+    let result = (t.func)(&mut fix);
+    let icount_end = fix.vm.stats.instrs;
+
+    let mut lines = {
+        let mut log = log_lines.lock().unwrap();
+        log.get_lines().join("\n")
+    };
+
+    match result {
+        Ok(()) => TestResult {
+            pass: true,
+            log: lines,
+            icount: icount_end - icount_begin,
+        },
+        Err(e) => {
+            lines.push_str(&format!("\nException: {:#}", e));
+
+            TestResult {
+                pass: false,
+                log: lines,
+                icount: icount_end - icount_begin,
+            }
+        }
+    }
 }
 
 impl<'a> TestRunner<'a> {
-    pub fn new<P: AsRef<Path>>(kernel_dir: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(kernel_dir: P, tests: TestSet) -> Result<Self> {
         check_kernel_version(&kernel_dir)?;
 
         let mut path = PathBuf::new();
@@ -212,7 +204,7 @@ impl<'a> TestRunner<'a> {
         Ok(TestRunner {
             kernel_dir: path,
             filter_fn,
-            tests: BTreeMap::new(),
+            tests: tests.into_inner(),
             jobs: 1,
             jit: false,
         })
@@ -234,19 +226,10 @@ impl<'a> TestRunner<'a> {
         &self.kernel_dir
     }
 
-    pub fn register(&mut self, path: &str, t: Test) {
-        self.tests.insert(path.to_string(), t);
-    }
-
-    pub fn exec(self) -> Result<(usize, usize)> {
-        let mut pass = 0;
-        let mut fail = 0;
-        let mut formatter = PathFormatter::new();
-
-        let pool = ThreadPool::new(self.jobs);
-
-        let results: Arc<Mutex<BTreeMap<String, Result<()>>>> =
-            Arc::new(Mutex::new(BTreeMap::new()));
+    // FIXME: I've stripped out the jobs stuff for now.  We need to switch to using
+    // processes for rather than threads so we can capture the log output.
+    pub fn exec(self, log_lines: Arc<Mutex<LogInner>>) -> BTreeMap<String, TestResult> {
+        let mut results: BTreeMap<String, TestResult> = BTreeMap::new();
 
         let mut memories: BTreeMap<BTreeSet<String>, Result<(LoaderInfo, Memory)>> =
             BTreeMap::new();
@@ -269,65 +252,43 @@ impl<'a> TestRunner<'a> {
             };
             match rmem {
                 Ok((loader_info, mem)) => {
-                    let results = results.clone();
                     let loader_info = loader_info.clone();
                     let mem = mem.snapshot();
                     let jit = self.jit;
                     let kernel_dir = self.kernel_dir.clone();
 
-                    pool.execute(move || {
-                        match Fixture::new(&kernel_dir, loader_info, mem, jit) {
-                            Ok(fix) => {
-                                let res = run_test(fix, t);
-                                if res.is_err() {
-                                    warn!("test {} failed: {:#}", p, res.as_ref().unwrap_err());
-                                }
-
-                                // FIXME: common code
-                                let mut results = results.lock().unwrap();
-                                results.insert(p.clone(), res);
-                                drop(results);
-                            }
-                            Err(e) => {
-                                // FIXME: common code
-                                let mut results = results.lock().unwrap();
-                                results.insert(p.clone(), Err(e));
-                                drop(results);
-                            }
+                    match Fixture::new(&kernel_dir, loader_info, mem, jit) {
+                        Ok(fix) => {
+                            info!("Running test: {}", p);
+                            let res = run_test(fix, t, log_lines.clone());
+                            results.insert(p.clone(), res);
                         }
-                    });
+                        Err(e) => {
+                            results.insert(
+                                p.clone(),
+                                TestResult {
+                                    pass: false,
+                                    log: format!("{:#}", e),
+                                    icount: 0,
+                                },
+                            );
+                        }
+                    }
                 }
                 Err(_) => {
-                    // FIXME: common code
-                    let mut results = results.lock().unwrap();
-                    results.insert(p.clone(), Err(anyhow!("unable to load kernel modules")));
-                    drop(results);
+                    results.insert(
+                        p.clone(),
+                        TestResult {
+                            pass: false,
+                            log: format!("unable to load kernel modules"),
+                            icount: 0,
+                        },
+                    );
                 }
             }
         }
 
-        pool.join();
-
-        let results = Arc::try_unwrap(results).unwrap().into_inner()?;
-
-        for (p, res) in results.into_iter() {
-            let components = path_components(&p);
-            formatter.print(&components);
-
-            match res {
-                Err(e) => {
-                    fail += 1;
-                    println!(" FAIL");
-                    info!("{:#}", e);
-                }
-                Ok(()) => {
-                    pass += 1;
-                    println!(" PASS");
-                }
-            }
-        }
-
-        Ok((pass, fail))
+        results
     }
 }
 

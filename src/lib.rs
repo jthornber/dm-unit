@@ -9,9 +9,12 @@ extern crate thiserror;
 
 pub mod anymap;
 pub mod block_manager;
+pub mod capture_log;
+pub mod db;
 pub mod emulator;
 pub mod fixture;
 pub mod guest;
+pub mod path_formatter;
 pub mod primitive;
 pub mod stats;
 pub mod stubs;
