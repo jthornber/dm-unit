@@ -6,9 +6,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
-use tempfile::NamedTempFile;
+use std::sync::{Arc, Mutex};
 
 use crate::emulator::memory::{Addr, Memory, PERM_EXEC, PERM_READ, PERM_WRITE};
+use crate::emulator::stack_trace::*;
 
 //--------------------------
 
@@ -151,42 +152,69 @@ fn addr_offset(lhs: Addr, rhs: Addr) -> i32 {
     }
 }
 
-/// Some relocations need to be performed as a pair.  ie. the location of the hi
-/// relocation is used in the calculation for the low bits.
+/// Some relocations need to be performed as a pair.  ie. the location
+/// of the hi relocation is used in the calculation for the low bits.
 #[derive(Clone)]
 enum CompoundRel {
     Simple(Relocation),
     Pair(Relocation, Relocation),
 }
 
+/// Builds a vector of `CompoundRel` instances from a vector of
+/// `Relocation` instances.
+///
+/// A `CompoundRel` instance represents either a single `Relocation`
+/// instance or a pair of `Relocation` instances that need to be performed
+/// together. Specifically, if a `Relocation` instance has a type of
+/// `Rpcrel_hi20`, it needs to be paired with the next `Relocation`
+/// instance if its type is either `Rpcrel_lo12_i` or `Rpcrel_lo12_s`.
+///
+/// # Arguments
+///
+/// * `rlocs` - A vector of `Relocation` instances to process.
+///
+/// # Returns
+///
+/// A vector of `CompoundRel` instances.
 fn build_compound_rels(rlocs: Vec<Relocation>) -> Vec<CompoundRel> {
     use RelocationType::*;
 
-    let mut i = 0;
     let mut compound = Vec::new();
-    while i < rlocs.len() {
-        let rloc = &rlocs[i];
+    let mut iter = rlocs.iter().peekable();
+    while let Some(rloc) = iter.next() {
+        let mut push_simple = true;
         if rloc.rtype == Rpcrel_hi20 {
-            // the next entry is probably the corresponding lo12
-            i += 1;
-            if i < rlocs.len() {
-                let rloc2 = &rlocs[i];
-                if rloc2.rtype == Rpcrel_lo12_i {
-                    compound.push(CompoundRel::Pair(rloc.clone(), rloc2.clone()));
-                    i += 1;
-                } else {
-                    compound.push(CompoundRel::Simple(rloc.clone()));
+            if let Some(rloc2) = iter.peek() {
+                if rloc2.rtype == Rpcrel_lo12_i || rloc2.rtype == Rpcrel_lo12_s {
+                    compound.push(CompoundRel::Pair(rloc.clone(), (*rloc2).clone()));
+                    iter.next();
+                    push_simple = false;
                 }
-            } else {
-                compound.push(CompoundRel::Simple(rloc.clone()));
             }
-        } else {
+        }
+
+        if push_simple {
             compound.push(CompoundRel::Simple(rloc.clone()));
-            i += 1;
         }
     }
 
     compound
+}
+
+fn mutate_u6<F: FnOnce(u8) -> u8>(mem: &mut Memory, loc: Addr, f: F) -> Result<()> {
+    let old = mem.read_into::<u8>(loc, 0)?;
+    let new = f(old & 0b111111);
+    let bytes = [new & 0x3f];
+    mem.write(loc, &bytes, 0)
+        .map_err(|e| anyhow!("bad access at {}", e))
+}
+
+fn mutate_u8<F: FnOnce(u8) -> u8>(mem: &mut Memory, loc: Addr, f: F) -> Result<()> {
+    let old = mem.read_into::<u8>(loc, 0)?;
+    let new = f(old);
+    let bytes = [new];
+    mem.write(loc, &bytes, 0)
+        .map_err(|e| anyhow!("bad access at {}", e))
 }
 
 fn mutate_u16<F: FnOnce(u16) -> u16>(mem: &mut Memory, loc: Addr, f: F) -> Result<()> {
@@ -213,83 +241,158 @@ fn mutate_u64<F: FnOnce(u64) -> u64>(mem: &mut Memory, loc: Addr, f: F) -> Resul
         .map_err(|e| anyhow!("bad access at {}", e))
 }
 
-fn relocate(
-    mem: &mut Memory,
-    rtype: RelocationType,
-    location: Addr,
-    sym: Addr,
-    _addend: u64,
-) -> Result<()> {
+/// Performs a relocation.
+///
+/// See Table 3. Relocation types of the following:
+///    https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc
+///
+/// A: Addend field in the relocation entry associated with the symbol.
+/// P: Position of the relocation (ie. address)
+/// S: Value of the symbol
+/// V: Value currently stored in P
+///
+/// The newly calculated value gets written into a field at P.  This can be a simple
+/// type such as a word32.  Or it can be the immediate field of a risc-v instruction.
+/// Instruction formats containing immediates are denoted as I, S, B, U and J.  Some
+/// of these have the immediate field split up into multiple parts, so you will see
+/// some bit shuffling in the code below.
+fn relocate(mem: &mut Memory, rtype: RelocationType, p: u64, s: u64, a: u64) -> Result<()> {
     use RelocationType::*;
 
     match rtype {
         R32 => {
-            assert!(sym.0 as u32 as u64 == sym.0);
-            mutate_u32(mem, location, |_old| sym.0 as u32)?;
+            // S + A, word32
+            assert!(s as u32 as u64 == s);
+            mutate_u32(mem, Addr(p), |_v| (s as u32).wrapping_add(a as u32))?;
         }
         R64 => {
-            mutate_u64(mem, location, |_old| sym.0)?;
+            // S + A, word64
+            mutate_u64(mem, Addr(p), |_v| s.wrapping_add(a))?;
         }
         Rbranch => {
-            let offset = addr_offset(sym, location) as u32;
+            // S + A - P, B-type
+            let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
 
             let imm12 = (offset & 0x1000) << (31 - 12);
             let imm11 = (offset & 0x800) >> (11 - 7);
             let imm10_5 = (offset & 0x7e0) << (30 - 10);
             let imm4_1 = (offset & 0x1e) << (11 - 4);
-            mutate_u32(mem, location, |old| {
-                (old & 0x1fff07f) | imm12 | imm11 | imm10_5 | imm4_1
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0x1fff07f) | imm12 | imm11 | imm10_5 | imm4_1
             })?;
         }
         Rjal => {
-            let offset = addr_offset(sym, location) as u32;
+            // S + A - P, J-type
+            let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
             let imm20 = (offset & 0x100000) << (31 - 20);
             let imm19_12 = offset & 0xff000;
             let imm11 = (offset & 0x800) << (20 - 11);
             let imm10_1 = (offset & 0x7fe) << (30 - 10);
-            mutate_u32(mem, location, |old| {
-                (old & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
             })?;
         }
         Rcall => {
-            let offset = addr_offset(sym, location);
+            // S + A - P, U + I type (two instructions)
+            let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
 
-            let hi20: u32 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
-            let lo12: u32 = (offset as u32).wrapping_sub(hi20) & 0xfff;
-            mutate_u32(mem, location, |old| (old & 0xfff) | hi20)?;
-            let location = Addr(location.0 + 4);
-            mutate_u32(mem, location, |old| (old & 0xfffff) | (lo12 << 20))?;
+            let hi20: u32 = offset.wrapping_add(0x800) & 0xfffff000;
+            let lo12: u32 = offset.wrapping_sub(hi20) & 0xfff;
+            mutate_u32(mem, Addr(p), |v| (v & 0xfff) | hi20)?;
+            mutate_u32(mem, Addr(p + 4), |v| (v & 0xfffff) | (lo12 << 20))?;
         }
         Rpcrel_hi20 => {
-            let offset = addr_offset(sym, location);
-            let hi20 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
-            mutate_u32(mem, location, |old| (old & 0xfff) | hi20)?;
+            // S + A - P, U-type
+            let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
+            let hi20 = offset.wrapping_add(0x800) & 0xfffff000;
+            mutate_u32(mem, Addr(p), |v| (v & 0xfff) | hi20)?;
         }
         Rpcrel_lo12_i => {
-            mutate_u32(mem, location, |old| {
-                (old & 0xfffff) | (((sym.0 as u32) & 0xfff) << 20)
+            // S - P, I-type
+            // let offset = (s - p) as u32;
+            let offset = s as u32; // FIXME: subtraction already occured in caller
+            mutate_u32(mem, Addr(p), |v| (v & 0xfffff) | ((offset & 0xfff) << 20))?;
+        }
+        Rpcrel_lo12_s => {
+            // S + A, S-type
+            // let offset = (s + a) as u32;
+            let offset = s as u32; // FIXME: subtraction already occured in caller
+            mutate_u32(mem, Addr(p), |v| {
+                (v & 0xfffff) | ((offset & 0x1f) << 7) | ((offset & 0xfe) << 24)
+            })?;
+        }
+        Radd16 => {
+            // V + S + A, word16
+            mutate_u16(mem, Addr(p), |v| {
+                v.wrapping_add(s as u16).wrapping_add(a as u16)
             })?;
         }
         Radd32 => {
-            mutate_u32(mem, location, |old| old + sym.0 as u32)?;
+            // V + S + A, word32
+            mutate_u32(mem, Addr(p), |v| {
+                v.wrapping_add(s as u32).wrapping_add(a as u32)
+            })?;
+        }
+        Rsub6 => {
+            // V - S - A, word6
+            mutate_u6(mem, Addr(p), |v| {
+                v.wrapping_sub(s as u8).wrapping_sub(a as u8)
+            })?;
+        }
+        Rsub8 => {
+            // V - S - A, word8
+            mutate_u8(mem, Addr(p), |v| {
+                v.wrapping_sub(s as u8).wrapping_sub(a as u8)
+            })?;
+        }
+        Rsub16 => {
+            // V - S - A, word16
+            mutate_u16(mem, Addr(p), |v| {
+                v.wrapping_sub(s as u16).wrapping_sub(a as u16)
+            })?;
         }
         Rsub32 => {
-            mutate_u32(mem, location, |old| old.wrapping_sub(sym.0 as u32))?;
+            // V - S - A, word32
+            mutate_u32(mem, Addr(p), |v| {
+                v.wrapping_sub(s as u32).wrapping_sub(a as u32)
+            })?;
+        }
+        Radd64 => {
+            // V + S + A, word64
+            mutate_u64(mem, Addr(p), |v| v.wrapping_add(s).wrapping_add(a))?;
+        }
+        Rsub64 => {
+            // V - S - A, word64
+            mutate_u64(mem, Addr(p), |v| v.wrapping_sub(s).wrapping_sub(a))?;
+        }
+        Rset6 => {
+            // S + A, word6
+            mutate_u6(mem, Addr(p), |_| (s as u8).wrapping_add(a as u8))?;
+        }
+        Rset8 => {
+            // S + A, word8
+            mutate_u8(mem, Addr(p), |_| (s as u8).wrapping_add(a as u8))?;
+        }
+        Rset16 => {
+            // S + A, word16
+            mutate_u16(mem, Addr(p), |_| (s as u16).wrapping_add(a as u16))?;
         }
         Rrvc_branch => {
-            let offset = addr_offset(sym, location) as u16;
+            // S + A - P, B-type (says CB-type in the doc ???)
+            let offset = (s as u16).wrapping_add(a as u16).wrapping_sub(p as u16);
 
             let imm8 = (offset & 0x100) << (12 - 8);
             let imm7_6 = (offset & 0xc0) >> (6 - 5);
             let imm5 = (offset & 0x20) >> (5 - 2);
             let imm4_3 = (offset & 0x18) << (12 - 5);
             let imm2_1 = (offset & 0x6) << (12 - 10);
-            mutate_u16(mem, location, |old| {
-                (old & 0xe383) | imm8 | imm7_6 | imm5 | imm4_3 | imm2_1
+            mutate_u16(mem, Addr(p), |v| {
+                (v & 0xe383) | imm8 | imm7_6 | imm5 | imm4_3 | imm2_1
             })?;
         }
         Rrvc_jump => {
-            let offset = addr_offset(sym, location) as u16;
+            // S + A - P, J-type (says CJ-type in the doc ???)
+            let offset = (s as u16).wrapping_add(a as u16).wrapping_sub(p as u16);
 
             let imm11 = (offset & 0x800) << (12 - 11);
             let imm10 = (offset & 0x400) >> (10 - 8);
@@ -300,11 +403,12 @@ fn relocate(
             let imm4 = (offset & 0x10) << (12 - 5);
             let imm3_1 = (offset & 0xe) << (12 - 10);
 
-            mutate_u16(mem, location, |old| {
-                (old & 0xe003) | imm11 | imm10 | imm9_8 | imm7 | imm6 | imm5 | imm4 | imm3_1
+            mutate_u16(mem, Addr(p), |v| {
+                (v & 0xe003) | imm11 | imm10 | imm9_8 | imm7 | imm6 | imm5 | imm4 | imm3_1
             })?;
         }
         _ => {
+            debug!("unsupported relocation type: {:?}", rtype);
             return Err(anyhow!("unsupported relocation type: {:?}", rtype));
         }
     }
@@ -317,25 +421,18 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
         CompoundRel::Simple(rloc) => {
             // This is the location of the instruction that needs adjusting.
             let base = rloc.section.borrow().shdr.addr;
-            let location = Addr(base + rloc.offset);
+            let location = base + rloc.offset;
             let sym = rloc.sym.borrow();
             let mut sym_addr = sym.section.as_ref().unwrap().borrow().shdr.addr;
             sym_addr += sym.value;
 
-            relocate(
-                mem,
-                rloc.rtype,
-                location,
-                Addr(sym_addr + rloc.addend),
-                rloc.addend,
-            )?;
+            relocate(mem, rloc.rtype, location, sym_addr, rloc.addend)?;
         }
         CompoundRel::Pair(hi_rloc, lo_rloc) => {
             let base = hi_rloc.section.borrow().shdr.addr;
 
-            // These is the location of the instruction that needs adjusting.
-            let hi_location = Addr(base + hi_rloc.offset);
-            let lo_location = Addr(base + lo_rloc.offset);
+            let hi_location = base + hi_rloc.offset;
+            let lo_location = base + lo_rloc.offset;
 
             // Both hi/lo refer to the same sym.
             let sym = hi_rloc.sym.borrow();
@@ -343,19 +440,13 @@ fn exec_relocation(mem: &mut Memory, crel: &CompoundRel) -> Result<()> {
             sym_addr += sym.value;
 
             // Do the hi20 relocation
-            relocate(
-                mem,
-                hi_rloc.rtype,
-                hi_location,
-                Addr(sym_addr + hi_rloc.addend),
-                hi_rloc.addend,
-            )?;
+            relocate(mem, hi_rloc.rtype, hi_location, sym_addr, hi_rloc.addend)?;
 
             // Do the lo12 relocation
-            let offset = addr_offset(Addr(sym_addr + hi_rloc.addend), hi_location);
+            let offset = addr_offset(Addr(sym_addr + hi_rloc.addend), Addr(hi_location));
             let hi20 = ((offset + 0x800) as u32 as u64) & 0xfffff000;
             let lo12 = (offset as u32 as u64).wrapping_sub(hi20);
-            relocate(mem, lo_rloc.rtype, lo_location, Addr(lo12), lo_rloc.addend)?;
+            relocate(mem, lo_rloc.rtype, lo_location, lo12, 0)?;
         }
     }
 
@@ -386,7 +477,10 @@ struct Module {
     text_sections: Sections,
     rw_sections: Sections,
     ro_sections: Sections,
+    dbg_sections: Sections,
+
     relocations: Vec<CompoundRel>,
+    dbg_relocations: Vec<CompoundRel>,
 }
 
 fn read_syms(file: &elf::File) -> Result<Vec<Symbol>> {
@@ -440,12 +534,21 @@ fn filter_syms(syms: &[Rc<RefCell<Sym>>]) -> (Syms, Syms, Syms) {
     (refs, defs, internal)
 }
 
+struct FilteredSections {
+    text_sections: Sections,
+    rw_sections: Sections,
+    ro_sections: Sections,
+    rel_sections: Sections,
+    dbg_sections: Sections,
+}
+
 // Returns (text, rw, ro, rel)
-fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sections) {
+fn filter_sections(sections: &Sections) -> FilteredSections {
     let mut text_sections = Vec::new();
     let mut rw_sections = Vec::new();
     let mut ro_sections = Vec::new();
     let mut rel_sections = Vec::new();
+    let mut dbg_sections = Vec::new();
 
     for section in sections {
         let s = section.borrow();
@@ -456,6 +559,11 @@ fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sectio
 
         if s.shdr.shtype == SHT_RELA {
             rel_sections.push(section.clone());
+            continue;
+        }
+
+        if s.shdr.name.starts_with(".debug") {
+            dbg_sections.push(section.clone());
             continue;
         }
 
@@ -476,7 +584,13 @@ fn filter_sections(sections: &Sections) -> (Sections, Sections, Sections, Sectio
         }
     }
 
-    (text_sections, rw_sections, ro_sections, rel_sections)
+    FilteredSections {
+        text_sections,
+        rw_sections,
+        ro_sections,
+        rel_sections,
+        dbg_sections,
+    }
 }
 
 fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
@@ -492,44 +606,46 @@ fn read_module<P: AsRef<Path>>(path: P) -> Result<Module> {
 
     let syms = xlate_syms(syms, &sections);
     let (refs, defs, internal) = filter_syms(&syms[0..]);
-    let (text_sections, rw_sections, ro_sections, rel_sections) = filter_sections(&sections);
+    let fsections = filter_sections(&sections);
 
     // FIXME: factor out
     let mut relocations = Vec::new();
-    for rsection in rel_sections {
+    let mut dbg_relocations = Vec::new();
+
+    for rsection in fsections.rel_sections {
         let rsection = rsection.borrow();
 
         let index = rsection.shdr.info as usize;
         let associated_section = sections[index].clone();
 
-        // Hack to avoid relocating debug sections.  Really we should
-        // check to see if the associated section is going to be loaded.
-        if !has_flag(associated_section.borrow().shdr.flags, SHF_ALLOC) {
-            debug!(
-                "ignoring relocations for section {}",
-                associated_section.borrow().shdr.name
-            );
-            continue;
-        }
+        let rels = if !has_flag(associated_section.borrow().shdr.flags, SHF_ALLOC) {
+            &mut dbg_relocations
+        } else {
+            &mut relocations
+        };
 
-        relocations.append(&mut parse_relocations(
+        rels.append(&mut parse_relocations(
             &rsection.data,
             &syms[0..],
             associated_section,
         )?);
     }
+
     let relocations = build_compound_rels(relocations);
+    let dbg_relocations = build_compound_rels(dbg_relocations);
 
     Ok(Module {
         refs,
         defs,
         internal,
 
-        text_sections,
-        rw_sections,
-        ro_sections,
+        text_sections: fsections.text_sections,
+        rw_sections: fsections.rw_sections,
+        ro_sections: fsections.ro_sections,
+        dbg_sections: fsections.dbg_sections,
 
         relocations,
+        dbg_relocations,
     })
 }
 
@@ -590,20 +706,41 @@ fn load_sections(mem: &mut Memory, base: Addr, ss: &mut Sections, perms: u8) -> 
     Ok(Addr(base.0 + len))
 }
 
+fn load_dbg_sections(ss: &mut Sections) -> Result<DbgMems> {
+    let mut mems = BTreeMap::new();
+    for s in ss {
+        let mut s = s.borrow_mut();
+        s.shdr.addr = 0;
+
+        let mut mem = Memory::new(Addr(0), Addr(1024)); // heap not used
+        let len = s.shdr.size as usize;
+        mem.mmap_bytes(Addr(0), s.data.clone(), PERM_READ | PERM_WRITE)
+            .map_err(|_e| anyhow!("couldn't mmap section"))?;
+        mems.insert(s.shdr.name.clone(), (len, mem));
+    }
+
+    Ok(mems)
+}
+
 #[derive(Clone)]
 pub struct LoaderInfo {
     symbols: BTreeMap<String, Addr>,
     sym_rmap: BTreeMap<Addr, String>,
+    pub debug: Arc<Mutex<DebugInfo>>,
 }
 
 impl LoaderInfo {
-    fn new(symbols: BTreeMap<String, Addr>) -> Self {
+    fn new(symbols: BTreeMap<String, Addr>, debug: DebugInfo) -> Self {
         let mut sym_rmap = BTreeMap::new();
         for (k, v) in &symbols {
             sym_rmap.insert(*v, k.clone());
         }
 
-        LoaderInfo { symbols, sym_rmap }
+        LoaderInfo {
+            symbols,
+            sym_rmap,
+            debug: Arc::new(Mutex::new(debug)),
+        }
     }
 
     pub fn get_sym(&self, name: &str) -> Option<Addr> {
@@ -613,6 +750,11 @@ impl LoaderInfo {
     pub fn get_rmap(&self, loc: Addr) -> Option<String> {
         self.sym_rmap.get(&loc).cloned()
     }
+}
+
+fn round_up(addr: Addr, align: u64) -> Addr {
+    let mask = align - 1;
+    Addr((addr.0 + mask) & !mask)
 }
 
 fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
@@ -625,15 +767,15 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     let space = 1024 * 1024;
     let text_base = Addr(space);
     debug!("loading text sections starting at {:?}", text_base);
-    load_sections(mem, text_base, &mut module.text_sections, PERM_EXEC)?;
+    let end = load_sections(mem, text_base, &mut module.text_sections, PERM_EXEC)?;
 
-    let ro_base = Addr(2 * space);
+    let ro_base = round_up(end, space);
     debug!("loading ro sections starting at {:?}", ro_base);
-    load_sections(mem, ro_base, &mut module.ro_sections, PERM_READ)?;
+    let end = load_sections(mem, ro_base, &mut module.ro_sections, PERM_READ)?;
 
-    let rw_base = Addr(3 * space);
+    let rw_base = round_up(end, space);
     debug!("loading rw sections starting at {:?}", rw_base);
-    load_sections(
+    let end = load_sections(
         mem,
         rw_base,
         &mut module.rw_sections,
@@ -641,10 +783,11 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     )?;
 
     // FIXME: factor out
+    debug!("stubbing undefined references");
     {
         // Create a section for undefined references.  These will be hooked by
         // test code.
-        let undefined_base = Addr(4 * space);
+        let undefined_base = round_up(end, space);
         let undefined_end = Addr(undefined_base.0 + module.refs.len() as u64 * 4);
         mem.mmap_zeroes(
             undefined_base,
@@ -686,16 +829,19 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
     // Now that the global refs have been stubbed, every
     // symbol in the relocations should have an associated
     // section.
+    debug!("checking relocations");
     for r in &module.relocations {
         check_relocation(r);
     }
 
     // Execute all the relocations.
+    debug!("executing relocations");
     for r in &module.relocations {
         exec_relocation(mem, r)?;
     }
 
     // build globals symbol table
+    debug!("building global symbol table");
     let mut symtable = BTreeMap::new();
     for s in &module.refs {
         let s = s.borrow();
@@ -705,6 +851,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
+    debug!("building defs");
     for s in &module.defs {
         let s = s.borrow();
         if let Some(section) = &s.section {
@@ -713,6 +860,7 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
+    debug!("building internals");
     for s in &module.internal {
         let s = s.borrow();
         if let Some(section) = &s.section {
@@ -721,7 +869,22 @@ fn load_module(mem: &mut Memory, mut module: Module) -> Result<LoaderInfo> {
         }
     }
 
-    Ok(LoaderInfo::new(symtable))
+    debug!("loading debug info");
+    let mut mems = load_dbg_sections(&mut module.dbg_sections)?;
+
+    debug!("relocating debug sections");
+    for r in &module.dbg_relocations {
+        let section_name = match r {
+            CompoundRel::Simple(r) => r.section.borrow().shdr.name.clone(),
+            CompoundRel::Pair(r1, _r2) => r1.section.borrow().shdr.name.clone(),
+        };
+        if let Some((_len, mem)) = mems.get_mut(&section_name) {
+            exec_relocation(mem, r)?;
+        }
+    }
+
+    let debug = DebugInfo::new(mems)?;
+    Ok(LoaderInfo::new(symtable, debug))
 }
 
 /// Links all the modules needed for a test into a single 'super' module.
@@ -756,9 +919,9 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
 }
 
 pub fn load_modules<P: AsRef<Path>>(mem: &mut Memory, paths: &[P]) -> Result<LoaderInfo> {
-    let super_module = NamedTempFile::new()?;
-    link_modules(paths, super_module.path())?;
-    let module = read_module(super_module.path())?;
+    let path = Path::new("super-module.ko");
+    link_modules(paths, path)?;
+    let module = read_module(path)?;
     load_module(mem, module)
 }
 

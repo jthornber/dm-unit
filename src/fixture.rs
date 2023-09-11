@@ -6,7 +6,7 @@ use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use libc::{c_int, strerror_r};
 use log::*;
 use std::collections::BTreeMap;
@@ -37,6 +37,8 @@ pub struct Fixture {
     // A useful place to store host structures against a guest
     // address.
     pub contexts: AnyMap<Addr>,
+
+    kernel_dir: PathBuf,
 }
 
 #[derive(Clone)]
@@ -62,6 +64,11 @@ impl KernelModule {
 pub const PDATA_MOD: KernelModule = KernelModule {
     basename: "dm-persistent-data",
     relative_path: "drivers/md/persistent-data/dm-persistent-data.ko",
+};
+
+pub const BUFIO_MOD: KernelModule = KernelModule {
+    basename: "dm-bufio",
+    relative_path: "drivers/md/dm-bufio.ko",
 };
 
 pub const THIN_MOD: KernelModule = KernelModule {
@@ -96,7 +103,12 @@ impl Fixture {
         Ok((loader_info, mem))
     }
 
-    pub fn new(loader_info: LoaderInfo, mem: Memory, jit: bool) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        kernel_dir: &P,
+        loader_info: LoaderInfo,
+        mem: Memory,
+        jit: bool,
+    ) -> Result<Self> {
         let mut vm = VM::new(mem, jit);
 
         // Setup the stack and heap
@@ -108,6 +120,7 @@ impl Fixture {
             breakpoints: BTreeMap::new(),
             trace_indent: 0,
             contexts: AnyMap::default(),
+            kernel_dir: std::fs::canonicalize(PathBuf::from(kernel_dir.as_ref())).unwrap(),
         })
     }
 
@@ -166,7 +179,7 @@ impl Fixture {
     // Sometimes we need a unique location to set a breakpoint, to do this
     // we allocate a word on the heap and fill it out with an ebreak.
     // FIXME: memleak
-    fn alloc_ebreak(&mut self) -> Result<Addr> {
+    pub fn alloc_ebreak(&mut self) -> Result<Addr> {
         // We need a unique address return control to us.
         let ptr = self.vm.mem.alloc_bytes(vec![0u8; 4], PERM_EXEC)?;
 
@@ -214,14 +227,23 @@ impl Fixture {
                     self.bp_rm(exit_addr);
                     Ok(())
                 } else {
-                    Err(e)
+                    Err(e).with_context(|| {
+                        let debug = self.loader_info.debug.lock().unwrap();
+                        let loc = debug
+                            .addr2line(&self.kernel_dir, Addr(self.vm.reg(PC)))
+                            .unwrap_or(format!("0x{:x}", self.vm.reg(PC)));
+                        format!("{}", loc)
+                    })
                 }
             }
         }
     }
 
     pub fn call(&mut self, func: &str) -> Result<()> {
-        self.call_at(self.lookup_fn(func)?)
+        // debug!(">>> {}()", func);
+        self.call_at(self.lookup_fn(func)?)?;
+        // debug!("<<< {}()", func);
+        Ok(())
     }
 
     // Use this to call functions that return an int errno.
@@ -238,7 +260,7 @@ impl Fixture {
         Ok(())
     }
 
-    pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
+    pub fn call_at_with_errno_(&mut self, loc: Addr) -> Result<()> {
         self.call_at(loc)?;
         let r = self.vm.reg(A0) as i64 as i32;
         if r != 0 {
@@ -248,6 +270,13 @@ impl Fixture {
                 return Err(anyhow!("failed: {}", r));
             }
         }
+        Ok(())
+    }
+
+    pub fn call_at_with_errno(&mut self, loc: Addr) -> Result<()> {
+        // debug!(">>> 0x{:x}", loc.0);
+        self.call_at_with_errno_(loc)?;
+        // debug!("<<< 0x{:x}", loc.0);
         Ok(())
     }
 
@@ -274,6 +303,16 @@ impl Fixture {
             Ok(())
         };
         self.at_func(func, Box::new(callback))
+    }
+
+    pub fn const_callback(&mut self, v: u64) -> Result<Addr> {
+        let callback = move |fix: &mut Fixture| {
+            fix.vm.ret(v);
+            Ok(())
+        };
+        let ptr = self.alloc_ebreak()?;
+        self.bp_at_addr(ptr, Box::new(callback));
+        Ok(ptr)
     }
 
     // FIXME: there's got to be a better way to do this
@@ -398,10 +437,27 @@ impl<'a> AutoGPtr<'a> {
     pub fn new(fix: &'a mut Fixture, ptr: Addr) -> Self {
         AutoGPtr { fix, ptr }
     }
+
+    /// Takes ownership of the pointer and returns its value.
+    ///
+    /// The method sets the pointer to zero to prevent double-freeing and returns its original value.
+    ///
+    /// # Returns
+    ///
+    /// The value of the pointer.
+    pub fn take(&mut self) -> Addr {
+        let ptr = self.ptr;
+        self.ptr.0 = 0;
+        ptr
+    }
 }
 
 impl<'a> Drop for AutoGPtr<'a> {
     fn drop(&mut self) {
+        if self.ptr.is_null() {
+            return;
+        }
+
         self.fix
             .vm
             .mem
@@ -423,12 +479,33 @@ impl<'a> DerefMut for AutoGPtr<'a> {
     }
 }
 
+/// Create an auto ptr to a guest allocation of size |len|.  The memory
+/// will have read/write permissions.
 pub fn auto_alloc(fix: &mut Fixture, len: usize) -> Result<(AutoGPtr, Addr)> {
     let ptr = fix
         .vm
         .mem
         .alloc_bytes(vec![0u8; len], PERM_READ | PERM_WRITE)?;
     Ok((AutoGPtr::new(fix, ptr), ptr))
+}
+
+pub fn auto_alloc_vec<'a, G: Guest>(
+    fix: &'a mut Fixture,
+    vals: &'a [G],
+) -> Result<(AutoGPtr<'a>, Vec<Addr>)> {
+    let len = G::guest_len() * vals.len();
+    let (mut fix, ptr) = auto_alloc(fix, len)?;
+
+    for (i, v) in vals.iter().enumerate() {
+        let v_ptr = Addr(ptr.0 + (G::guest_len() * i) as u64);
+        write_guest(&mut fix.vm.mem, v_ptr, v)?;
+    }
+
+    let ptrs = (0..vals.len())
+        .map(|i| Addr(ptr.0 + (G::guest_len() * i) as u64))
+        .collect();
+
+    Ok((fix, ptrs))
 }
 
 /// Allocates an excutable chunk of memory that we can use to fake a callback.

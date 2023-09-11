@@ -1,5 +1,5 @@
 use crate::emulator::memory::*;
-use crate::emulator::riscv;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
@@ -173,7 +173,7 @@ impl BMInner {
     }
 
     fn v_prep(&mut self, fix: &mut Fixture, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
-        use riscv::Reg::*;
+        use Reg::*;
 
         if v_ptr.is_null() {
             return Ok(());
@@ -574,6 +574,7 @@ impl BMInner {
                     self.v_prep(fix, guest_ptr, validator)?;
 
                     let data = fix.vm.mem.free(gb.data)?;
+                    fix.vm.mem.free(guest_ptr)?;
                     self.locks.insert(
                         gb.loc,
                         Lock::Clean {
@@ -819,10 +820,6 @@ impl BlockManager {
 }
 
 impl IoEngine for BlockManager {
-    fn suggest_nr_threads(&self) -> usize {
-        1
-    }
-
     fn get_nr_blocks(&self) -> u64 {
         let inner = self.inner.lock().unwrap();
         inner.nr_blocks
@@ -830,6 +827,10 @@ impl IoEngine for BlockManager {
 
     fn get_batch_size(&self) -> usize {
         1024
+    }
+
+    fn suggest_nr_threads(&self) -> usize {
+        1
     }
 
     fn read(&self, b: u64) -> io::Result<io_engine::Block> {

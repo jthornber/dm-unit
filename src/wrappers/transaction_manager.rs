@@ -3,6 +3,9 @@ use crate::emulator::riscv::Reg::*;
 use crate::fixture::*;
 
 use anyhow::Result;
+use byteorder::LittleEndian;
+use byteorder::ReadBytesExt;
+use std::io::Cursor;
 
 //-------------------------------
 
@@ -121,6 +124,39 @@ pub fn dm_tm_ref(fix: &mut Fixture, tm: Addr, b: u64) -> Result<u32> {
 
     let count = fix.vm.mem.read_into::<u32>(result_ptr, PERM_READ)?;
     Ok(count)
+}
+
+pub fn dm_tm_load_stats(fix: &mut Fixture, tm: Addr) -> Result<(Vec<u32>, Vec<u32>)> {
+    let (mut fix, action) = auto_alloc(fix, 32)?;
+    let (mut fix, stats) = auto_alloc(&mut fix, 32)?;
+
+    fix.vm.set_reg(A0, tm.0);
+    fix.vm.set_reg(A1, action.0);
+    fix.vm.set_reg(A2, stats.0);
+
+    fix.call("dm_tm_load_stats")?;
+
+    let action = fix.vm.mem.read_some(action, PERM_READ, |bytes| {
+        assert!(bytes.len() >= 32);
+        let mut v = Vec::new();
+        let mut r = Cursor::new(bytes);
+        for _i in 0..8 {
+            v.push(r.read_u32::<LittleEndian>().unwrap());
+        }
+        v
+    })?;
+
+    let stats = fix.vm.mem.read_some(stats, PERM_READ, |bytes| {
+        assert!(bytes.len() >= 32);
+        let mut v = Vec::new();
+        let mut r = Cursor::new(bytes);
+        for _i in 0..8 {
+            v.push(r.read_u32::<LittleEndian>().unwrap());
+        }
+        v
+    })?;
+
+    Ok((action, stats))
 }
 
 //-------------------------------
