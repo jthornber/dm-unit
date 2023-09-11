@@ -14,7 +14,7 @@ use dm_unit::tests::thinp;
 
 use anyhow::Result;
 use clap::{arg, value_parser, Arg, ArgAction, ArgMatches, Command};
-use log::Level;
+use log::{set_boxed_logger, Level};
 use regex::Regex;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -169,8 +169,8 @@ fn run(matches: &ArgMatches, log_lines: Arc<Mutex<LogInner>>) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let (log, inner) = CaptureLogger::new(Level::Debug);
-    log::set_boxed_logger(Box::new(log))?;
+    let (new_log, inner) = CaptureLogger::new(Level::Debug);
+    log::set_boxed_logger(Box::new(new_log))?;
     log::set_max_level(log::LevelFilter::Debug);
 
     let parser = Command::new("dm-unit")
