@@ -158,6 +158,11 @@ pub struct TestRunner<'a> {
     jit: bool,
 }
 
+fn get_log(log_lines: &Arc<Mutex<LogInner>>) -> String {
+    let mut log = log_lines.lock().unwrap();
+    log.get_lines().join("\n")
+}
+
 /// Wraps a test so we can run it in a thread.
 fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestResult {
     {
@@ -169,23 +174,18 @@ fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestR
     let result = (t.func)(&mut fix);
     let icount_end = fix.vm.stats.instrs;
 
-    let mut lines = {
-        let mut log = log_lines.lock().unwrap();
-        log.get_lines().join("\n")
-    };
-
     match result {
         Ok(()) => TestResult {
             pass: true,
-            log: lines,
+            log: get_log(&log_lines),
             icount: icount_end - icount_begin,
         },
         Err(e) => {
-            lines.push_str(&format!("\nException: {:#}", e));
+            warn!("Test failed: {:#}", e);
 
             TestResult {
                 pass: false,
-                log: lines,
+                log: get_log(&log_lines),
                 icount: icount_end - icount_begin,
             }
         }
