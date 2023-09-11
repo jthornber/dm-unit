@@ -132,6 +132,12 @@ impl Fixture {
         }
     }
 
+    /// Returns the source location of the current instruction.
+    fn get_source_location(&self) -> Result<String> {
+        let debug = self.loader_info.debug.lock().unwrap();
+        debug.addr2line(&self.kernel_dir, Addr(self.vm.reg(PC)))
+    }
+
     // Runs the vm, handling any breakpoints.
     fn run_vm(&mut self) -> Result<()> {
         loop {
@@ -165,7 +171,8 @@ impl Fixture {
                 }
                 Err(VmErr::EBreak) => {
                     if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
-                        warn!("unstubbed global called: {}", global);
+                        let loc = self.get_source_location()?;
+                        warn!("{}: unstubbed global called '{}'", loc, global);
                         return Err(anyhow!("unstubbed global access '{}'", global));
                     } else {
                         return Err(VmErr::EBreak.into());
@@ -228,11 +235,8 @@ impl Fixture {
                     Ok(())
                 } else {
                     Err(e).with_context(|| {
-                        let debug = self.loader_info.debug.lock().unwrap();
-                        let loc = debug
-                            .addr2line(&self.kernel_dir, Addr(self.vm.reg(PC)))
-                            .unwrap_or(format!("0x{:x}", self.vm.reg(PC)));
-                        format!("{}", loc)
+                        self.get_source_location()
+                            .unwrap_or(format!("0x{:x}", self.vm.reg(PC)))
                     })
                 }
             }
