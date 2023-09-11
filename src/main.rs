@@ -13,8 +13,8 @@ use dm_unit::tests::space_map_metadata;
 use dm_unit::tests::thinp;
 
 use anyhow::Result;
-use clap::{arg, value_parser, Arg, ArgAction, ArgMatches, Command};
-use log::{set_boxed_logger, Level};
+use clap::{arg, Arg, ArgAction, ArgMatches, Command};
+use log::Level;
 use regex::Regex;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
