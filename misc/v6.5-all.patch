@@ -1,0 +1,1220 @@
+commit 2446a8c97684821b39bd8148143503cbe086d8b1
+Author: Joe Thornber <ejt@redhat.com>
+Date:   Tue Sep 12 14:45:13 2023 +0100
+
+    dm-unit changes
+
+diff --git a/Makefile b/Makefile
+index 2fdd8b40b7e0..9d3c611aa9dc 100644
+--- a/Makefile
++++ b/Makefile
+@@ -932,6 +932,13 @@ ifdef CONFIG_ZERO_CALL_USED_REGS
+ KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
+ endif
+ 
++ifdef CONFIG_NO_AUTO_INLINE
++KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
++		   $(call cc-option, -fno-inline-small-functions) \
++		   $(call cc-option, -fno-inline-functions-called-once) \
++		   -fno-ipa-cp -fno-ipa-sra -fno-tree-dce
++endif
++
+ ifdef CONFIG_FUNCTION_TRACER
+ ifdef CONFIG_FTRACE_MCOUNT_USE_CC
+   CC_FLAGS_FTRACE	+= -mrecord-mcount
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bea7b73e895d..e22d77ca35e3 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -794,11 +794,8 @@ config EFI
+ 	  allow the kernel to be booted as an EFI application. This
+ 	  is only useful on systems that have UEFI firmware.
+ 
+-config CC_HAVE_STACKPROTECTOR_TLS
+-	def_bool $(cc-option,-mstack-protector-guard=tls -mstack-protector-guard-reg=tp -mstack-protector-guard-offset=0)
+-
+ config STACKPROTECTOR_PER_TASK
+-	def_bool y
++	def_bool n
+ 	depends on !RANDSTRUCT
+ 	depends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_TLS
+ 
+diff --git a/drivers/md/dm-bufio.c b/drivers/md/dm-bufio.c
+index bc309e41d074..534e64e0f852 100644
+--- a/drivers/md/dm-bufio.c
++++ b/drivers/md/dm-bufio.c
+@@ -114,7 +114,7 @@ static void lru_destroy(struct lru *lru)
+ /*
+  * Insert a new entry into the lru.
+  */
+-static void lru_insert(struct lru *lru, struct lru_entry *le)
++static noinline void lru_insert(struct lru *lru, struct lru_entry *le)
+ {
+ 	/*
+ 	 * Don't be tempted to set to 1, makes the lru aspect
+@@ -235,7 +235,7 @@ static void lru_remove(struct lru *lru, struct lru_entry *le)
+ /*
+  * Mark as referenced.
+  */
+-static inline void lru_reference(struct lru_entry *le)
++static noinline void lru_reference(struct lru_entry *le)
+ {
+ 	atomic_set(&le->referenced, 1);
+ }
+@@ -254,7 +254,7 @@ enum evict_result {
+ 
+ typedef enum evict_result (*le_predicate)(struct lru_entry *le, void *context);
+ 
+-static struct lru_entry *lru_evict(struct lru *lru, le_predicate pred, void *context)
++struct lru_entry *lru_evict(struct lru *lru, le_predicate pred, void *context)
+ {
+ 	unsigned long tested = 0;
+ 	struct list_head *h = lru->cursor;
+@@ -517,7 +517,7 @@ static void cache_init(struct dm_buffer_cache *bc, unsigned int num_locks)
+ 	lru_init(&bc->lru[LIST_DIRTY]);
+ }
+ 
+-static void cache_destroy(struct dm_buffer_cache *bc)
++static noinline void cache_destroy(struct dm_buffer_cache *bc)
+ {
+ 	unsigned int i;
+ 
+@@ -811,7 +811,7 @@ static bool __cache_insert(struct rb_root *root, struct dm_buffer *b)
+ 	return true;
+ }
+ 
+-static bool cache_insert(struct dm_buffer_cache *bc, struct dm_buffer *b)
++static noinline bool cache_insert(struct dm_buffer_cache *bc, struct dm_buffer *b)
+ {
+ 	bool r;
+ 
+diff --git a/drivers/md/dm-cache-metadata.c b/drivers/md/dm-cache-metadata.c
+index acffed750e3e..0cb1365fd37e 100644
+--- a/drivers/md/dm-cache-metadata.c
++++ b/drivers/md/dm-cache-metadata.c
+@@ -1324,11 +1324,12 @@ static bool hints_array_initialized(struct dm_cache_metadata *cmd)
+ 	return cmd->hint_root && cmd->policy_hint_size;
+ }
+ 
+-static bool hints_array_available(struct dm_cache_metadata *cmd,
++static noinline bool hints_array_available(struct dm_cache_metadata *cmd,
+ 				  struct dm_cache_policy *policy)
+ {
++	pr_alert("here");
+ 	return cmd->clean_when_opened && policy_unchanged(cmd, policy) &&
+-		hints_array_initialized(cmd);
++	       hints_array_initialized(cmd);
+ }
+ 
+ static int __load_mapping_v1(struct dm_cache_metadata *cmd,
+diff --git a/drivers/md/dm-thin-metadata.c b/drivers/md/dm-thin-metadata.c
+index 6022189c1388..880ad9a8fd89 100644
+--- a/drivers/md/dm-thin-metadata.c
++++ b/drivers/md/dm-thin-metadata.c
+@@ -7,6 +7,7 @@
+ 
+ #include "dm-thin-metadata.h"
+ #include "persistent-data/dm-btree.h"
++#include "persistent-data/dm-extent-allocator.h"
+ #include "persistent-data/dm-space-map.h"
+ #include "persistent-data/dm-space-map-disk.h"
+ #include "persistent-data/dm-transaction-manager.h"
+@@ -152,6 +153,7 @@ struct dm_pool_metadata {
+ 	struct dm_block_manager *bm;
+ 	struct dm_space_map *metadata_sm;
+ 	struct dm_space_map *data_sm;
++	struct dm_extent_allocator *data_extents;
+ 	struct dm_transaction_manager *tm;
+ 	struct dm_transaction_manager *nb_tm;
+ 
+@@ -232,6 +234,7 @@ struct dm_thin_device {
+ 	struct list_head list;
+ 	struct dm_pool_metadata *pmd;
+ 	dm_thin_id id;
++	struct dm_alloc_context data_alloc;
+ 
+ 	int open_count;
+ 	bool changed:1;
+@@ -846,6 +849,12 @@ static int __begin_transaction(struct dm_pool_metadata *pmd)
+ 	return 0;
+ }
+ 
++static void __free_device(struct dm_thin_device *td)
++{
++	dm_alloc_context_put(&td->data_alloc);
++	kfree(td);
++}
++
+ static int __write_changed_details(struct dm_pool_metadata *pmd)
+ {
+ 	int r;
+@@ -874,7 +883,7 @@ static int __write_changed_details(struct dm_pool_metadata *pmd)
+ 			td->changed = false;
+ 		else {
+ 			list_del(&td->list);
+-			kfree(td);
++			__free_device(td);
+ 		}
+ 	}
+ 
+@@ -956,6 +965,7 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
+ {
+ 	int r;
+ 	struct dm_pool_metadata *pmd;
++	uint64_t nr_blocks;
+ 
+ 	pmd = kmalloc(sizeof(*pmd), GFP_KERNEL);
+ 	if (!pmd) {
+@@ -972,6 +982,7 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
+ 	pmd->data_block_size = data_block_size;
+ 	pmd->pre_commit_fn = NULL;
+ 	pmd->pre_commit_context = NULL;
++	pmd->data_extents = NULL;
+ 
+ 	r = __create_persistent_data_objects(pmd, format_device);
+ 	if (r) {
+@@ -981,14 +992,31 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
+ 
+ 	r = __begin_transaction(pmd);
+ 	if (r < 0) {
+-		if (dm_pool_metadata_close(pmd) < 0)
+-			DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
+-		return ERR_PTR(r);
++		DMERR("could not begin transaction");
++		goto bad;
+ 	}
+ 
+ 	__set_metadata_reserve(pmd);
+ 
++	r = dm_sm_get_nr_blocks(pmd->data_sm, &nr_blocks);
++	if (r) {
++		DMERR("could not get size of data device");
++		goto bad;
++	}
++
++	pmd->data_extents = dm_extent_allocator_create(nr_blocks);
++	if (!pmd->data_extents) {
++		DMWARN("could not create data extent allocator");
++		r = -ENOMEM;
++		goto bad;
++	}
++
+ 	return pmd;
++
++bad:
++	if (dm_pool_metadata_close(pmd) < 0)
++		DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
++	return ERR_PTR(r);
+ }
+ 
+ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
+@@ -1003,7 +1031,7 @@ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
+ 			open_devices++;
+ 		else {
+ 			list_del(&td->list);
+-			kfree(td);
++			__free_device(td);
+ 		}
+ 	}
+ 	up_read(&pmd->root_lock);
+@@ -1024,6 +1052,9 @@ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
+ 	pmd_write_unlock(pmd);
+ 	__destroy_persistent_data_objects(pmd, true);
+ 
++	if (pmd->data_extents)
++		dm_extent_allocator_destroy(pmd->data_extents);
++
+ 	kfree(pmd);
+ 	return 0;
+ }
+@@ -1091,6 +1122,7 @@ static int __open_device(struct dm_pool_metadata *pmd,
+ 	(*td)->creation_time = le32_to_cpu(details_le.creation_time);
+ 	(*td)->snapshotted_time = le32_to_cpu(details_le.snapshotted_time);
+ 
++	dm_alloc_context_get(pmd->data_extents, &(*td)->data_alloc);
+ 	list_add(&(*td)->list, &pmd->thin_devices);
+ 
+ 	return 0;
+@@ -1263,7 +1295,8 @@ static int __delete_device(struct dm_pool_metadata *pmd, dm_thin_id dev)
+ 	}
+ 
+ 	list_del(&td->list);
+-	kfree(td);
++	__free_device(td);
++
+ 	r = dm_btree_remove(&pmd->details_info, pmd->details_root,
+ 			    &key, &pmd->details_root);
+ 	if (r)
+@@ -1849,13 +1882,29 @@ bool dm_thin_aborted_changes(struct dm_thin_device *td)
+ 	return r;
+ }
+ 
+-int dm_pool_alloc_data_block(struct dm_pool_metadata *pmd, dm_block_t *result)
++static int sm_alloc_extent(void *context, uint64_t b, uint64_t e, uint64_t *result)
++{
++	struct dm_pool_metadata *pmd = context;
++	return dm_sm_new_block_in_range(pmd->data_sm, b, e, result);
++}
++
++int dm_thin_alloc_data_block(struct dm_thin_device *td, dm_block_t *result)
+ {
+ 	int r = -EINVAL;
++	struct dm_pool_metadata *pmd = td->pmd;
+ 
+ 	pmd_write_lock(pmd);
+-	if (!pmd->fail_io)
+-		r = dm_sm_new_block(pmd->data_sm, result);
++	if (!pmd->fail_io) {
++		r = dm_alloc_context_alloc(&td->data_alloc, sm_alloc_extent, pmd, result);
++		if (r == -ENOSPC) {
++			/*
++			 * If we've run out of space we retry in case any block have been
++			 * freed since we last resized/reset the extent allocator.
++			 */
++			dm_extent_allocator_reset(pmd->data_extents);
++			r = dm_alloc_context_alloc(&td->data_alloc, sm_alloc_extent, pmd, result);
++		}
++	}
+ 	pmd_write_unlock(pmd);
+ 
+ 	return r;
+@@ -2050,8 +2099,11 @@ int dm_pool_resize_data_dev(struct dm_pool_metadata *pmd, dm_block_t new_count)
+ 	int r = -EINVAL;
+ 
+ 	pmd_write_lock(pmd);
+-	if (!pmd->fail_io)
++	if (!pmd->fail_io) {
+ 		r = __resize_space_map(pmd->data_sm, new_count);
++		if (!r)
++			dm_extent_allocator_resize(pmd->data_extents, new_count);
++	}
+ 	pmd_write_unlock(pmd);
+ 
+ 	return r;
+diff --git a/drivers/md/dm-thin-metadata.h b/drivers/md/dm-thin-metadata.h
+index 2f64f48b5f19..1003b9c7f2d7 100644
+--- a/drivers/md/dm-thin-metadata.h
++++ b/drivers/md/dm-thin-metadata.h
+@@ -159,7 +159,7 @@ int dm_thin_find_mapped_range(struct dm_thin_device *td,
+ /*
+  * Obtain an unused block.
+  */
+-int dm_pool_alloc_data_block(struct dm_pool_metadata *pmd, dm_block_t *result);
++int dm_thin_alloc_data_block(struct dm_thin_device *td, dm_block_t *result);
+ 
+ /*
+  * Insert or remove block.
+diff --git a/drivers/md/dm-thin.c b/drivers/md/dm-thin.c
+index 07c7f9795b10..518ba35b8819 100644
+--- a/drivers/md/dm-thin.c
++++ b/drivers/md/dm-thin.c
+@@ -1552,12 +1552,12 @@ static int alloc_data_block(struct thin_c *tc, dm_block_t *result)
+ 		}
+ 	}
+ 
+-	r = dm_pool_alloc_data_block(pool->pmd, result);
++	r = dm_thin_alloc_data_block(tc->td, result);
+ 	if (r) {
+ 		if (r == -ENOSPC)
+ 			set_pool_mode(pool, PM_OUT_OF_DATA_SPACE);
+ 		else
+-			metadata_operation_failed(pool, "dm_pool_alloc_data_block", r);
++			metadata_operation_failed(pool, "dm_thin_alloc_data_block", r);
+ 		return r;
+ 	}
+ 
+diff --git a/drivers/md/persistent-data/Makefile b/drivers/md/persistent-data/Makefile
+index 66be7c66479a..62d2d2351502 100644
+--- a/drivers/md/persistent-data/Makefile
++++ b/drivers/md/persistent-data/Makefile
+@@ -4,6 +4,7 @@ dm-persistent-data-objs := \
+ 	dm-array.o \
+ 	dm-bitset.o \
+ 	dm-block-manager.o \
++	dm-extent-allocator.o \
+ 	dm-space-map-common.o \
+ 	dm-space-map-disk.o \
+ 	dm-space-map-metadata.o \
+diff --git a/drivers/md/persistent-data/dm-btree.c b/drivers/md/persistent-data/dm-btree.c
+index 0c7a2e8d1846..8e93c9c56608 100644
+--- a/drivers/md/persistent-data/dm-btree.c
++++ b/drivers/md/persistent-data/dm-btree.c
+@@ -579,7 +579,7 @@ static void redistribute2(struct btree_node *left, struct btree_node *right)
+  * Redistribute entries between three nodes.  Assumes the central
+  * node is empty.
+  */
+-static void redistribute3(struct btree_node *left, struct btree_node *center,
++extern void redistribute3(struct btree_node *left, struct btree_node *center,
+ 			  struct btree_node *right)
+ {
+ 	unsigned int nr_left = le32_to_cpu(left->header.nr_entries);
+diff --git a/drivers/md/persistent-data/dm-extent-allocator.c b/drivers/md/persistent-data/dm-extent-allocator.c
+new file mode 100644
+index 000000000000..ece2767de32e
+--- /dev/null
++++ b/drivers/md/persistent-data/dm-extent-allocator.c
+@@ -0,0 +1,640 @@
++#include "dm-extent-allocator.h"
++
++
++/*
++ * 'extents' are just ranges of blocks that we'd like to allocate from.  These
++ * extents are held as the leaf nodes of a BSP tree.  An 'allocation context' points
++ * to a particular leaf/extent in the tree.  Multiple allocation contexts can point
++ * to the same leaf.
++ * 
++ * If a leaf is exhausted, we update all allocation contexts that point to it and delete
++ * it from the tree.
++ */
++
++struct internal {
++	/*
++	 * An approximation to the number of free blocks below this internal node.
++	 * Used to guide the walk to a new leaf.
++	 */
++	uint64_t nr_free;
++
++	/* child nodes */
++	struct node *left;
++	struct node *right;
++};
++
++struct leaf {
++	/* contains allocation contexts */
++	struct list_head holders;
++};
++
++struct node {
++	/*
++	 * We sometimes walk up the tree from a leaf to a root, it's useful
++	 * to know if we were the left or right child of the parent.
++	 */
++	bool is_left_child;
++
++	/* discriminant for the union */
++	bool is_leaf;
++
++	/* nr of allocation contexts using leaves below this node */
++	uint32_t nr_holders;
++
++	/* range of blocks covered by this node */
++	uint64_t begin;
++	uint64_t end;
++
++	struct node *parent;
++
++	union {
++		struct internal internal;
++		struct leaf leaf;
++	} u;
++};
++
++/*
++ * We preallocate this many nodes in case we can't add any when setting up 
++ * allocation contexts.
++ */
++#define INITIAL_NR_NODES 32
++
++/*
++ * Leaf nodes with fewer than this many free blocks cannot be split.
++ */
++#define SPLIT_THRESHOLD 16
++
++struct dm_extent_allocator {
++	spinlock_t lock;
++
++	unsigned nr_preallocated_nodes;
++	unsigned nr_free_nodes;
++	struct list_head free_nodes;
++
++	unsigned nr_allocation_contexts;
++	struct list_head allocation_contexts;
++
++	uint64_t nr_blocks;
++	struct node *root;
++};
++
++static void lock(struct dm_extent_allocator *ea)
++{
++	spin_lock(&ea->lock);
++}
++
++static void unlock(struct dm_extent_allocator *ea)
++{
++	spin_unlock(&ea->lock);
++}
++
++/**
++ * __free_node - Frees a node in the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ * @node: Node to free.
++ */
++static inline void __free_node(struct dm_extent_allocator *ea, struct node *n)
++{
++	struct list_head *l = (struct list_head *)n;
++	list_add(l, &ea->free_nodes);
++	ea->nr_free_nodes++;
++}
++
++/**
++ * __alloc_node - Allocates a node from the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ */
++static inline struct node *__alloc_node(struct dm_extent_allocator *ea)
++{
++	struct list_head *l;
++
++	l = ea->free_nodes.next;
++	list_del(l);
++	ea->nr_free_nodes--;
++
++	return (struct node *) l;
++}
++
++/**
++ * @ea: Pointer to the extent allocator.
++ * @node: Index of the node to query.
++ *
++ * Returns: The number of free blocks in the node.
++ */
++static inline uint64_t __nr_free_blocks(struct node *n)
++{
++	if (!n)
++		return 0;
++	
++	if (n->is_leaf)
++		return n->end - n->begin;
++	else
++		return n->u.internal.nr_free;
++}
++
++/**
++ * __free_tree - Frees all nodes in a tree.
++ * @ea: Pointer to the extent allocator.
++ * @n: Pointer to the root node of the tree to free.
++ */
++static void __free_tree(struct dm_extent_allocator *ea, struct node *n)
++{
++	if (!n)
++		return;
++
++	if (n->is_leaf)
++		__free_node(ea, n);
++	else {
++		__free_tree(ea, n->u.internal.left);
++		__free_tree(ea, n->u.internal.right);
++	}
++}
++
++/**
++ * __setup_initial_root - Sets up the initial root node for the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ *
++ * The root node is a leaf node that spans the entire device.
++ */
++static void __setup_initial_root(struct dm_extent_allocator *ea)
++{
++	struct node *n;
++	struct leaf *l;
++
++	n = ea->root = __alloc_node(ea);
++	n->is_left_child = true;
++	n->is_leaf = true;
++	n->nr_holders = 0;
++	n->begin = 0;
++	n->end = ea->nr_blocks;
++	n->parent = NULL;
++
++	l = &n->u.leaf;
++	INIT_LIST_HEAD(&l->holders);
++}
++
++/**
++ * free_node_list - Frees a list of nodes.
++ * @l: Pointer to the list head of the nodes to free.
++ */
++static void free_node_list(struct list_head *l)
++{
++	struct list_head *e, *tmp;
++
++	list_for_each_safe(e, tmp, l) {
++		list_del(e);
++		kfree(e);
++	}
++}
++
++/**
++ * alloc_node_list - Allocates a list of nodes.
++ * @nr: Number of nodes to allocate.
++ * @flags: Flags to pass to kmalloc.
++ * @result: Pointer to the list head to store the allocated nodes.
++ *
++ * Used to initialise the free list of nodes.
++ * Returns: 0 on success, or -ENOMEM if allocation failed.
++ */
++static int alloc_node_list(unsigned nr, int flags, struct list_head *result)
++{
++	int i;
++
++	INIT_LIST_HEAD(result);
++
++	for (i = 0; i < nr; i++) {
++		struct node *n = kmalloc(sizeof(*n), flags);
++		struct list_head *l = (struct list_head *) n;
++		if (!n) {
++			free_node_list(result);
++			return -ENOMEM;
++		}
++
++		list_add(l, result);
++	}
++
++	return 0;
++}
++
++/**
++ * __prealloc_nodes - Preallocates nodes for allocation contexts.
++ * @ea: Pointer to the extent allocator.
++ * @nr: Number of nodes to preallocate.
++ */
++static void __prealloc_nodes(struct dm_extent_allocator *ea, unsigned nr, int flags)
++{
++	int r;
++	struct list_head new_nodes;
++
++	r = alloc_node_list(nr, flags, &new_nodes);
++	if (!r) {
++		struct list_head *e, *tmp;
++		list_for_each_safe(e, tmp, &new_nodes) {
++			list_del(e);
++			__free_node(ea, (struct node *)e);
++		}
++		ea->nr_preallocated_nodes += nr;
++	}
++}
++
++struct dm_extent_allocator *dm_extent_allocator_create(uint64_t nr_blocks)
++{
++	struct dm_extent_allocator *ea = kmalloc(sizeof(*ea), GFP_KERNEL);
++
++	if (!ea)
++		return NULL;
++
++	spin_lock_init(&ea->lock);
++	ea->nr_blocks = nr_blocks;
++	ea->nr_preallocated_nodes = 0;
++	ea->nr_free_nodes = 0;
++	ea->nr_allocation_contexts = 0;
++
++	INIT_LIST_HEAD(&ea->free_nodes);
++	__prealloc_nodes(ea, INITIAL_NR_NODES, GFP_KERNEL);
++	INIT_LIST_HEAD(&ea->allocation_contexts);
++	__setup_initial_root(ea);
++
++	return ea;
++}
++EXPORT_SYMBOL_GPL(dm_extent_allocator_create);
++
++void dm_extent_allocator_destroy(struct dm_extent_allocator *ea)
++{
++	__free_tree(ea, ea->root);
++	free_node_list(&ea->free_nodes);
++	kfree(ea);
++}
++EXPORT_SYMBOL_GPL(dm_extent_allocator_destroy);
++
++/**
++ * __reset - Resets the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ * @nr_blocks: New number of blocks in the device in case of resize.
++ *
++ * Frees all nodes in the tree and sets up a new root node that spans the entire device.
++ */
++static void __reset(struct dm_extent_allocator *ea, uint64_t nr_blocks)
++{
++	struct dm_alloc_context *ac, *tmp;
++
++	list_for_each_entry_safe(ac, tmp, &ea->allocation_contexts, list) {
++		if (ac->leaf)
++			list_del(&ac->holders_list);
++		ac->leaf = NULL;
++	}
++
++	__free_tree(ea, ea->root);
++
++	ea->nr_blocks = nr_blocks;
++	__setup_initial_root(ea);
++}
++
++void dm_extent_allocator_reset(struct dm_extent_allocator *ea)
++{
++	lock(ea);
++	__reset(ea, ea->nr_blocks);
++	unlock(ea);
++}
++EXPORT_SYMBOL_GPL(dm_extent_allocator_reset);
++
++void dm_extent_allocator_resize(struct dm_extent_allocator *ea,
++				uint64_t nr_blocks)
++{
++	lock(ea);
++	__reset(ea, nr_blocks);
++	unlock(ea);
++}
++EXPORT_SYMBOL_GPL(dm_extent_allocator_resize);
++
++/**
++ * __split_leaf - Splits a leaf node in the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ * @node: leaf node to split.
++ *
++ * The split point is chosen to be the midpoint of the leaf's range. The new leaf
++ * node is added as the right child of a new internal node, which is added as the
++ * parent of the original leaf node. The function returns the index of the new
++ * internal node on success, or NULL on failure.
++ */
++static struct node *__split_leaf(struct dm_extent_allocator *ea, struct node *n)
++{
++	uint64_t mid;
++	struct node *new_parent, *right_child;
++
++	if (ea->nr_free_nodes < 2)
++		return NULL;
++
++	if (n->end - n->begin <= SPLIT_THRESHOLD)
++		return NULL;
++
++	new_parent = __alloc_node(ea);
++	right_child = __alloc_node(ea);
++
++	mid = n->begin + (n->end - n->begin) / 2;
++
++	new_parent->is_left_child = false;
++	right_child->is_leaf = true;
++	right_child->nr_holders = 0;
++	right_child->begin = mid;
++	right_child->end = n->end;
++	right_child->parent = new_parent;
++	INIT_LIST_HEAD(&right_child->u.leaf.holders);
++
++	new_parent->is_left_child = n->is_left_child;
++	new_parent->is_leaf = false;
++	new_parent->nr_holders = n->nr_holders + 1;
++	new_parent->begin = n->begin;
++	new_parent->end = n->end;
++	new_parent->parent = n->parent;
++	new_parent->u.internal.nr_free = n->end - n->begin;
++	new_parent->u.internal.left = n;
++	new_parent->u.internal.right = right_child;
++
++	/* the original leaf becomes the left child */
++	n->is_left_child = true;
++	n->end = mid;
++	n->parent = new_parent;
++
++	return new_parent;
++}
++
++/**
++ * __select_child - Selects the best child node to allocate from in the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ * @left: left child node.
++ * @right: right child node.
++ *
++ * The best child is the one with the highest ratio of free blocks to holders. If the
++ * ratios are equal, the left child is preferred.
++ */
++static struct node **__select_child(struct dm_extent_allocator *ea, struct node **left, struct node **right)
++{
++	uint64_t left_score, right_score;
++
++	left_score = __nr_free_blocks(*left) / ((*left)->nr_holders + 1);
++	right_score = __nr_free_blocks(*right) / ((*right)->nr_holders + 1);
++
++	if (left_score >= right_score)
++		return left;
++	else
++		return right;
++}
++
++/**
++ * __get_leaf - Gets a leaf node from the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ *
++ * The function walks the tree from the root to a leaf, selecting the best child node at each
++ * step. If the selected child node is already in use, the function will attempt to split the
++ * node with __split_leaf.  If splitting fails the leaf node will be shared.
++ *
++ * Returns: A pointer to the leaf node on success, or NULL if there are no more free blocks.
++ */
++static struct node *__get_leaf(struct dm_extent_allocator *ea)
++{
++	struct node **ptr = &ea->root;
++	struct node *n = *ptr;
++
++	if (!ea->root)
++		return NULL;
++
++	/* walk the tree until we get to a leaf */
++	while (!n->is_leaf) {
++		struct internal *i = &n->u.internal;
++		n->nr_holders++;
++		ptr = __select_child(ea, &i->left, &i->right);
++		n = *ptr;
++	}
++
++	if (n->nr_holders > 0) {
++		/*
++		* Someone is already using this extent.  See if we can split it.
++		*/
++		struct node *split = __split_leaf(ea, n);
++		if (split) {
++			/* patch up the parent */
++			*ptr = split;
++
++			/* the new leaf is the right child */
++			n = split->u.internal.right;
++		}
++	}
++
++	n->nr_holders++;
++	return n;
++}
++
++/**
++ * __put_leaf - Releases a leaf node and updates the extent allocator's tree.
++ * @ea: Pointer to the extent allocator.
++ * @n: Pointer to the leaf node to release.
++ * @delta: Number of holders to release.
++ */
++static void __put_leaf(struct dm_extent_allocator *ea, struct node *n, uint32_t delta)
++{
++	bool empty;
++	struct node *parent, *grand_parent;
++
++	if (!n)
++		return;
++
++	parent = n->parent;
++
++	/* adjust leaf */
++	n->nr_holders -= delta;
++
++	/* see if the leaf is now empty */
++	empty = n->begin == n->end;
++	if (empty && !n->nr_holders) {
++		bool n_is_left = n->is_left_child;
++		__free_node(ea, n);
++
++		if (parent) {
++			bool is_left = parent->is_left_child;
++
++			/*
++			* We also free the parent, since every internal node 
++			* must have two children.
++			*/
++			grand_parent = parent->parent;
++
++			/* replace the parent with the other child */
++			if (n_is_left)
++				n = parent->u.internal.right;
++			else
++				n = parent->u.internal.left;
++
++			__free_node(ea, parent);
++			parent = grand_parent;
++			n->parent = parent;
++
++			if (parent) {
++				/* patch up the parent */
++				if (is_left) {
++					n->is_left_child = true;
++					parent->u.internal.left = n;
++				} else {
++					n->is_left_child = false;
++					parent->u.internal.right = n;
++				}
++			}
++		} else
++			n = NULL;
++	}
++
++	/* walk up the tree adjusting the counts */
++	while (parent) {
++		parent->nr_holders -= delta;
++		parent->u.internal.nr_free =
++			__nr_free_blocks(parent->u.internal.left) +
++			__nr_free_blocks(parent->u.internal.right);
++
++		n = parent;
++		parent = n->parent;
++	}
++
++	ea->root = n;
++}
++
++/**
++ * __next_leaf - Gets the next available leaf node for an allocation context.
++ * @ac: Pointer to the allocation context.
++ *
++ * Returns: 0 on success, or -ENOSPC if there are no more free blocks.
++ */
++static int __next_leaf(struct dm_alloc_context *ac)
++{
++	struct node *l;
++	struct dm_extent_allocator *ea = ac->ea;
++
++	ac->leaf = __get_leaf(ea);
++	if (!ac->leaf)
++		return -ENOSPC;
++
++	l = ac->leaf;
++	list_add(&ac->holders_list, &l->u.leaf.holders);
++	return 0;
++}
++
++void dm_alloc_context_get(struct dm_extent_allocator *ea,
++			  struct dm_alloc_context *ac)
++{
++	lock(ea);
++	ac->ea = ea;
++
++	ea->nr_allocation_contexts++;
++
++	/*
++	 * We try and maintain a couple of nodes per alloc context to avoid sharing.
++	 * If allocation fails it's no big deal; we'll just get more fragmentation.
++	 */ 
++	if (ea->nr_preallocated_nodes < ea->nr_allocation_contexts * 2)
++		__prealloc_nodes(ea, 2, GFP_NOIO);
++
++	list_add(&ac->list, &ea->allocation_contexts);
++	INIT_LIST_HEAD(&ac->holders_list);
++	ac->leaf = NULL;
++	unlock(ea);
++}
++EXPORT_SYMBOL_GPL(dm_alloc_context_get);
++
++void dm_alloc_context_put(struct dm_alloc_context *ac)
++{
++	struct dm_extent_allocator *ea = ac->ea;
++
++	lock(ea);
++	if (ac->leaf)
++		list_del(&ac->holders_list);
++	list_del(&ac->list);
++	__put_leaf(ea, ac->leaf, 1);
++	ea->nr_allocation_contexts--;
++	unlock(ea);
++}
++EXPORT_SYMBOL_GPL(dm_alloc_context_put);
++
++/**
++ * __reset_contexts - Resets all allocation contexts that are currently using a leaf node.
++ * @ac: Pointer to the allocation context.
++ */
++static void __reset_contexts(struct dm_alloc_context *ac)
++{
++	struct node *n = ac->leaf;
++	struct leaf *l = &n->u.leaf;
++	struct dm_alloc_context *ac_it, *tmp;
++
++	list_for_each_entry_safe(ac_it, tmp, &l->holders, holders_list) {
++		ac_it->leaf = NULL;
++		list_del(&ac_it->holders_list);
++	}
++}
++
++/**
++ * __reset_and_release - Resets all allocation contexts that are currently using a leaf node
++ *                       then releases the leaf node.
++ * @ac: Pointer to the allocation context.
++ */
++static void __reset_and_release(struct dm_alloc_context *ac)
++{
++	struct node *old_leaf = ac->leaf;
++
++	__reset_contexts(ac); /* this clobbers ac->leaf */
++	__put_leaf(ac->ea, old_leaf, old_leaf->nr_holders);
++}
++
++
++static int __alloc(struct dm_alloc_context *ac, dm_alloc_extent_fn fn,
++	    void *context, uint64_t *result)
++{
++	int r = 0;
++	struct node *n;
++
++	while (true) {
++		/* do we have a leaf? */
++		if (!ac->leaf) {
++			r = __next_leaf(ac);
++			if (r)
++				return r;
++		}
++
++		n = ac->leaf;
++
++		/* does the leaf have space? */
++		if (n->begin == n->end) {
++			__reset_and_release(ac);
++			continue;
++		}
++
++		/* call down to the underlying allocator */
++		r = fn(context, n->begin, n->end, result);
++		if (r == -ENOSPC) {
++			n->begin = n->end;
++			__reset_and_release(ac);
++			continue;
++		}
++
++		if (!r) {
++			/* success */
++			n->begin = *result + 1;
++
++			if (n->begin == n->end)
++				__reset_and_release(ac);
++		}
++
++		return r;
++	}
++}
++
++int dm_alloc_context_alloc(struct dm_alloc_context *ac, dm_alloc_extent_fn fn,
++			   void *context, uint64_t *result)
++{
++	int r;
++	struct dm_extent_allocator *ea = ac->ea;
++
++	lock(ea);
++	r = __alloc(ac, fn, context, result);
++	unlock(ea);
++
++	return r;
++}
++EXPORT_SYMBOL_GPL(dm_alloc_context_alloc);
+\ No newline at end of file
+diff --git a/drivers/md/persistent-data/dm-extent-allocator.h b/drivers/md/persistent-data/dm-extent-allocator.h
+new file mode 100644
+index 000000000000..42897f08ee3a
+--- /dev/null
++++ b/drivers/md/persistent-data/dm-extent-allocator.h
+@@ -0,0 +1,106 @@
++/*
++ * Copyright (C) 2023 Red Hat, Inc.
++ *
++ * This file is released under the GPL.
++ */
++
++#ifndef _LINUX_DM_EXTENT_ALLOCATOR_H
++#define _LINUX_DM_EXTENT_ALLOCATOR_H
++
++#include "dm-block-manager.h"
++
++/*
++ * This extent allocator is used to supervise allocations of data blocks for
++ * thin provisioning.  It enhances data locality and reduces fragmentation by
++ * allocating contiguous extents of blocks.
++ * 
++ * An extent allocator instance is created with a fixed number of blocks. An 
++ * 'allocation context' abstraction is provided to manage contiguous allocations.
++ * Each allocation context aims to allocate as few linear ranges of blocks as 
++ * possible, keeping different contexts isolated from each other.
++ *
++ * There are three categories of operations supported:
++ * 1. Allocator-wide operations: create, destroy and reset.
++ * 2. Context-related operations: getting and putting allocation contexts.
++ * 3. Block allocation within a context: allocation of a new block.
++ *
++ * All methods provided in this interface except create/destroy are thread-safe.
++ */
++
++struct dm_extent_allocator;
++
++// Treat this structure as opaque
++struct dm_alloc_context {
++	struct dm_extent_allocator *ea;
++
++	struct list_head list;
++	struct list_head holders_list;
++	void *leaf;
++};
++
++/**
++ * dm_extent_allocator_create - Creates a new extent allocator.
++ * @nr_blocks: Number of blocks in the device.
++ *
++ * The allocator is initialized with a root node that spans the entire device and
++ * has no holders. The function returns a pointer to the new extent allocator on
++ * success, or NULL on failure.
++ */
++struct dm_extent_allocator *
++dm_extent_allocator_create(uint64_t nr_blocks);
++
++/**
++ * dm_extent_allocator_destroy - Destroys an extent allocator.
++ * @ea: Pointer to the extent allocator.
++ *
++ * Assumes that there are no active allocation contexts.
++ */
++void dm_extent_allocator_destroy(struct dm_extent_allocator *ea);
++
++/**
++ * dm_extent_allocator_reset - Resets an extent allocator to its initial state.
++ * @ea: Pointer to the extent allocator.
++ *
++ * Resets an extent allocator to its initial state by freeing all of its nodes
++ * and resetting allocation contexts, it then sets up a new root node that spans the
++ * entire extent and has no holders.
++ */
++void dm_extent_allocator_reset(struct dm_extent_allocator *ea);
++
++/**
++ * dm_extent_allocator_resize - Resizes an extent allocator to a new size.
++ * @ea: Pointer to the extent allocator.
++ * @nr_blocks: New number of blocks in the device.
++ */
++void dm_extent_allocator_resize(struct dm_extent_allocator *ea,
++				uint64_t nr_blocks);
++
++/**
++ * dm_alloc_context_get - Gets a new allocation context for the extent allocator.
++ * @ea: Pointer to the extent allocator.
++ * @ac: Pointer to the allocation context to initialize.
++ */
++void dm_alloc_context_get(struct dm_extent_allocator *ea, struct dm_alloc_context *ac);
++
++/**
++ * dm_alloc_context_put - Releases an allocation context for the extent allocator.
++ * @ac: Pointer to the allocation context to release.
++ */
++void dm_alloc_context_put(struct dm_alloc_context *ac);
++
++/**
++ * dm_alloc_context_alloc - Allocates a new block in the extent allocator.
++ * @ac: Pointer to the allocation context.
++ * @result: Pointer to a variable to store the allocated block number.
++ *
++ * A callback is used for the fine grain allocation decision (eg, using a space map).
++ * The function returns 0 on success, or -ENOSPC if there are no more free blocks.
++ * The allocated block number is stored in the variable pointed to by @result. 
++ */
++typedef int (*dm_alloc_extent_fn)(void *context, uint64_t b, uint64_t e,
++				  uint64_t *result);
++int dm_alloc_context_alloc(struct dm_alloc_context *ac,
++			 dm_alloc_extent_fn fn, void *context,
++			 uint64_t *result);
++
++#endif
+\ No newline at end of file
+diff --git a/drivers/md/persistent-data/dm-space-map-common.c b/drivers/md/persistent-data/dm-space-map-common.c
+index 591d1a43d035..97de3665da8e 100644
+--- a/drivers/md/persistent-data/dm-space-map-common.c
++++ b/drivers/md/persistent-data/dm-space-map-common.c
+@@ -397,7 +397,7 @@ int sm_ll_find_common_free_block(struct ll_disk *old_ll, struct ll_disk *new_ll,
+ 	uint32_t count;
+ 
+ 	do {
+-		r = sm_ll_find_free_block(new_ll, begin, new_ll->nr_blocks, b);
++		r = sm_ll_find_free_block(new_ll, begin, end, b);
+ 		if (r)
+ 			break;
+ 
+diff --git a/drivers/md/persistent-data/dm-space-map-disk.c b/drivers/md/persistent-data/dm-space-map-disk.c
+index f4241f54e20e..c0661184c672 100644
+--- a/drivers/md/persistent-data/dm-space-map-disk.c
++++ b/drivers/md/persistent-data/dm-space-map-disk.c
+@@ -155,6 +155,28 @@ static int sm_disk_new_block(struct dm_space_map *sm, dm_block_t *b)
+ 	return r;
+ }
+ 
++static int sm_disk_new_block_in_range(struct dm_space_map *sm, dm_block_t b, dm_block_t e, dm_block_t *result)
++{
++	int r;
++	int32_t nr_allocations;
++	struct sm_disk *smd = container_of(sm, struct sm_disk, sm);
++
++	/*
++	 * Any block we allocate has to be free in both the old and current ll.
++	 */
++	r = sm_ll_find_common_free_block(&smd->old_ll, &smd->ll, b, e, result);
++	if (r)
++		return r;
++
++	r = sm_ll_inc(&smd->ll, *result, *result + 1, &nr_allocations);
++	if (!r)
++		smd->nr_allocated_this_transaction += nr_allocations;
++
++	return r;
++}
++
++//--------------------
++
+ static int sm_disk_commit(struct dm_space_map *sm)
+ {
+ 	int r;
+@@ -208,6 +230,7 @@ static struct dm_space_map ops = {
+ 	.inc_blocks = sm_disk_inc_blocks,
+ 	.dec_blocks = sm_disk_dec_blocks,
+ 	.new_block = sm_disk_new_block,
++	.new_block_in_range = sm_disk_new_block_in_range,
+ 	.commit = sm_disk_commit,
+ 	.root_size = sm_disk_root_size,
+ 	.copy_root = sm_disk_copy_root,
+diff --git a/drivers/md/persistent-data/dm-space-map.h b/drivers/md/persistent-data/dm-space-map.h
+index 6bf69922b5ad..aa0dba45dfa8 100644
+--- a/drivers/md/persistent-data/dm-space-map.h
++++ b/drivers/md/persistent-data/dm-space-map.h
+@@ -54,6 +54,8 @@ struct dm_space_map {
+ 	 * new_block will increment the returned block.
+ 	 */
+ 	int (*new_block)(struct dm_space_map *sm, dm_block_t *b);
++	int (*new_block_in_range)(struct dm_space_map *sm, dm_block_t b, dm_block_t e,
++				  dm_block_t *result);
+ 
+ 	/*
+ 	 * The root contains all the information needed to fix the space map.
+@@ -144,6 +146,12 @@ static inline int dm_sm_new_block(struct dm_space_map *sm, dm_block_t *b)
+ 	return sm->new_block(sm, b);
+ }
+ 
++static inline int dm_sm_new_block_in_range(struct dm_space_map *sm, dm_block_t b, dm_block_t e,
++			  		  dm_block_t *result)
++{
++	return sm->new_block_in_range(sm, b, e, result);
++}
++
+ static inline int dm_sm_root_size(struct dm_space_map *sm, size_t *result)
+ {
+ 	return sm->root_size(sm, result);
+diff --git a/include/linux/slab.h b/include/linux/slab.h
+index 848c7c82ad5a..410ba66f5f1c 100644
+--- a/include/linux/slab.h
++++ b/include/linux/slab.h
+@@ -572,6 +572,7 @@ void *kmalloc_large_node(size_t size, gfp_t flags, int node) __assume_page_align
+  */
+ static __always_inline __alloc_size(1) void *kmalloc(size_t size, gfp_t flags)
+ {
++#if 0
+ 	if (__builtin_constant_p(size) && size) {
+ 		unsigned int index;
+ 
+@@ -583,6 +584,7 @@ static __always_inline __alloc_size(1) void *kmalloc(size_t size, gfp_t flags)
+ 				kmalloc_caches[kmalloc_type(flags)][index],
+ 				flags, size);
+ 	}
++#endif
+ 	return __kmalloc(size, flags);
+ }
+ 
+diff --git a/setup-cross-compile b/setup-cross-compile
+new file mode 100644
+index 000000000000..9e1743eda9fc
+--- /dev/null
++++ b/setup-cross-compile
+@@ -0,0 +1,4 @@
++# source this file
++
++export CROSS_COMPILE=riscv64-linux-gnu-
++export ARCH=riscv
