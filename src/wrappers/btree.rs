@@ -25,7 +25,7 @@ pub struct BTreeValueType<G: Guest> {
 impl<G: Guest> Guest for BTreeValueType<G> {
     fn guest_len() -> usize {
         // 4 functions ptrs and a u32
-        4 * 8 + 4
+        40
     }
 
     fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
@@ -66,7 +66,7 @@ pub struct BTreeInfo<G: Guest> {
 
 impl<G: Guest> Guest for BTreeInfo<G> {
     fn guest_len() -> usize {
-        8 + 4 + BTreeValueType::<G>::guest_len()
+        8 + 4 + 4 + BTreeValueType::<G>::guest_len()
     }
 
     fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
