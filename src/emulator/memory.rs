@@ -483,6 +483,26 @@ impl Memory {
         Ok(ptr)
     }
 
+    pub fn alloc_with<F>(&mut self, count: usize, perms: u8, func: F) -> Result<Addr>
+    where
+        F: FnOnce(Addr, &mut [u8]) -> Result<()>,
+    {
+        // We allocate an extra double word before and after the block to
+        // detect overwrites.
+        let len = count as usize;
+        let heap_len = len + 8;
+        let heap_ptr = self.heap.alloc(heap_len)?;
+
+        // mmap just the central part that may be used.
+        let ptr = Addr(heap_ptr.0 + 4);
+        let mut bytes = vec![0u8; count];
+        func(ptr, &mut bytes)?;
+        self.mmap_bytes(ptr, bytes, perms)?;
+        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
+
+        Ok(ptr)
+    }
+
     /// Allocates a block of memory with a specified alignment and moves the given bytes into it.
     ///
     /// The function allocates an extra double word before and after the block to detect overwrites.
