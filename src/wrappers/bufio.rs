@@ -31,7 +31,7 @@ impl Guest for ListHead {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.next.0)?;
         w.write_u64::<LittleEndian>(self.prev.0)?;
         Ok(())
@@ -64,8 +64,8 @@ impl Guest for LruEntry {
         24
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        self.list.pack(w)?;
+    fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
+        self.list.pack(w, loc)?;
         w.write_u32::<LittleEndian>(self.referenced)?;
         w.write_u32::<LittleEndian>(0)?; // Padding
         Ok(())
@@ -96,12 +96,17 @@ impl Default for Lru {
 
 impl Guest for Lru {
     fn guest_len() -> usize {
-        16
+        32
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.cursor.0)?;
         w.write_u64::<LittleEndian>(self.count)?;
+
+        let list_head = loc.0 + 16;
+        w.write_u64::<LittleEndian>(list_head)?;
+        w.write_u64::<LittleEndian>(list_head)?;
+
         Ok(())
     }
 
@@ -175,8 +180,8 @@ impl Guest for Buffer {
         152
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        self.lru.pack(w)?;
+    fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
+        self.lru.pack(w, loc)?;
         w.write_u64::<LittleEndian>(self.block)?;
         w.write_all(&[0; 40])?;
         w.write_u32::<LittleEndian>(self.hold_count)?;

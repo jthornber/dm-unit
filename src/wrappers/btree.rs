@@ -1,7 +1,7 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use anyhow::{ensure, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -28,7 +28,7 @@ impl<G: Guest> Guest for BTreeValueType<G> {
         4 * 8 + 4
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.context.0)?;
         w.write_u32::<LittleEndian>(G::guest_len() as u32)?;
         w.write_u32::<LittleEndian>(0)?; // padding
@@ -69,11 +69,11 @@ impl<G: Guest> Guest for BTreeInfo<G> {
         8 + 4 + BTreeValueType::<G>::guest_len()
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.tm.0)?;
         w.write_u32::<LittleEndian>(self.levels)?;
         w.write_u32::<LittleEndian>(0)?; // padding
-        self.vtype.pack(w)
+        self.vtype.pack(w, Addr(loc.0 + 16))
     }
 
     fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
@@ -113,7 +113,10 @@ pub fn dm_btree_del<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>, root: u64)
 }
 
 fn auto_keys<'a>(fix: &'a mut Fixture, keys: &[u64]) -> Result<(AutoGPtr<'a>, Addr)> {
-    let ptr = fix.vm.mem.alloc_bytes(vec![0u8; 8 * keys.len()], PERM_READ | PERM_WRITE)?;
+    let ptr = fix
+        .vm
+        .mem
+        .alloc_bytes(vec![0u8; 8 * keys.len()], PERM_READ | PERM_WRITE)?;
 
     for (i, _item) in keys.iter().enumerate() {
         let bytes = keys[i].to_le_bytes();
@@ -353,7 +356,7 @@ impl Guest for ShadowSpine {
         40
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.info.0)?;
         assert!(self.nodes.len() <= 2);
         w.write_u32::<LittleEndian>(self.nodes.len() as u32)?;

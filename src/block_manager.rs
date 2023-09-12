@@ -30,7 +30,7 @@ impl Guest for Validator {
         24
     }
 
-    fn pack<W: Write>(&self, _w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, _w: &mut W, _loc: Addr) -> io::Result<()> {
         todo!();
     }
 
@@ -63,7 +63,7 @@ impl Guest for GBlock {
         24
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.bm_ptr.0)?;
         w.write_u64::<LittleEndian>(self.loc)?;
         w.write_u64::<LittleEndian>(self.data.0)

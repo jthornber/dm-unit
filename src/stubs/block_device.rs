@@ -4,8 +4,8 @@ use log::*;
 use std::io;
 use std::io::{Read, Write};
 
-use crate::guest::*;
 use crate::emulator::memory::*;
+use crate::guest::*;
 
 //-------------------------------
 
@@ -20,7 +20,7 @@ impl Guest for INode {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.nr_sectors)?;
         w.write_u64::<LittleEndian>(if self.ro { 1 } else { 0 })?;
         Ok(())
@@ -37,7 +37,7 @@ impl Guest for INode {
 
 /*
  * Kernel v5.12-rc8
- 
+
 Assumes SYSFS is enabled.
 struct block_device {
     dev_t                      bd_dev;               /*    28     4 */
@@ -61,7 +61,7 @@ impl Guest for BlockDevice {
         BDEV_SIZE
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_all(&[0u8; BD_DEV_OFFSET])?;
         w.write_u32::<LittleEndian>(self.dev_node)?;
         w.write_all(&[0u8; BD_INODE_OFFSET - 4 - BD_DEV_OFFSET])?;

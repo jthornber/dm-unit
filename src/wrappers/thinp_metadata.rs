@@ -153,7 +153,7 @@ impl Guest for LookupResult {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.block)?;
         w.write_u8(if self.shared { 1u8 } else { 0u8 })?;
         w.write_all(&[0u8, 7])?;

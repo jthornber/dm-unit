@@ -1,5 +1,5 @@
-use crate::emulator::riscv::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
@@ -130,7 +130,7 @@ impl Guest for CacheStats {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u32::<LittleEndian>(self.read_hits)?;
         w.write_u32::<LittleEndian>(self.read_misses)?;
         w.write_u32::<LittleEndian>(self.write_hits)?;

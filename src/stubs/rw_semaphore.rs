@@ -3,10 +3,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io;
 use std::io::{Read, Write};
 
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
-use crate::emulator::memory::*;
 
 use Reg::*;
 
@@ -41,7 +41,7 @@ impl Guest for RWSem {
         72
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.count)?;
         w.write_all(&[0u8; 72 - 8])?;
         Ok(())
@@ -118,7 +118,7 @@ fn down_write(fix: &mut Fixture) -> Result<()> {
 
         Ok(1)
     })?;
-    
+
     fix.vm.ret(0);
     Ok(())
 }

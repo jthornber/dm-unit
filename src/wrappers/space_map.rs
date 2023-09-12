@@ -40,7 +40,7 @@ impl Guest for SpaceMap {
         120
     }
 
-    fn pack<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.destroy.0)?;
         w.write_u64::<LittleEndian>(self.extend.0)?;
         w.write_u64::<LittleEndian>(self.get_nr_blocks.0)?;
