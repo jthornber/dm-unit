@@ -6,7 +6,6 @@ use crate::test_runner::*;
 use crate::wrappers::bufio::*;
 
 use anyhow::{anyhow, Result};
-use byteorder::{LittleEndian, WriteBytesExt};
 use std::collections::BTreeSet;
 
 //-------------------------------
