@@ -1,6 +1,6 @@
+use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
-use crate::emulator::memory::*;
 
 use anyhow::{anyhow, Result};
 

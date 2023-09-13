@@ -23,8 +23,6 @@ impl SpaceMapBuilder for MetadataSMBuilder {
     fn create(&self, fix: &mut Fixture, nr_blocks: u64) -> Result<Box<dyn space_map::SpaceMap>> {
         let bm = dm_bm_create(fix, nr_blocks)?;
         let (tm, sm) = dm_tm_create(fix, bm, 0)?;
-        let tm = tm;
-        let sm = sm;
         let sb = dm_bm_write_lock_zero(fix, bm, 0, Addr(0))?;
 
         Ok(Box::new(MetadataSpaceMap { bm, tm, sm, sb }))
@@ -54,22 +52,22 @@ impl space_map::SpaceMap for MetadataSpaceMap {
 fn test_boundary_size_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = MetadataSMBuilder;
-    test_boundary_size(fix, &mut builder)
+    let builder = MetadataSMBuilder;
+    test_boundary_size(fix, &builder)
 }
 
 fn test_commit_cost_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = MetadataSMBuilder;
-    test_commit_cost(fix, &mut builder)
+    let builder = MetadataSMBuilder;
+    test_commit_cost(fix, &builder)
 }
 
 fn test_wrapping_around_(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let mut builder = MetadataSMBuilder;
-    test_wrapping_around(fix, &mut builder)
+    let builder = MetadataSMBuilder;
+    test_wrapping_around(fix, &builder)
 }
 
 //-------------------------------

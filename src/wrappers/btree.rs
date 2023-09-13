@@ -98,7 +98,7 @@ pub fn dm_btree_empty<G: Guest>(fix: &mut Fixture, info: &BTreeInfo<G>) -> Resul
     let (mut fix, info_ptr) = auto_info(fix, info)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
-    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, result_ptr) = auto_alloc(&mut fix, 8)?;
     fix.vm.set_reg(A1, result_ptr.0);
     fix.call_with_errno("dm_btree_empty")?;
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
@@ -137,9 +137,9 @@ pub fn dm_btree_insert<G: Guest>(
     v: &G,
 ) -> Result<u64> {
     let (mut fix, info_ptr) = auto_info(fix, info)?;
-    let (mut fix, guest_keys) = auto_keys(&mut *fix, keys)?;
-    let (mut fix, guest_value) = auto_guest(&mut *fix, v, PERM_READ | PERM_WRITE)?;
-    let (mut fix, new_root) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, guest_keys) = auto_keys(&mut fix, keys)?;
+    let (mut fix, guest_value) = auto_guest(&mut fix, v, PERM_READ | PERM_WRITE)?;
+    let (mut fix, new_root) = auto_alloc(&mut fix, 8)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
@@ -161,10 +161,10 @@ pub fn dm_btree_insert_notify<G: Guest>(
     v: &G,
 ) -> Result<(u64, bool)> {
     let (mut fix, info_ptr) = auto_info(fix, info)?;
-    let (mut fix, guest_keys) = auto_keys(&mut *fix, keys)?;
-    let (mut fix, guest_value) = auto_guest(&mut *fix, v, PERM_READ | PERM_WRITE)?;
-    let (mut fix, new_root) = auto_alloc(&mut *fix, 8)?;
-    let (mut fix, inserted_ptr) = auto_alloc(&mut *fix, 4)?;
+    let (mut fix, guest_keys) = auto_keys(&mut fix, keys)?;
+    let (mut fix, guest_value) = auto_guest(&mut fix, v, PERM_READ | PERM_WRITE)?;
+    let (mut fix, new_root) = auto_alloc(&mut fix, 8)?;
+    let (mut fix, inserted_ptr) = auto_alloc(&mut fix, 4)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
@@ -189,14 +189,14 @@ pub fn dm_btree_lookup<G: Guest>(
 ) -> Result<G> {
     ensure!(keys.len() == info.levels as usize);
 
-    let (mut fix, info_ptr) = auto_info(fix, &info)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
 
-    let (mut fix, keys_ptr) = auto_keys(&mut *fix, keys)?;
+    let (mut fix, keys_ptr) = auto_keys(&mut fix, keys)?;
     fix.vm.set_reg(A2, keys_ptr.0);
 
-    let (mut fix, value_ptr) = auto_alloc(&mut *fix, G::guest_len())?;
+    let (mut fix, value_ptr) = auto_alloc(&mut fix, G::guest_len())?;
     fix.vm.set_reg(A3, value_ptr.0);
 
     fix.call_with_errno("dm_btree_lookup")?;
@@ -213,17 +213,17 @@ pub fn dm_btree_lookup_next<G: Guest>(
 ) -> Result<(Vec<u64>, G)> {
     ensure!(keys.len() == info.levels as usize);
 
-    let (mut fix, info_ptr) = auto_info(fix, &info)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
 
-    let (mut fix, keys_ptr) = auto_keys(&mut *fix, keys)?;
+    let (mut fix, keys_ptr) = auto_keys(&mut fix, keys)?;
     fix.vm.set_reg(A2, keys_ptr.0);
 
-    let (mut fix, rkeys_ptr) = auto_alloc(&mut *fix, 8 * info.levels as usize)?;
+    let (mut fix, rkeys_ptr) = auto_alloc(&mut fix, 8 * info.levels as usize)?;
     fix.vm.set_reg(A3, rkeys_ptr.0);
 
-    let (mut fix, value_ptr) = auto_alloc(&mut *fix, G::guest_len())?;
+    let (mut fix, value_ptr) = auto_alloc(&mut fix, G::guest_len())?;
 
     fix.call_with_errno("dm_btree_lookup_next")?;
 
@@ -248,14 +248,14 @@ pub fn dm_btree_remove<G: Guest>(
 ) -> Result<u64> {
     ensure!(keys.len() == info.levels as usize);
 
-    let (mut fix, info_ptr) = auto_info(fix, &info)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
 
-    let (mut fix, keys_ptr) = auto_keys(&mut *fix, keys)?;
+    let (mut fix, keys_ptr) = auto_keys(&mut fix, keys)?;
     fix.vm.set_reg(A2, keys_ptr.0);
 
-    let (mut fix, new_root_ptr) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, new_root_ptr) = auto_alloc(&mut fix, 8)?;
     fix.vm.set_reg(A3, new_root_ptr.0);
 
     fix.call_with_errno("dm_btree_remove")?;
@@ -273,10 +273,10 @@ pub fn dm_btree_remove_leaves<G: Guest>(
 ) -> Result<(u64, u32)> {
     ensure!(keys.len() == info.levels as usize);
 
-    let (mut fix, info_ptr) = auto_info(fix, &info)?;
-    let (mut fix, keys_ptr) = auto_keys(&mut *fix, keys)?;
-    let (mut fix, new_root_ptr) = auto_alloc(&mut *fix, 8)?;
-    let (mut fix, inserted_ptr) = auto_alloc(&mut *fix, 4)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
+    let (mut fix, keys_ptr) = auto_keys(&mut fix, keys)?;
+    let (mut fix, new_root_ptr) = auto_alloc(&mut fix, 8)?;
+    let (mut fix, inserted_ptr) = auto_alloc(&mut fix, 4)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
@@ -296,8 +296,8 @@ pub fn dm_btree_find_lowest_key<G: Guest>(
     info: &BTreeInfo<G>,
     root: u64,
 ) -> Result<Vec<u64>> {
-    let (mut fix, info_ptr) = auto_info(fix, &info)?;
-    let (mut fix, rkeys_ptr) = auto_alloc(&mut *fix, 8 * info.levels as usize)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
+    let (mut fix, rkeys_ptr) = auto_alloc(&mut fix, 8 * info.levels as usize)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
@@ -322,8 +322,8 @@ pub fn dm_btree_find_highest_key<G: Guest>(
     info: &BTreeInfo<G>,
     root: u64,
 ) -> Result<Vec<u64>> {
-    let (mut fix, info_ptr) = auto_info(fix, &info)?;
-    let (mut fix, rkeys_ptr) = auto_alloc(&mut *fix, 8 * info.levels as usize)?;
+    let (mut fix, info_ptr) = auto_info(fix, info)?;
+    let (mut fix, rkeys_ptr) = auto_alloc(&mut fix, 8 * info.levels as usize)?;
 
     fix.vm.set_reg(A0, info_ptr.0);
     fix.vm.set_reg(A1, root);
@@ -413,7 +413,7 @@ pub fn split_one_into_two<V: Guest>(
     key: u64,
 ) -> Result<()> {
     let (mut fix, spine_ptr) = auto_guest::<ShadowSpine>(fix, spine, PERM_READ | PERM_WRITE)?;
-    let (mut fix, vt_ptr) = auto_guest::<BTreeValueType<V>>(&mut *fix, vt, PERM_READ | PERM_WRITE)?;
+    let (mut fix, vt_ptr) = auto_guest::<BTreeValueType<V>>(&mut fix, vt, PERM_READ | PERM_WRITE)?;
 
     fix.vm.set_reg(A0, spine_ptr.0);
     fix.vm.set_reg(A1, parent_index as u64);

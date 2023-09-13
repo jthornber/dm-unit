@@ -96,7 +96,7 @@ pub fn dm_cache_insert_mapping(
 pub fn dm_cache_changed_this_transaction(fix: &mut Fixture, cmd: Addr) -> Result<bool> {
     fix.vm.set_reg(A0, cmd.0);
     fix.call_with_errno("dm_cache_changed_this_transaction")?;
-    Ok(if fix.vm.reg(A0) == 0 { false } else { true })
+    Ok(fix.vm.reg(A0) != 0)
 }
 
 pub fn dm_cache_set_dirty_bits(
@@ -107,22 +107,12 @@ pub fn dm_cache_set_dirty_bits(
     todo!();
 }
 
+#[derive(Default)]
 pub struct CacheStats {
     pub read_hits: u32,
     pub read_misses: u32,
     pub write_hits: u32,
     pub write_misses: u32,
-}
-
-impl Default for CacheStats {
-    fn default() -> Self {
-        CacheStats {
-            read_hits: 0,
-            read_misses: 0,
-            write_hits: 0,
-            write_misses: 0,
-        }
-    }
 }
 
 impl Guest for CacheStats {
@@ -260,7 +250,7 @@ pub fn dm_cache_load_mappings(fix: &mut Fixture, cmd: Addr) -> Result<Vec<CacheM
         let hint = fix.vm.reg(A4) as u32;
         let hint_valid = fix.vm.reg(A5);
 
-        let dirty = if dirty == 0 { false } else { true };
+        let dirty = dirty != 0;
         let hint = if hint_valid == 0 { None } else { Some(hint) };
 
         {

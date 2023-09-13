@@ -296,31 +296,29 @@ fn relocate(mem: &mut Memory, rtype: RelocationType, p: u64, s: u64, a: u64) -> 
             // S + A - P, U + I type (two instructions)
             let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
 
-            let hi20: u32 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
-            let lo12: u32 = (offset as u32).wrapping_sub(hi20) & 0xfff;
+            let hi20: u32 = offset.wrapping_add(0x800) & 0xfffff000;
+            let lo12: u32 = offset.wrapping_sub(hi20) & 0xfff;
             mutate_u32(mem, Addr(p), |v| (v & 0xfff) | hi20)?;
             mutate_u32(mem, Addr(p + 4), |v| (v & 0xfffff) | (lo12 << 20))?;
         }
         Rpcrel_hi20 => {
             // S + A - P, U-type
             let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
-            let hi20 = (offset as u32).wrapping_add(0x800) & 0xfffff000;
+            let hi20 = offset.wrapping_add(0x800) & 0xfffff000;
             mutate_u32(mem, Addr(p), |v| (v & 0xfff) | hi20)?;
         }
         Rpcrel_lo12_i => {
             // S - P, I-type
             // let offset = (s - p) as u32;
             let offset = s as u32; // FIXME: subtraction already occured in caller
-            mutate_u32(mem, Addr(p), |v| {
-                (v & 0xfffff) | (((offset as u32) & 0xfff) << 20)
-            })?;
+            mutate_u32(mem, Addr(p), |v| (v & 0xfffff) | ((offset & 0xfff) << 20))?;
         }
         Rpcrel_lo12_s => {
             // S + A, S-type
             // let offset = (s + a) as u32;
             let offset = s as u32; // FIXME: subtraction already occured in caller
             mutate_u32(mem, Addr(p), |v| {
-                (v & 0xfffff) | (((offset as u32) & 0x1f) << 7) | (((offset as u32) & 0xfe) << 24)
+                (v & 0xfffff) | ((offset & 0x1f) << 7) | ((offset & 0xfe) << 24)
             })?;
         }
         Radd16 => {
@@ -746,11 +744,11 @@ impl LoaderInfo {
     }
 
     pub fn get_sym(&self, name: &str) -> Option<Addr> {
-        self.symbols.get(name).map(|a| a.clone())
+        self.symbols.get(name).copied()
     }
 
     pub fn get_rmap(&self, loc: Addr) -> Option<String> {
-        self.sym_rmap.get(&loc).map(|s| s.clone())
+        self.sym_rmap.get(&loc).cloned()
     }
 }
 

@@ -45,18 +45,10 @@ impl Guest for ListHead {
     }
 }
 
+#[derive(Default)]
 pub struct LruEntry {
     pub list: ListHead,
     pub referenced: u32,
-}
-
-impl Default for LruEntry {
-    fn default() -> Self {
-        Self {
-            list: ListHead::default(),
-            referenced: 0,
-        }
-    }
 }
 
 impl Guest for LruEntry {
@@ -132,7 +124,7 @@ pub fn lru_exit(fix: &mut Fixture, lru: Addr) -> Result<()> {
 // This is a trivial function that gets inlined.  Instead of
 // calling the C version we read the lru structure from the
 // guest and access the count field.
-pub fn lru_count(fix: &mut Fixture, lru: Addr) -> Result<u64> {
+pub fn lru_count(fix: &Fixture, lru: Addr) -> Result<u64> {
     let lru = read_guest::<Lru>(&fix.vm.mem, lru)?;
     Ok(lru.count)
 }

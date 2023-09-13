@@ -2,12 +2,14 @@ extern crate dm_unit;
 
 use dm_unit::capture_log::*;
 use dm_unit::path_formatter::*;
+use dm_unit::bench;
 use dm_unit::test_runner::*;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
 use dm_unit::tests::bufio;
 use dm_unit::tests::cache;
 use dm_unit::tests::extent_allocator;
+use dm_unit::tests::rtree;
 use dm_unit::tests::space_map_disk;
 use dm_unit::tests::space_map_metadata;
 use dm_unit::tests::thinp;
@@ -28,10 +30,20 @@ fn all_tests() -> Result<TestSet> {
     block_manager::register_tests(&mut tests)?;
     btree::register_tests(&mut tests)?;
     cache::register_tests(&mut tests)?;
+    rtree::register_tests(&mut tests)?;
     extent_allocator::register_tests(&mut tests)?;
     space_map_disk::register_tests(&mut tests)?;
     space_map_metadata::register_tests(&mut tests)?;
     thinp::register_tests(&mut tests)?;
+
+    Ok(tests)
+}
+
+fn benchmark_tests() -> Result<TestSet> {
+    let mut tests = TestSet::default();
+
+    bench::btree::register_bench(&mut tests)?;
+    bench::rtree::register_bench(&mut tests)?;
 
     Ok(tests)
 }
@@ -51,6 +63,45 @@ fn get_result_set() -> Result<String> {
         Err(e) => Err(anyhow::anyhow!("DM_UNIT_RESULT_SET not set: {}", e)),
     }
 }
+
+/*
+fn main() -> Result<()> {
+    env_logger::init();
+
+    let parser = Command::new("dm-unit")
+        .version("0")
+        .about("Unit test framework for device mapper kernel modules")
+        .arg(
+            arg!(-k --"kernel-dir" <KERNEL_DIR>)
+                .help("Location of kernel source that contains built kernel modules to be tested.")
+                .required(true),
+        )
+        .arg(
+            arg!(-j <JOBS>)
+                .value_parser(value_parser!(usize))
+                .help("Number of tests to run concurrently.")
+                .required(false),
+        )
+        .arg(arg!(-t <FILTER>).help("regex filter to select which tests to run"))
+        .arg(
+            Arg::new("JIT")
+                .long("jit")
+                .action(ArgAction::SetTrue)
+                .help("Turn on the experimental jit compiler"),
+        )
+        .arg(
+            Arg::new("BENCH")
+                .long("bench")
+                .action(ArgAction::SetTrue)
+                .help("Run benchmarks"),
+        );
+
+    let matches = parser.get_matches();
+    let kernel_dir = Path::new(matches.get_one::<String>("kernel-dir").unwrap());
+
+    let mut runner = TestRunner::new(kernel_dir)?;
+>>>>>>> hank/2023-08-22-shrink-value-size-v2-merged-ea
+*/
 
 fn get_rx(matches: &ArgMatches) -> Result<Regex> {
     let empty_pattern = "".to_string();
@@ -116,8 +167,13 @@ fn run(matches: &ArgMatches, log_lines: Arc<Mutex<LogInner>>) -> Result<()> {
     let mut db = dm_unit::db::TestResults::new(DB_PATH)?;
     let kernel_dir = Path::new(matches.get_one::<String>("kernel-dir").unwrap());
 
+    let mut tests = if *matches.get_one::<bool>("BENCH").unwrap_or(&false) {
+        benchmark_tests()?
+    } else {
+        all_tests()?
+    };
+
     let rx = get_rx(matches)?;
-    let mut tests = all_tests()?;
     tests.filter(&rx);
 
     let mut runner = TestRunner::new(kernel_dir, tests)?;
@@ -211,6 +267,13 @@ fn main() -> Result<()> {
                     .required(false),
             )
             */
+                    .arg(
+            Arg::new("BENCH")
+                .long("bench")
+                .action(ArgAction::SetTrue)
+                .help("Run benchmarks"),
+        )
+
             .arg(Arg::new("FILTER")
                 .index(1)
                 .required(false)

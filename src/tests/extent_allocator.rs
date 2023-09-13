@@ -37,7 +37,7 @@ impl AllocationContext {
         fix: &mut Fixture,
         allocated: &Arc<Mutex<RoaringBitmap>>,
     ) -> Result<Option<u64>> {
-        match alloc_context_alloc(fix, self.context, &allocated) {
+        match alloc_context_alloc(fix, self.context, allocated) {
             Ok(Some(block)) => {
                 self.blocks.push(block);
                 Ok(Some(block))
@@ -86,7 +86,7 @@ fn do_allocation_test(
     }
 
     for i in 0..nr_blocks_to_allocate {
-        let context = &mut contexts[(i % nr_contexts) as usize];
+        let context = &mut contexts[i % nr_contexts];
         context.alloc(fix, allocated)?;
     }
 
@@ -227,7 +227,7 @@ fn test_reset_no_holders(fix: &mut Fixture) -> Result<()> {
     let nr_blocks = 1024;
     let nr_blocks_to_allocate = nr_blocks / 2;
     let nr_contexts = 16;
-    let mut allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
 
     let mut contexts = Vec::new();
     let ea = extent_allocator_create(fix, nr_blocks as u64)?;
@@ -243,7 +243,7 @@ fn test_reset_no_holders(fix: &mut Fixture) -> Result<()> {
 
     for i in 0..nr_blocks_to_allocate {
         let context = &mut contexts[(i % nr_contexts) as usize];
-        context.alloc(fix, &mut allocated)?;
+        context.alloc(fix, &allocated)?;
     }
 
     for context in &contexts {
@@ -263,7 +263,7 @@ fn allocate_all_blocks(
 ) -> Result<()> {
     let mut i = 0;
     loop {
-        let context = &mut contexts[(i % contexts.len()) as usize];
+        let context = &mut contexts[i % contexts.len()];
         i += 1;
 
         match context.alloc(fix, allocated) {
@@ -286,7 +286,7 @@ fn test_reset_many_holders(fix: &mut Fixture) -> Result<()> {
 
     let nr_blocks = 1024;
     let nr_contexts = 16;
-    let mut allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
 
     let mut rng = rand::thread_rng();
     {
@@ -304,7 +304,7 @@ fn test_reset_many_holders(fix: &mut Fixture) -> Result<()> {
         contexts.push(AllocationContext::new(context));
     }
 
-    allocate_all_blocks(fix, &mut contexts, &mut allocated)?;
+    allocate_all_blocks(fix, &mut contexts, &allocated)?;
 
     {
         let allocated = allocated.lock().unwrap();
@@ -324,7 +324,7 @@ fn test_reset_many_holders(fix: &mut Fixture) -> Result<()> {
         }
     }
 
-    allocate_all_blocks(fix, &mut contexts, &mut allocated)?;
+    allocate_all_blocks(fix, &mut contexts, &allocated)?;
 
     {
         let allocated = allocated.lock().unwrap();
@@ -350,7 +350,7 @@ fn test_shared_contexts(fix: &mut Fixture) -> Result<()> {
 
     let nr_blocks = 1024;
     let nr_contexts = 32;
-    let mut allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
 
     let mut rng = rand::thread_rng();
     {
@@ -376,7 +376,7 @@ fn test_shared_contexts(fix: &mut Fixture) -> Result<()> {
         contexts.push(AllocationContext::new(context));
     }
 
-    allocate_all_blocks(fix, &mut contexts, &mut allocated)?;
+    allocate_all_blocks(fix, &mut contexts, &allocated)?;
 
     {
         let allocated = allocated.lock().unwrap();

@@ -140,7 +140,7 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
     );
     tests.register(
         "/pdata/block-manager/write-lock",
-        Test::new(kmodules.clone(), Box::new(test_write_lock)),
+        Test::new(kmodules, Box::new(test_write_lock)),
     );
 
     Ok(())

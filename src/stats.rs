@@ -2,27 +2,17 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::prelude::*;
 
-use crate::fixture::*;
 use crate::block_manager::*;
+use crate::fixture::*;
 
 //-------------------------------
 
+#[derive(Default)]
 pub struct Stats {
     pub instrs: u64,
     pub read_locks: u64,
     pub write_locks: u64,
     pub disk_reads: u64,
-}
-
-impl Default for Stats {
-    fn default() -> Self {
-        Stats {
-            instrs: 0,
-            read_locks: 0,
-            write_locks: 0,
-            disk_reads: 0,
-        }
-    }
 }
 
 impl Stats {
@@ -50,7 +40,7 @@ impl Stats {
 
 pub struct CostTracker {
     csv_out: File,
-    iteration: u32,
+    iteration: u64,
     baseline: Stats,
 }
 
@@ -58,7 +48,7 @@ impl CostTracker {
     pub fn new(path: &str) -> Result<Self> {
         // FIXME: support overwrite
         let mut csv_out = File::create(path)?;
-        csv_out.write_all(b"iteration, instructions, read locks, write locks\n")?;
+        csv_out.write_all(b"iteration, instructions, read_locks, write_locks, disk_reads\n")?;
 
         Ok(CostTracker {
             csv_out,
@@ -67,17 +57,30 @@ impl CostTracker {
         })
     }
 
-    pub fn begin(&mut self, fix: &mut Fixture, bm: &BlockManager) {
+    pub fn begin(&mut self, fix: &Fixture, bm: &BlockManager) {
         self.baseline = Stats::collect_stats(fix, bm);
-        self.iteration += 1;
     }
 
-    pub fn end(&mut self, fix: &mut Fixture, bm: &BlockManager) -> Result<()> {
+    pub fn end(&mut self, fix: &Fixture, bm: &BlockManager) -> Result<()> {
+        self.end_in_iterations(fix, bm, 1)
+    }
+
+    pub fn end_in_iterations(
+        &mut self,
+        fix: &Fixture,
+        bm: &BlockManager,
+        iters: u64,
+    ) -> Result<()> {
+        self.iteration += iters;
         let delta = Stats::delta(&self.baseline, fix, bm);
-        write!(
+        writeln!(
             self.csv_out,
-            "{}, {}, {}, {}, {}\n",
-            self.iteration, delta.instrs, delta.read_locks, delta.write_locks, delta.disk_reads
+            "{}, {}, {:.1}, {:.1}, {:.1}",
+            self.iteration,
+            delta.instrs / iters,
+            delta.read_locks as f64 / iters as f64,
+            delta.write_locks as f64 / iters as f64,
+            delta.disk_reads as f64 / iters as f64
         )?;
         Ok(())
     }

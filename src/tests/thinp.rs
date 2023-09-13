@@ -5,22 +5,24 @@ use rand::SeedableRng;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use thinp::io_engine::*;
+
 use thinp::pdata::btree_walker::*;
 use thinp::pdata::space_map::common::{IndexEntry, SMRoot};
 use thinp::pdata::unpack::*;
 use thinp::report::*;
-use thinp::thin::block_time::*;
 use thinp::thin::check::*;
 use thinp::thin::superblock::*;
 
 use crate::emulator::memory::*;
 use crate::fixture::*;
+use crate::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::btree::*;
+use crate::utils::rtree;
 use crate::wrappers::thinp_metadata::*;
 
 //-------------------------------
@@ -66,9 +68,11 @@ impl ReportInner for DebugReportInner {
         debug!("report: {}", txt);
     }
 
-    fn complete(&mut self) {}
+    fn to_stdout(&mut self, txt: &str) {
+        println!("{}", txt);
+    }
 
-    fn to_stdout(&mut self, _txt: &str) {}
+    fn complete(&mut self) {}
 
     fn get_prompt_input(&mut self, prompt: &str) -> std::io::Result<String> {
         Err(std::io::Error::new(
@@ -100,7 +104,7 @@ impl ThinPool {
         })
     }
 
-    fn stats_start(&mut self, fix: &mut Fixture) {
+    fn stats_start(&mut self, fix: &Fixture) {
         let bm = get_bm(fix, self.bm_ptr);
         self.baseline = Stats::collect_stats(fix, &bm);
     }
@@ -161,10 +165,10 @@ impl ThinPool {
         dm_pool_get_free_block_count(fix, self.pmd)
     }
 
-    fn check(&mut self, fix: &Fixture) -> Result<()> {
+    fn _check(&mut self, fix: &Fixture) -> Result<()> {
         // let report = std::sync::Arc::new(Report::new(Box::new(DebugReportInner {})));
         let report = std::sync::Arc::new(mk_quiet_report());
-        let engine = get_bm(fix, self.bm_ptr).clone();
+        let engine = get_bm(fix, self.bm_ptr);
         let space_maps = check_with_maps(engine, report)?;
         let metadata_sm = space_maps.metadata_sm.lock().unwrap();
         debug!(
@@ -194,9 +198,24 @@ impl ThinPool {
         Ok(())
     }
 
+    // TODO: check space maps
+    fn check_rtree(&self, fix: &Fixture) -> Result<()> {
+        let bm = get_bm(fix, self.bm_ptr);
+        let sb = read_superblock(bm.as_ref(), 0)?;
+
+        let mut path = Vec::new();
+        let roots = btree_to_map(&mut path, bm.clone(), false, sb.mapping_root)?;
+        for (thin_id, root) in roots {
+            let stats = rtree_stat(bm.clone(), root)?;
+            println!("thin id {}, stats {:?}", thin_id, stats);
+        }
+
+        Ok(())
+    }
+
     fn show_mapping_residency(&self, fix: &Fixture) -> Result<()> {
         let bm = get_bm(fix, self.bm_ptr);
-        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
+        let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr);
         let sb = read_superblock(engine.as_ref(), 0)?;
 
         let mut path = Vec::new();
@@ -205,7 +224,7 @@ impl ThinPool {
             debug!(
                 "residency of thin {} = {}",
                 thin_id,
-                calc_residency::<Value64>(&bm, root)?
+                rtree::calc_residency(bm.clone(), root)?
             );
         }
 
@@ -228,6 +247,8 @@ impl ThinPool {
     }
 
     fn build_run_histogram(&self, fix: &Fixture) -> Result<BTreeMap<usize, usize>> {
+        use crate::pdata::rtree::Mapping;
+
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
         let sb = read_superblock(engine.as_ref(), 0)?;
 
@@ -236,20 +257,20 @@ impl ThinPool {
 
         let mut histogram = BTreeMap::new();
         for (_thin_id, root) in roots {
-            let blocks: BTreeMap<u64, BlockTime> =
-                btree_to_map(&mut path, engine.clone(), false, root)?;
+            let (entries, _) = extract_rtree_entries(engine.clone(), root)?;
 
             // Build a histogram of run lengths
-            let mut last_entry: Option<(u64, BlockTime)> = None;
-            let mut run_length = 0;
+            let mut last_entry: Option<Mapping> = None;
+            let mut run_length: usize = 0;
 
-            for (k, v) in &blocks {
+            for m in entries {
                 match last_entry {
-                    Some((last_key, last_value))
-                        if last_key + 1 == *k && last_value.block + 1 == v.block =>
+                    Some(last)
+                        if last.thin_begin + last.len as u64 == m.thin_begin
+                            && last.data_begin + last.len as u64 == m.data_begin =>
                     {
                         // Blocks and keys are both adjacent, increment run length
-                        run_length += 1;
+                        run_length += m.len as usize;
                     }
                     _ => {
                         // Blocks or keys are not adjacent or this is the first entry,
@@ -257,10 +278,10 @@ impl ThinPool {
                         if let Some(_last) = last_entry {
                             *histogram.entry(run_length).or_insert(0) += 1;
                         }
-                        run_length = 1;
+                        run_length = m.len as usize;
                     }
                 }
-                last_entry = Some((*k, v.clone()));
+                last_entry = Some(m);
             }
 
             // Record the last run
@@ -341,8 +362,10 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
 
     let mut alloc_tracker = CostTracker::new("single-alloc-block.csv")?;
     let mut insert_tracker = CostTracker::new("single-insert-block.csv")?;
+    let mut overall_tracker = CostTracker::new("single-provision.csv")?;
     let mut insert_count = 0;
     let bm = get_bm(fix, pool.bm_ptr);
+    overall_tracker.begin(fix, &bm);
     pool.stats_start(fix);
     for thin_b in thin_blocks {
         alloc_tracker.begin(fix, &bm);
@@ -359,6 +382,9 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
             pool.commit(fix)?;
             pool.stats_report(fix, "provision", commit_interval)?;
             pool.stats_start(fix);
+            pool.check_rtree(fix)?;
+            overall_tracker.end_in_iterations(fix, &bm, commit_interval)?;
+            overall_tracker.begin(fix, &bm);
             insert_count = 0;
         }
     }
@@ -374,12 +400,12 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
 const PROVISION_SINGLE_COUNT: u64 = 100000;
 
 fn test_provision_single_thin_linear(fix: &mut Fixture) -> Result<()> {
-    let thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).into_iter().collect();
+    let thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).collect();
     do_provision_single_thin(fix, &thin_blocks)
 }
 
 fn test_provision_single_thin_random(fix: &mut Fixture) -> Result<()> {
-    let mut thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).into_iter().collect();
+    let mut thin_blocks: Vec<u64> = (0..PROVISION_SINGLE_COUNT).collect();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     thin_blocks.shuffle(&mut rng);
     do_provision_single_thin(fix, &thin_blocks)
@@ -517,7 +543,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
             }
             pool.commit(fix)?;
             //pool.stats_report(fix, "provision", commit_interval)?;
-            pool.check(fix)?;
+            pool.check_rtree(fix)?;
 
             pool.stats_start(fix);
             insert_count = 0;
@@ -576,7 +602,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
         if discard_count == commit_interval {
             pool.commit(fix)?;
             pool.stats_report(fix, "discard", commit_interval)?;
-            pool.check(fix)?;
+            pool.check_rtree(fix)?;
             pool.stats_start(fix);
             discard_count = 0;
         }
@@ -584,6 +610,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
 
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
+    pool.check_rtree(fix)?;
 
     Ok(())
 }
@@ -627,7 +654,7 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
                 pool.delete_thin(fix, thin_id - 10)?;
             }
             pool.commit(fix)?;
-            pool.check(fix)?;
+            pool.check_rtree(fix)?;
 
             insert_count = 0;
         }

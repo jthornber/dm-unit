@@ -1,10 +1,11 @@
-use crate::emulator::riscv::*;
-use crate::fixture::*;
 use crate::emulator::memory::*;
+use crate::emulator::riscv::Reg::*;
+use crate::fixture::*;
 
 use anyhow::Result;
-
-use Reg::*;
+use byteorder::LittleEndian;
+use byteorder::ReadBytesExt;
+use std::io::Cursor;
 
 //-------------------------------
 
@@ -19,7 +20,7 @@ pub fn dm_tm_create(fix: &mut Fixture, bm: Addr, sb_loc: u64) -> Result<(Addr, A
     fix.vm.set_reg(A1, sb_loc);
     let (mut fix, tm_result) = auto_alloc(fix, 8)?;
     fix.vm.set_reg(A2, tm_result.0);
-    let (mut fix, sm_result) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, sm_result) = auto_alloc(&mut fix, 8)?;
     fix.vm.set_reg(A3, sm_result.0);
     fix.call_with_errno("dm_tm_create_with_sm")?;
 
@@ -67,7 +68,7 @@ pub fn dm_tm_shadow_block(
 
     let (mut fix, result_ptr) = auto_alloc(fix, 8)?;
     fix.vm.set_reg(A3, result_ptr.0);
-    let (mut fix, inc_children) = auto_alloc(&mut *fix, 4)?;
+    let (mut fix, inc_children) = auto_alloc(&mut fix, 4)?;
     fix.vm.set_reg(A4, inc_children.0);
 
     fix.call_with_errno("dm_tm_shadow_block")?;
@@ -123,6 +124,39 @@ pub fn dm_tm_ref(fix: &mut Fixture, tm: Addr, b: u64) -> Result<u32> {
 
     let count = fix.vm.mem.read_into::<u32>(result_ptr, PERM_READ)?;
     Ok(count)
+}
+
+pub fn dm_tm_load_stats(fix: &mut Fixture, tm: Addr) -> Result<(Vec<u32>, Vec<u32>)> {
+    let (mut fix, action) = auto_alloc(fix, 32)?;
+    let (mut fix, stats) = auto_alloc(&mut fix, 32)?;
+
+    fix.vm.set_reg(A0, tm.0);
+    fix.vm.set_reg(A1, action.0);
+    fix.vm.set_reg(A2, stats.0);
+
+    fix.call("dm_tm_load_stats")?;
+
+    let action = fix.vm.mem.read_some(action, PERM_READ, |bytes| {
+        assert!(bytes.len() >= 32);
+        let mut v = Vec::new();
+        let mut r = Cursor::new(bytes);
+        for _i in 0..8 {
+            v.push(r.read_u32::<LittleEndian>().unwrap());
+        }
+        v
+    })?;
+
+    let stats = fix.vm.mem.read_some(stats, PERM_READ, |bytes| {
+        assert!(bytes.len() >= 32);
+        let mut v = Vec::new();
+        let mut r = Cursor::new(bytes);
+        for _i in 0..8 {
+            v.push(r.read_u32::<LittleEndian>().unwrap());
+        }
+        v
+    })?;
+
+    Ok((action, stats))
 }
 
 //-------------------------------

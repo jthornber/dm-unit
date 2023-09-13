@@ -320,20 +320,11 @@ impl std::fmt::Display for IR {
 
 //----------------------------------
 
+#[derive(Default)]
 struct Builder {
     buffer: Vec<IR>,
     current_reg: u32,
     guest_regs: BTreeMap<riscv::Reg, IReg>,
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Builder {
-            buffer: Vec::new(),
-            current_reg: 0,
-            guest_regs: BTreeMap::new(),
-        }
-    }
 }
 
 impl Builder {
@@ -357,7 +348,7 @@ impl Builder {
 
     /// Returns the IR register that contains the guest reg
     fn ref_greg(&self, greg: &riscv::Reg) -> IReg {
-        self.guest_regs.get(greg).unwrap().clone()
+        *self.guest_regs.get(greg).unwrap()
     }
 
     /// Call this when you want to mutate the value of a guest register.
@@ -365,7 +356,7 @@ impl Builder {
     fn mut_greg(&mut self, greg: &riscv::Reg) -> (IReg, IReg) {
         let mut new = self.next_reg();
         new.1 = Some(*greg);
-        let old = self.guest_regs.get(greg).unwrap().clone();
+        let old = *self.guest_regs.get(greg).unwrap();
 
         // We don't insert the new reg for zero, since it
         // shouldn't change.
@@ -491,14 +482,7 @@ impl Builder {
     fn xlate_shift(&mut self, rd: &riscv::Reg, op: ShiftOp, rs: &riscv::Reg, shamt: u8) {
         let rs = self.ref_greg(rs);
         let rd = self.def_greg(rd);
-        self.assign(
-            rd,
-            RValue::Shift {
-                op,
-                rs: rs,
-                shamt: shamt,
-            },
-        );
+        self.assign(rd, RValue::Shift { op, rs, shamt });
     }
 
     fn imm(&mut self, rd: &riscv::Reg, op: ImmOp, rs: &riscv::Reg, imm: &i32) {
@@ -563,7 +547,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
                 Imm {
                     op: Addi,
                     rs: old_pc,
-                    imm: width as i32,
+                    imm: width,
                 },
             );
 
@@ -959,7 +943,7 @@ fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
             rs: base,
             imm: *greg as i32 * 8,
         });
-        let rd2 = b.def_greg(&greg);
+        let rd2 = b.def_greg(greg);
         b.assign(rd2, Ld { rs: rd1 });
     }
 
@@ -978,7 +962,7 @@ fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
             rs: base,
             imm: *greg as i32 * 8,
         });
-        let rs2 = b.ref_greg(&greg);
+        let rs2 = b.ref_greg(greg);
         b.push(Sd { rs1, rs2 });
     }
 }
@@ -1205,7 +1189,7 @@ fn opt_noop(instrs: &[IR]) -> Vec<IR> {
 
 //--------------------------------
 
-fn simplify(rval: &RValue, defs: &mut BTreeMap<IReg, RValue>) -> RValue {
+fn simplify(rval: &RValue, defs: &BTreeMap<IReg, RValue>) -> RValue {
     match rval {
         Imm { op: Addi, rs, imm } => {
             let rval2 = defs.get(rs).unwrap();
@@ -1234,7 +1218,7 @@ fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
     for ir in instrs {
         match ir {
             Assign { rd, rval } => {
-                let rval = simplify(&rval, &mut defs);
+                let rval = simplify(rval, &mut defs);
                 r.push(Assign { rd: *rd, rval });
                 defs.insert(*rd, rval);
             }
@@ -1384,11 +1368,7 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     for r in &ranges {
         by_base.insert(
             r.base,
-            (
-                IReg(highest_reg, None),
-                IReg(highest_reg + 1, None),
-                r.clone(),
-            ),
+            (IReg(highest_reg, None), IReg(highest_reg + 1, None), *r),
         );
         highest_reg += 2;
     }

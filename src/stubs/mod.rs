@@ -161,6 +161,7 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.at_func("dm_bm_write_lock_zero", Box::new(bm_write_lock_zero));
     let _ = fix.at_func("kfree", Box::new(kfree));
     let _ = fix.at_func("__kmalloc", Box::new(kmalloc));
+    let _ = fix.at_func("kmalloc_large", Box::new(kmalloc));
     let _ = fix.at_func("kmalloc_order", Box::new(kmalloc));
     let _ = fix.at_func("kmalloc_large", Box::new(kmalloc));
     let _ = fix.at_func("memcpy", Box::new(memcpy));
