@@ -1,11 +1,11 @@
 use crate::emulator::memory::*;
 use crate::fixture::*;
-use crate::tools::pdata::rtree::*;
-use crate::tools::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
+use crate::tools::pdata::rtree::*;
+use crate::tools::pdata::rtree_walker::*;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::rtree::*;
 use crate::wrappers::space_map::*;

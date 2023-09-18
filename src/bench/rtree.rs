@@ -1,8 +1,8 @@
 use crate::fixture::*;
-use crate::tools::pdata::rtree::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::rtree::*;
+use crate::tools::pdata::rtree::*;
 
 use anyhow::Result;
 use rand::prelude::*;

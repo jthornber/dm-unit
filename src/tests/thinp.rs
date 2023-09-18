@@ -15,13 +15,13 @@ use thinp::thin::superblock::*;
 
 use crate::emulator::memory::*;
 use crate::fixture::*;
-use crate::tools::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::btree::*;
+use crate::tools::pdata::rtree_walker::*;
 use crate::utils::rtree;
 use crate::wrappers::thinp_metadata::*;
 

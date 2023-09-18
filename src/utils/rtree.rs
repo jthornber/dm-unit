@@ -1,9 +1,9 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+use crate::block_manager::BlockManager;
 use crate::tools::pdata::rtree::MAX_LEAF_ENTRIES;
 use crate::tools::pdata::rtree_walker::*;
-use crate::block_manager::BlockManager;
 
 //-------------------------------
 
