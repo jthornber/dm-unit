@@ -586,9 +586,11 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
     pool.commit(fix)?;
     info!("provisioned");
 
+    pool.check_rtree(fix)?;
+
     let mut discard_tracker = CostTracker::new("discard-blocks.csv")?;
 
-    let thin_blocks = generate_ranges(20_000, 20);
+    let thin_blocks = generate_ranges(DISCARD_SINGLE_COUNT, 20);
     let bm = get_bm(fix, pool.bm_ptr);
     pool.stats_start(fix);
     let mut discard_count = 0;
