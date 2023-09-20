@@ -145,6 +145,7 @@ fn bench_insert_ascending(fix: &mut Fixture) -> Result<()> {
 
 fn bench_lookup_random(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
+    disable_data_sm(fix)?; // test the rtree only
 
     const COUNT: u64 = 200000;
     const COMMIT_INTERVAL: usize = 100;
