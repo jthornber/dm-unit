@@ -6,17 +6,24 @@ use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tools::pdata::rtree::*;
 use crate::tools::pdata::rtree_walker::*;
+use crate::tools::thin::check::BottomLevelVisitor;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::rtree::*;
 use crate::wrappers::space_map::*;
 use crate::wrappers::space_map_disk::*;
 use crate::wrappers::transaction_manager::*;
 
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
+use thinp::io_engine::IoEngine;
+use thinp::pdata::space_map::checker::*;
+use thinp::pdata::space_map::common::SMRoot;
+use thinp::pdata::space_map::core_sm;
+use thinp::pdata::unpack::Unpack;
+use thinp::report::mk_simple_report;
 
 //-------------------------------
 
@@ -84,8 +91,8 @@ impl<'a> RTreeTest<'a> {
 
         let root = dm_rtree_empty(fix, tm)?;
 
-        // Inc the superblock
-        sm_inc_block(fix, metadata_sm, SUPERBLOCK, SUPERBLOCK + 1)?;
+        // A newly created metadata sm already has the superblock reserved,
+        // so we can write to it directly.
         let sb = dm_bm_write_lock_zero(fix, bm, SUPERBLOCK, Addr(0))?;
 
         let baseline = {
@@ -117,6 +124,7 @@ impl<'a> RTreeTest<'a> {
     */
 
     pub fn commit(&mut self) -> Result<()> {
+        sm_commit(self.fix, self.data_sm)?;
         dm_tm_pre_commit(self.fix, self.tm)?;
         dm_tm_commit(self.fix, self.tm, self.sb)?;
         self.sb = dm_bm_write_lock_zero(self.fix, self.bm, SUPERBLOCK, Addr(0))?;
@@ -200,7 +208,45 @@ impl<'a> RTreeTest<'a> {
         self.commit()?;
 
         let bm = get_bm(self.fix, self.bm);
+        let meta_sm = core_sm(bm.get_nr_blocks(), 255);
+        let data_sm = core_sm(sm_get_nr_blocks(self.fix, self.data_sm)?, 255);
+        meta_sm.lock().unwrap().inc(0, 1)?; // count the superblock
+
+        let w = RTreeWalker::new_with_sm(bm.clone(), meta_sm.clone())?;
+        let v = BottomLevelVisitor::new(data_sm.clone());
+        w.walk(&v, self.root)?;
+
+        // Check the data space map
+        let mut root_buf = vec![0u8; SMRoot::disk_size() as usize];
+        sm_copy_root(self.fix, self.data_sm, root_buf.as_mut_slice())?;
+        let data_root = thinp::pdata::unpack::unpack::<SMRoot>(root_buf.as_slice())?;
+        let report = std::sync::Arc::new(mk_simple_report());
+        let leaks = check_disk_space_map(
+            bm.clone(),
+            report.clone(),
+            data_root.clone(),
+            data_sm,
+            meta_sm.clone(),
+            false,
+        )?;
+        if !leaks.is_empty() {
+            return Err(anyhow!("data space map contains leaks"));
+        }
+
+        // Check the metadata space map
+        sm_copy_root(self.fix, self.metadata_sm, root_buf.as_mut_slice())?;
+        let meta_root = thinp::pdata::unpack::unpack::<SMRoot>(root_buf.as_slice())?;
+        let leaks = check_metadata_space_map(bm.clone(), report, meta_root, meta_sm, false)?;
+        if !leaks.is_empty() {
+            return Err(anyhow!("metadata space map contains leaks"));
+        }
+
         let stats = rtree_stat(bm, self.root)?;
+
+        if data_root.nr_allocated != stats.nr_mapped_blocks {
+            return Err(anyhow!("shared data blocks in a tree"));
+        }
+
         Ok(stats)
     }
 
