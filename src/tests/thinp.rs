@@ -198,17 +198,10 @@ impl ThinPool {
         Ok(())
     }
 
-    // TODO: check space maps
-    fn check_rtree(&self, fix: &Fixture) -> Result<()> {
-        let bm = get_bm(fix, self.bm_ptr);
-        let sb = read_superblock(bm.as_ref(), 0)?;
-
-        let mut path = Vec::new();
-        let roots = btree_to_map(&mut path, bm.clone(), false, sb.mapping_root)?;
-        for (thin_id, root) in roots {
-            let stats = rtree_stat(bm.clone(), root)?;
-            println!("thin id {}, stats {:?}", thin_id, stats);
-        }
+    fn check(&mut self, fix: &mut Fixture) -> Result<()> {
+        let report = std::sync::Arc::new(mk_simple_report());
+        let engine = get_bm(fix, self.bm_ptr);
+        crate::tools::thin::check::check_rtree(engine, report)?;
 
         Ok(())
     }
@@ -307,7 +300,9 @@ impl ThinPool {
 
 fn test_create(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
-    let _t = ThinPool::new(fix, 1024, 64, 102400)?;
+    let mut t = ThinPool::new(fix, 1024, 64, 102400)?;
+    t.commit(fix)?;
+    t.check(fix)?;
     Ok(())
 }
 
@@ -323,6 +318,9 @@ fn test_create_many_thins(fix: &mut Fixture) -> Result<()> {
     for tid in 0..1000 {
         t.delete_thin(fix, tid)?;
     }
+
+    t.commit(fix)?;
+    t.check(fix)?;
 
     Ok(())
 }
@@ -347,6 +345,7 @@ fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
     }
 
     t.commit(fix)?;
+    t.check(fix)?;
 
     Ok(())
 }
@@ -381,8 +380,8 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
         if insert_count == commit_interval {
             pool.commit(fix)?;
             pool.stats_report(fix, "provision", commit_interval)?;
+            pool.check(fix)?;
             pool.stats_start(fix);
-            pool.check_rtree(fix)?;
             overall_tracker.end_in_iterations(fix, &bm, commit_interval)?;
             overall_tracker.begin(fix, &bm);
             insert_count = 0;
@@ -393,6 +392,7 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
     // or if this is a feature).
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
+    pool.check(fix)?;
 
     Ok(())
 }
@@ -488,7 +488,9 @@ fn do_provision_recursive_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result
         }
     }
 
+    pool.commit(fix)?;
     pool.close_thin(fix, td)?;
+    pool.check(fix)?;
 
     Ok(())
 }
@@ -543,14 +545,16 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
             }
             pool.commit(fix)?;
             //pool.stats_report(fix, "provision", commit_interval)?;
-            pool.check_rtree(fix)?;
+            pool.check(fix)?;
 
             pool.stats_start(fix);
             insert_count = 0;
         }
     }
 
+    pool.commit(fix)?;
     pool.close_thin(fix, td)?;
+    pool.check(fix)?;
     pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
@@ -586,7 +590,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
     pool.commit(fix)?;
     info!("provisioned");
 
-    pool.check_rtree(fix)?;
+    pool.check(fix)?;
 
     let mut discard_tracker = CostTracker::new("discard-blocks.csv")?;
 
@@ -604,7 +608,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
         if discard_count == commit_interval {
             pool.commit(fix)?;
             pool.stats_report(fix, "discard", commit_interval)?;
-            pool.check_rtree(fix)?;
+            pool.check(fix)?;
             pool.stats_start(fix);
             discard_count = 0;
         }
@@ -612,7 +616,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
 
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
-    pool.check_rtree(fix)?;
+    pool.check(fix)?;
 
     Ok(())
 }
@@ -656,13 +660,15 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
                 pool.delete_thin(fix, thin_id - 10)?;
             }
             pool.commit(fix)?;
-            pool.check_rtree(fix)?;
+            pool.check(fix)?;
 
             insert_count = 0;
         }
     }
 
+    pool.commit(fix)?;
     pool.close_thin(fix, td)?;
+    pool.check(fix)?;
     pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
 
@@ -729,6 +735,7 @@ fn test_delete_frees_blocks(fix: &mut Fixture) -> Result<()> {
     pool.close_thin(fix, old_thin)?;
     pool.delete_thin(fix, 0)?;
     pool.commit(fix)?;
+    pool.check(fix)?;
 
     // and allocation should succeed
     ensure!(
@@ -807,6 +814,9 @@ where
         let td = td[i as usize].take();
         pool.close_thin(fix, td.unwrap())?;
     }
+
+    pool.commit(fix)?;
+    pool.check(fix)?;
 
     let histogram = pool.build_run_histogram(fix)?;
     pool.show_fragmentation(&histogram)?;
