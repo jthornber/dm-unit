@@ -907,9 +907,8 @@ fn test_trim_entry_end(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 1);
     ensure!(stats.nr_entries == 1);
 
-    let result = rtree.lookup(50)?;
     ensure!(
-        result
+        rtree.lookup(49)?
             == Some(Mapping {
                 thin_begin: 10,
                 data_begin: 1,
@@ -917,6 +916,8 @@ fn test_trim_entry_end(fix: &mut Fixture) -> Result<()> {
                 time: 0,
             })
     );
+
+    ensure!(rtree.lookup(50)?.is_none());
 
     Ok(())
 }
@@ -1841,7 +1842,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
     let mut rtree = RTreeTest::new(fix, 1024)?;
     let v = Mapping {
         thin_begin: 10,
-        data_begin: 1,
+        data_begin: 0,
         len: 100,
         time: 0,
     };
@@ -1849,7 +1850,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
 
     let v = Mapping {
         thin_begin: 5,
-        data_begin: 20,
+        data_begin: 500,
         len: 10,
         time: 0,
     };
@@ -1865,7 +1866,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
         result
             == Some(Mapping {
                 thin_begin: 5,
-                data_begin: 20,
+                data_begin: 500,
                 len: 10,
                 time: 0,
             })
@@ -1876,7 +1877,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
         result
             == Some(Mapping {
                 thin_begin: 15,
-                data_begin: 6,
+                data_begin: 5,
                 len: 95,
                 time: 0,
             })
@@ -2093,7 +2094,7 @@ fn test_overwrite_random(fix: &mut Fixture) -> Result<()> {
 fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const KEY_COUNT: usize = 200000;
+    const KEY_COUNT: u64 = 200000;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
 
     let mut endpoints = BTreeSet::new();
@@ -2126,17 +2127,17 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     // insert ranges with gaps
-    for m in &mappings {
+    for (i, m) in mappings.iter().enumerate() {
         if m.len > 1 {
             let mut m2 = m.clone();
             m2.len -= 1;
             rtree.insert(&m2)?;
         }
 
-        // the gaps have different time
+        // the gaps map to a different block address
         let gap = Mapping {
             thin_begin: m.thin_begin + m.len as u64 - 1,
-            data_begin: m.data_begin + m.len as u64 - 1,
+            data_begin: KEY_COUNT + i as u64,
             len: 1,
             time: 0,
         };
@@ -2157,12 +2158,12 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     }
 
     let tree_stats = rtree.check()?;
-    ensure!(tree_stats.nr_entries >= thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
-    ensure!(tree_stats.nr_mapped_blocks == KEY_COUNT as u64);
+    ensure!(tree_stats.nr_entries >= thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN as u64));
+    ensure!(tree_stats.nr_mapped_blocks == KEY_COUNT);
 
     // This test is optional. We might end up with more than twice number of entries
     // due to the entries across the leaf boundaries won't be merged.
-    ensure!(tree_stats.nr_entries <= 2 * thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
+    ensure!(tree_stats.nr_entries <= 2 * thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN as u64));
 
     Ok(())
 }
