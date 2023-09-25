@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use thinp::io_engine::{Block, IoEngine};
 use thinp::pdata::btree::split_key_ranges;
 
-use crate::pdata::rtree::*;
-use crate::pdata::rtree_error::*;
+use crate::tools::pdata::rtree::*;
+use crate::tools::pdata::rtree_error::*;
 
 pub use thinp::pdata::btree::KeyRange;
 

@@ -15,7 +15,7 @@ use thinp::thin::superblock::*;
 
 use crate::emulator::memory::*;
 use crate::fixture::*;
-use crate::pdata::rtree_walker::*;
+use crate::tools::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_device::*;
 use crate::stubs::block_manager::*;
@@ -247,7 +247,7 @@ impl ThinPool {
     }
 
     fn build_run_histogram(&self, fix: &Fixture) -> Result<BTreeMap<usize, usize>> {
-        use crate::pdata::rtree::Mapping;
+        use crate::tools::pdata::rtree::Mapping;
 
         let engine: Arc<dyn IoEngine + Send + Sync> = get_bm(fix, self.bm_ptr).clone();
         let sb = read_superblock(engine.as_ref(), 0)?;
