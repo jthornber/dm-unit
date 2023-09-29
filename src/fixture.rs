@@ -5,6 +5,7 @@ use crate::emulator::memory::{Addr, PERM_EXEC};
 use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
 use crate::guest::*;
+use crate::lock_check::*;
 
 use anyhow::{anyhow, Context, Result};
 use libc::{c_int, strerror_r};
@@ -39,6 +40,8 @@ pub struct Fixture {
     pub contexts: AnyMap<Addr>,
 
     kernel_dir: PathBuf,
+
+    pub lock_check: LockCheck,
 }
 
 #[derive(Clone)]
@@ -121,7 +124,32 @@ impl Fixture {
             trace_indent: 0,
             contexts: AnyMap::default(),
             kernel_dir: std::fs::canonicalize(PathBuf::from(kernel_dir.as_ref())).unwrap(),
+            lock_check: LockCheck::default(),
         })
+    }
+
+    pub fn get_lock(&mut self, kind: LockType, addr: Addr) {
+        self.lock_check.lock(kind, addr, Addr(self.vm.reg(Reg::Ra)));
+    }
+
+    pub fn put_lock(&mut self, kind: LockType, addr: Addr) -> Result<()> {
+        if let Err(l) = self.lock_check.unlock(kind, addr) {
+            return Err(anyhow!("lock mismatch: {:?}", l));
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks if a spin lock is held and raises an error if so.
+    pub fn may_sleep(&self) -> Result<()> {
+        if self.lock_check.spin_held() {
+            let spin_pc = self.lock_check.most_recent_spin_pc().unwrap();
+            let loc = self.get_loc_from_addr(spin_pc)?;
+            return Err(anyhow!("may_sleep() called with spin lock taken at {}",
+                            loc));
+        }
+
+        Ok(())
     }
 
     fn lookup_fn(&self, func: &str) -> Result<Addr> {
@@ -130,6 +158,11 @@ impl Fixture {
         } else {
             Err(anyhow!("couldn't lookup symbol '{}'", func))
         }
+    }
+
+    pub fn get_loc_from_addr(&self, addr: Addr) -> Result<String> {
+        let debug = self.loader_info.debug.lock().unwrap();
+        debug.addr2line(&self.kernel_dir, addr)
     }
 
     /// Returns the source location of the current instruction.

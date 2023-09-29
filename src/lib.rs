@@ -13,6 +13,7 @@ pub mod block_manager;
 pub mod capture_log;
 pub mod db;
 pub mod emulator;
+pub mod lock_check;
 pub mod fixture;
 pub mod guest;
 pub mod path_formatter;

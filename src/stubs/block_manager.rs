@@ -72,6 +72,8 @@ pub fn get_bm(fix: &Fixture, bm_ptr: Addr) -> Arc<BlockManager> {
 }
 
 pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
+    fix.may_sleep()?;
+
     let bm_ptr = Addr(fix.vm.reg(A0));
     let loc = fix.vm.reg(A1);
     let v_ptr = Addr(fix.vm.reg(A2));
@@ -90,6 +92,8 @@ pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
 }
 
 fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
+    fix.may_sleep()?;
+
     let bm_ptr = Addr(fix.vm.reg(A0));
     let loc = fix.vm.reg(A1);
     let v_ptr = Addr(fix.vm.reg(A2));

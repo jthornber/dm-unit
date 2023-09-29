@@ -67,7 +67,7 @@ impl DebugInfo {
                 loc.line.unwrap_or(0),
             ))
         } else {
-            Ok("no location info".to_string())
+            Ok("<no location info>".to_string())
         }
     }
 }

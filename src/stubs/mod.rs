@@ -130,12 +130,6 @@ pub fn standard_globals(fix: &mut Fixture) -> Result<()> {
     let _ = fix.stub("__list_add_valid", 1);
     let _ = fix.stub("__list_del_entry_valid", 1);
 
-    let _ = fix.stub("__raw_spin_lock_init", 0);
-    let _ = fix.stub("_raw_spin_lock", 0);
-    let _ = fix.stub("_raw_spin_unlock", 0);
-    let _ = fix.stub("__mutex_init", 0);
-    let _ = fix.stub("mutex_lock", 0);
-    let _ = fix.stub("mutex_unlock", 0);
     let _ = fix.stub("___ratelimit", 0);
     let _ = fix.stub("__might_resched", 0);
     let _ = fix.stub("__cond_resched", 0);

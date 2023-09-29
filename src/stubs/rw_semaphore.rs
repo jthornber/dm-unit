@@ -7,8 +7,43 @@ use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
+use crate::lock_check::*;
 
 use Reg::*;
+
+//-------------------------------
+
+
+fn lock_(fix: &mut Fixture, kind: LockType) -> Result<()> {
+    let ptr = Addr(fix.vm.reg(A0));
+    fix.get_lock(kind, ptr);
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn unlock_(fix: &mut Fixture, kind: LockType) -> Result<()> {
+    let ptr = Addr(fix.vm.reg(A0));
+    fix.put_lock(kind, ptr)?;
+    fix.vm.ret(0);
+    Ok(())
+}
+
+fn spin_lock(fix: &mut Fixture) -> Result<()> {
+    lock_(fix, LockType::Spin)
+}
+
+fn spin_unlock(fix: &mut Fixture) -> Result<()> {
+    unlock_(fix, LockType::Spin)
+}
+
+fn mutex_lock(fix: &mut Fixture) -> Result<()> {
+    fix.may_sleep()?;
+    lock_(fix, LockType::Mutex)
+}
+
+fn mutex_unlock(fix: &mut Fixture) -> Result<()> {
+    unlock_(fix, LockType::Mutex)
+}
 
 //-------------------------------
 
@@ -72,6 +107,8 @@ where
 }
 
 fn down_read(fix: &mut Fixture) -> Result<()> {
+    fix.may_sleep()?;
+
     let ptr = Addr(fix.vm.reg(A0));
     mut_count(&mut fix.vm.mem, ptr, |mut count| {
         if count == 1 {
@@ -110,6 +147,8 @@ fn up_read(fix: &mut Fixture) -> Result<()> {
 }
 
 fn down_write(fix: &mut Fixture) -> Result<()> {
+    fix.may_sleep()?;
+
     let ptr = Addr(fix.vm.reg(A0));
     mut_count(&mut fix.vm.mem, ptr, |count| {
         if count != 0 {
@@ -140,11 +179,20 @@ fn up_write(fix: &mut Fixture) -> Result<()> {
 //-------------------------------
 
 pub fn rw_sem_stubs(fix: &mut Fixture) -> Result<()> {
+    let _ = fix.stub("__raw_spin_lock_init", 0);
+    let _ = fix.at_func("_raw_spin_lock", Box::new(spin_lock));
+    let _ = fix.at_func("_raw_spin_unlock", Box::new(spin_unlock));
+
+    let _ = fix.stub("__mutex_init", 0);
+    let _ = fix.at_func("mutex_lock", Box::new(mutex_lock));
+    let _ = fix.at_func("mutex_unlock", Box::new(mutex_unlock));
+
     let _ = fix.at_func("__init_rwsem", Box::new(init_rwsem));
     let _ = fix.at_func("down_read", Box::new(down_read));
     let _ = fix.at_func("up_read", Box::new(up_read));
     let _ = fix.at_func("down_write", Box::new(down_write));
     let _ = fix.at_func("up_write", Box::new(up_write));
+
     Ok(())
 }
 
