@@ -113,7 +113,9 @@ impl RTreeWalker {
         // The child's key range might not be avilable if it is seriously damaged.
         let child_krs = self.krs.lock().unwrap();
         if let Some(child_kr) = child_krs.get(b as u32) {
-            if parent_kr.start > Some(child_kr.start) || parent_kr.end < Some(child_kr.end) {
+            if parent_kr.start > Some(child_kr.start)
+                || (parent_kr.end.is_some() && parent_kr.end < Some(child_kr.end))
+            {
                 return Err(RTreeError::Path(
                     vec![b],
                     Box::new(RTreeError::ContextError(String::new())),
