@@ -1,22 +1,29 @@
 use crate::emulator::memory::*;
 use crate::fixture::*;
-use crate::pdata::rtree::*;
-use crate::pdata::rtree_walker::*;
 use crate::stats::*;
 use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
+use crate::tools::pdata::rtree::*;
+use crate::tools::pdata::rtree_walker::*;
+use crate::tools::thin::check::BottomLevelVisitor;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::rtree::*;
 use crate::wrappers::space_map::*;
 use crate::wrappers::space_map_disk::*;
 use crate::wrappers::transaction_manager::*;
 
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
+use thinp::io_engine::IoEngine;
+use thinp::pdata::space_map::checker::*;
+use thinp::pdata::space_map::common::SMRoot;
+use thinp::pdata::space_map::core_sm;
+use thinp::pdata::unpack::Unpack;
+use thinp::report::mk_simple_report;
 
 //-------------------------------
 
@@ -84,8 +91,8 @@ impl<'a> RTreeTest<'a> {
 
         let root = dm_rtree_empty(fix, tm)?;
 
-        // Inc the superblock
-        sm_inc_block(fix, metadata_sm, SUPERBLOCK, SUPERBLOCK + 1)?;
+        // A newly created metadata sm already has the superblock reserved,
+        // so we can write to it directly.
         let sb = dm_bm_write_lock_zero(fix, bm, SUPERBLOCK, Addr(0))?;
 
         let baseline = {
@@ -117,6 +124,7 @@ impl<'a> RTreeTest<'a> {
     */
 
     pub fn commit(&mut self) -> Result<()> {
+        sm_commit(self.fix, self.data_sm)?;
         dm_tm_pre_commit(self.fix, self.tm)?;
         dm_tm_commit(self.fix, self.tm, self.sb)?;
         self.sb = dm_bm_write_lock_zero(self.fix, self.bm, SUPERBLOCK, Addr(0))?;
@@ -200,7 +208,45 @@ impl<'a> RTreeTest<'a> {
         self.commit()?;
 
         let bm = get_bm(self.fix, self.bm);
+        let meta_sm = core_sm(bm.get_nr_blocks(), 255);
+        let data_sm = core_sm(sm_get_nr_blocks(self.fix, self.data_sm)?, 255);
+        meta_sm.lock().unwrap().inc(0, 1)?; // count the superblock
+
+        let w = RTreeWalker::new_with_sm(bm.clone(), meta_sm.clone())?;
+        let v = BottomLevelVisitor::new(data_sm.clone());
+        w.walk(&v, self.root)?;
+
+        // Check the data space map
+        let mut root_buf = vec![0u8; SMRoot::disk_size() as usize];
+        sm_copy_root(self.fix, self.data_sm, root_buf.as_mut_slice())?;
+        let data_root = thinp::pdata::unpack::unpack::<SMRoot>(root_buf.as_slice())?;
+        let report = std::sync::Arc::new(mk_simple_report());
+        let leaks = check_disk_space_map(
+            bm.clone(),
+            report.clone(),
+            data_root.clone(),
+            data_sm,
+            meta_sm.clone(),
+            false,
+        )?;
+        if !leaks.is_empty() {
+            return Err(anyhow!("data space map contains leaks"));
+        }
+
+        // Check the metadata space map
+        sm_copy_root(self.fix, self.metadata_sm, root_buf.as_mut_slice())?;
+        let meta_root = thinp::pdata::unpack::unpack::<SMRoot>(root_buf.as_slice())?;
+        let leaks = check_metadata_space_map(bm.clone(), report, meta_root, meta_sm, false)?;
+        if !leaks.is_empty() {
+            return Err(anyhow!("metadata space map contains leaks"));
+        }
+
         let stats = rtree_stat(bm, self.root)?;
+
+        if data_root.nr_allocated != stats.nr_mapped_blocks {
+            return Err(anyhow!("shared data blocks in a tree"));
+        }
+
         Ok(stats)
     }
 
@@ -861,9 +907,8 @@ fn test_trim_entry_end(fix: &mut Fixture) -> Result<()> {
     ensure!(stats.nr_leaves == 1);
     ensure!(stats.nr_entries == 1);
 
-    let result = rtree.lookup(50)?;
     ensure!(
-        result
+        rtree.lookup(49)?
             == Some(Mapping {
                 thin_begin: 10,
                 data_begin: 1,
@@ -871,6 +916,8 @@ fn test_trim_entry_end(fix: &mut Fixture) -> Result<()> {
                 time: 0,
             })
     );
+
+    ensure!(rtree.lookup(50)?.is_none());
 
     Ok(())
 }
@@ -1795,7 +1842,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
     let mut rtree = RTreeTest::new(fix, 1024)?;
     let v = Mapping {
         thin_begin: 10,
-        data_begin: 1,
+        data_begin: 0,
         len: 100,
         time: 0,
     };
@@ -1803,7 +1850,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
 
     let v = Mapping {
         thin_begin: 5,
-        data_begin: 20,
+        data_begin: 500,
         len: 10,
         time: 0,
     };
@@ -1819,7 +1866,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
         result
             == Some(Mapping {
                 thin_begin: 5,
-                data_begin: 20,
+                data_begin: 500,
                 len: 10,
                 time: 0,
             })
@@ -1830,7 +1877,7 @@ fn test_overwrite_entry_begin(fix: &mut Fixture) -> Result<()> {
         result
             == Some(Mapping {
                 thin_begin: 15,
-                data_begin: 6,
+                data_begin: 5,
                 len: 95,
                 time: 0,
             })
@@ -2047,7 +2094,7 @@ fn test_overwrite_random(fix: &mut Fixture) -> Result<()> {
 fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    const KEY_COUNT: usize = 200000;
+    const KEY_COUNT: u64 = 200000;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
 
     let mut endpoints = BTreeSet::new();
@@ -2080,17 +2127,17 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     let mut rtree = RTreeTest::new(fix, 1024)?;
 
     // insert ranges with gaps
-    for m in &mappings {
+    for (i, m) in mappings.iter().enumerate() {
         if m.len > 1 {
             let mut m2 = m.clone();
             m2.len -= 1;
             rtree.insert(&m2)?;
         }
 
-        // the gaps have different time
+        // the gaps map to a different block address
         let gap = Mapping {
             thin_begin: m.thin_begin + m.len as u64 - 1,
-            data_begin: m.data_begin + m.len as u64 - 1,
+            data_begin: KEY_COUNT + i as u64,
             len: 1,
             time: 0,
         };
@@ -2111,12 +2158,12 @@ fn test_overwrite_with_merges(fix: &mut Fixture) -> Result<()> {
     }
 
     let tree_stats = rtree.check()?;
-    ensure!(tree_stats.nr_entries >= thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
-    ensure!(tree_stats.nr_mapped_blocks == KEY_COUNT as u64);
+    ensure!(tree_stats.nr_entries >= thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN as u64));
+    ensure!(tree_stats.nr_mapped_blocks == KEY_COUNT);
 
     // This test is optional. We might end up with more than twice number of entries
     // due to the entries across the leaf boundaries won't be merged.
-    ensure!(tree_stats.nr_entries <= 2 * thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN) as u64);
+    ensure!(tree_stats.nr_entries <= 2 * thinp::math::div_up(KEY_COUNT, MAPPINGS_MAX_LEN as u64));
 
     Ok(())
 }

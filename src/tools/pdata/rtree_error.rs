@@ -36,6 +36,7 @@ pub enum RTreeError {
     NodeError(NodeError),
     Path(Vec<u64>, Box<RTreeError>),
     ContextError(String),
+    ValueError(String),
     Aggregate(Vec<RTreeError>),
 }
 
@@ -45,6 +46,7 @@ impl fmt::Display for RTreeError {
             RTreeError::NodeError(e) => write!(f, "node error: {}", e),
             RTreeError::Path(path, e) => write!(f, "{} {}", e, encode_node_path(path)),
             RTreeError::ContextError(msg) => write!(f, "context error: {}", msg),
+            RTreeError::ValueError(msg) => write!(f, "value eror: {}", msg),
             RTreeError::Aggregate(errs) => {
                 for e in errs {
                     write!(f, "{}", e)?
@@ -56,7 +58,14 @@ impl fmt::Display for RTreeError {
 }
 
 pub fn io_err(path: &[u64]) -> RTreeError {
-    RTreeError::Path(path.to_vec(), Box::new(RTreeError::NodeError(NodeError::IoError)))
+    RTreeError::Path(
+        path.to_vec(),
+        Box::new(RTreeError::NodeError(NodeError::IoError)),
+    )
+}
+
+pub fn value_err(s: String) -> RTreeError {
+    RTreeError::ValueError(s)
 }
 
 pub fn aggregate_err(errs: Vec<RTreeError>) -> Result<(), RTreeError> {

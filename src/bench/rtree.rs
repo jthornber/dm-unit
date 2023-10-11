@@ -1,8 +1,8 @@
 use crate::fixture::*;
-use crate::pdata::rtree::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::rtree::*;
+use crate::tools::pdata::rtree::*;
 
 use anyhow::Result;
 use rand::prelude::*;
@@ -145,6 +145,7 @@ fn bench_insert_ascending(fix: &mut Fixture) -> Result<()> {
 
 fn bench_lookup_random(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
+    disable_data_sm(fix)?; // test the rtree only
 
     const COUNT: u64 = 200000;
     const COMMIT_INTERVAL: usize = 100;

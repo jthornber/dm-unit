@@ -1,8 +1,8 @@
 extern crate dm_unit;
 
+use dm_unit::bench;
 use dm_unit::capture_log::*;
 use dm_unit::path_formatter::*;
-use dm_unit::bench;
 use dm_unit::test_runner::*;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
