@@ -191,6 +191,12 @@ fn run(matches: &ArgMatches, log_lines: Arc<Mutex<LogInner>>) -> Result<()> {
         runner.set_jit();
     }
 
+    if let Some(args) = matches.get_many::<String>("ARGS") {
+        for arg in args {
+            runner.append_arg(arg);
+        }
+    }
+
     let results = runner.exec(log_lines.clone());
 
     let mut pf = PathFormatter::new();
@@ -283,6 +289,13 @@ fn main() -> Result<()> {
                     .long("jit")
                     .action(ArgAction::SetTrue)
                     .help("Turn on the experimental jit compiler"),
+            )
+            .arg(
+                Arg::new("ARGS")
+                    .long("args")
+                    .action(ArgAction::Append)
+                    .value_name("ARGS")
+                    .help("Optional arguments for tests"),
             ),
     );
 

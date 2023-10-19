@@ -10,7 +10,7 @@ use crate::lock_check::*;
 use anyhow::{anyhow, Context, Result};
 use libc::{c_int, strerror_r};
 use log::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CStr;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -42,6 +42,9 @@ pub struct Fixture {
     kernel_dir: PathBuf,
 
     pub lock_check: LockCheck,
+
+    // Optional arguments for tests
+    pub args: BTreeSet<String>,
 }
 
 #[derive(Clone)]
@@ -111,6 +114,7 @@ impl Fixture {
         loader_info: LoaderInfo,
         mem: Memory,
         jit: bool,
+        args: BTreeSet<String>,
     ) -> Result<Self> {
         let mut vm = VM::new(mem, jit);
 
@@ -125,6 +129,7 @@ impl Fixture {
             contexts: AnyMap::default(),
             kernel_dir: std::fs::canonicalize(PathBuf::from(kernel_dir.as_ref())).unwrap(),
             lock_check: LockCheck::default(),
+            args,
         })
     }
 

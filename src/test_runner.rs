@@ -156,6 +156,7 @@ pub struct TestRunner<'a> {
     tests: BTreeMap<String, Test>,
     jobs: usize,
     jit: bool,
+    args: BTreeSet<String>,
 }
 
 fn get_log(log_lines: &Arc<Mutex<LogInner>>) -> String {
@@ -207,6 +208,7 @@ impl<'a> TestRunner<'a> {
             tests: tests.into_inner(),
             jobs: 1,
             jit: false,
+            args: BTreeSet::new(),
         })
     }
 
@@ -220,6 +222,10 @@ impl<'a> TestRunner<'a> {
 
     pub fn set_jit(&mut self) {
         self.jit = true;
+    }
+
+    pub fn append_arg(&mut self, arg: &String) {
+        self.args.insert(arg.clone());
     }
 
     pub fn get_kernel_dir(&self) -> &Path {
@@ -256,8 +262,9 @@ impl<'a> TestRunner<'a> {
                     let mem = mem.snapshot();
                     let jit = self.jit;
                     let kernel_dir = self.kernel_dir.clone();
+                    let args = self.args.clone();
 
-                    match Fixture::new(&kernel_dir, loader_info, mem, jit) {
+                    match Fixture::new(&kernel_dir, loader_info, mem, jit, args) {
                         Ok(fix) => {
                             info!("Running test: {}", p);
                             let res = run_test(fix, t, log_lines.clone());
