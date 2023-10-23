@@ -362,6 +362,10 @@ impl ThinPool {
 
         Ok(())
     }
+
+    fn close(&self, fix: &mut Fixture) -> Result<()> {
+        dm_pool_metadata_close(fix, self.pmd)
+    }
 }
 
 //-------------------------------
@@ -372,6 +376,7 @@ fn test_create(fix: &mut Fixture) -> Result<()> {
     let mut t = ThinPool::new(fix, 1024, 64, 102400, use_rtree)?;
     t.commit(fix)?;
     t.check(fix)?;
+    t.close(fix)?;
     Ok(())
 }
 
@@ -391,6 +396,7 @@ fn test_create_many_thins(fix: &mut Fixture) -> Result<()> {
 
     t.commit(fix)?;
     t.check(fix)?;
+    t.close(fix)?;
 
     Ok(())
 }
@@ -465,6 +471,7 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
     pool.check(fix)?;
+    pool.close(fix)?;
 
     Ok(())
 }
@@ -564,6 +571,7 @@ fn do_provision_recursive_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
     pool.check(fix)?;
+    pool.close(fix)?;
 
     Ok(())
 }
@@ -631,6 +639,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
     pool.check(fix)?;
     pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
+    pool.close(fix)?;
 
     Ok(())
 }
@@ -692,6 +701,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
     pool.commit(fix)?;
     pool.close_thin(fix, td)?;
     pool.check(fix)?;
+    pool.close(fix)?;
 
     Ok(())
 }
@@ -747,6 +757,7 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
     pool.check(fix)?;
     pool.show_mapping_residency(fix)?;
     // get_bm()?.write_to_disk(Path::new("thinp-metadata.bin"))?;
+    pool.close(fix)?;
 
     Ok(())
 }
@@ -819,6 +830,17 @@ fn test_delete_frees_blocks(fix: &mut Fixture) -> Result<()> {
         thin.alloc_data_block(fix).is_ok(),
         "expected alloc to succeed"
     );
+
+    // close all the thins
+    let mut iter = td.into_iter();
+    while let Some(td) = iter.next() {
+        if let Some(t) = td {
+            pool.close_thin(fix, t)?;
+        }
+    }
+    pool.close_thin(fix, thin)?;
+
+    pool.close(fix)?;
 
     Ok(())
 }
@@ -906,6 +928,8 @@ where
         *histogram.get(&(nr_blocks as usize)).unwrap() == nr_thins as usize,
         "expected all blocks to be in a single run"
     );
+
+    pool.close(fix)?;
 
     Ok(())
 }
