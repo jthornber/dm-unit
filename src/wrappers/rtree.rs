@@ -81,6 +81,29 @@ pub fn dm_rtree_lookup(
     }
 }
 
+pub fn dm_rtree_find_highest_key(
+    fix: &mut Fixture,
+    tm: Addr,
+    root: u64,
+) -> Result<Option<u64>> {
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    fix.vm.set_reg(A0, tm.0);
+    fix.vm.set_reg(A1, root);
+    fix.vm.set_reg(A2, result_ptr.0);
+    fix.call("dm_rtree_find_highest_key")?;
+
+    let r = fix.vm.reg(A0) as i64 as i32;
+    if r < 0 {
+        return Err(anyhow!("dm_rtree_find_highest_key failed: {}", error_string(-r)));
+    }
+    if r == 0 {
+        return Ok(None);
+    }
+
+    let highest_key = fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?;
+    Ok(Some(highest_key))
+}
+
 pub fn dm_rtree_insert(
     fix: &mut Fixture,
     tm: Addr,
@@ -97,7 +120,7 @@ pub fn dm_rtree_insert(
     fix.vm.set_reg(A3, mapping_ptr.0);
     fix.vm.set_reg(A4, new_root_ptr.0);
     fix.vm.set_reg(A5, nr_inserts_ptr.0);
-    fix.call_with_errno("dm_rtree_insert")?;
+    fix.call("dm_rtree_insert")?;
     let new_root = fix.vm.mem.read_into::<u64>(new_root_ptr, PERM_READ)?;
     let nr_inserts = fix.vm.mem.read_into::<u32>(nr_inserts_ptr, PERM_READ)?;
     Ok((new_root, nr_inserts))

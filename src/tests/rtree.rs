@@ -260,6 +260,10 @@ impl<'a> RTreeTest<'a> {
         dm_rtree_lookup(self.fix, self.tm, self.root, thin_begin)
     }
 
+    pub fn highest_key(&mut self) -> Result<Option<u64>> {
+        dm_rtree_find_highest_key(self.fix, self.tm, self.root)
+    }
+
     pub fn stats_start(&mut self) {
         let bm = get_bm(self.fix, self.bm);
         self.baseline = Stats::collect_stats(self.fix, &bm);
@@ -2246,6 +2250,61 @@ fn test_overwrite_with_splitting(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+fn test_highest_key_empty(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    rtree.commit()?;
+    ensure!(rtree.highest_key()? == None);
+    Ok(())
+}
+
+fn test_highest_key_runs(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    const KEY_COUNT: usize = 200000;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+
+    let mut endpoints = BTreeSet::new();
+    for _ in 0..(KEY_COUNT / 20) {
+        endpoints.insert(rng.gen_range(0..KEY_COUNT));
+    }
+    endpoints.insert(KEY_COUNT);
+
+    let mut ranges = Vec::new();
+    let mut last = 0;
+    for e in endpoints {
+        if e != last {
+            ranges.push(last..e);
+        }
+        last = e;
+    }
+
+    let mut mappings = Vec::new();
+    let mut data_begin = 0u64;
+    for r in ranges {
+        let len = r.end - r.start;
+        mappings.push(Mapping {
+            thin_begin: r.start as u64,
+            data_begin,
+            len: len as u32 - 1,
+            time: 0,
+        });
+        data_begin += len as u64;
+    }
+
+    // FIXME: factor out common code
+    let mut rtree = RTreeTest::new(fix, 1024)?;
+    for m in &mappings {
+        let _nr_inserted = rtree.insert(m)?;
+    }
+    rtree.check()?;
+
+    ensure!(rtree.highest_key()? == Some(KEY_COUNT as u64 - 2));
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(tests: &mut TestSet) -> Result<()> {
     let kmodules = vec![PDATA_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
@@ -2306,6 +2365,8 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
         test!("overwrite/many/runs_descending", test_overwrite_runs_descending)
         test!("overwrite/many/merge", test_overwrite_with_merges)
         test!("overwrite/many/split", test_overwrite_with_splitting)
+        test!("highest_key/empty", test_highest_key_empty)
+        test!("highest_key/runs", test_highest_key_runs)
     };
 
     Ok(())
