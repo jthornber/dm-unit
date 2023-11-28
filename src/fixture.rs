@@ -261,7 +261,7 @@ impl Fixture {
         }
 
         let result = self.run_vm();
-        self.vm.mem.unmap(exit_addr)?;
+        self.vm.mem.free(exit_addr)?;
         match result {
             Ok(_) => {
                 // Not sure how we can get here
