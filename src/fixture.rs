@@ -150,8 +150,10 @@ impl Fixture {
         if self.lock_check.spin_held() {
             let spin_pc = self.lock_check.most_recent_spin_pc().unwrap();
             let loc = self.get_loc_from_addr(spin_pc)?;
-            return Err(anyhow!("may_sleep() called with spin lock taken at {}",
-                            loc));
+            return Err(anyhow!(
+                "may_sleep() called with spin lock taken at {}",
+                loc
+            ));
         }
 
         Ok(())

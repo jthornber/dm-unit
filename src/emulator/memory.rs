@@ -186,6 +186,34 @@ impl<'a> KeyAdapter<'a> for MMapAdapter {
 
 //-------------------------------------
 
+#[derive(Clone, Debug)]
+pub struct MEntry {
+    pub heap_ptr: u64,
+    pub len: usize,
+
+    // Riscv program counter that made the call.  Optional because
+    // a lot of memory gets allocated by stubs.
+    pub pc: Option<u64>,
+}
+
+impl MEntry {
+    fn new(heap_ptr: u64, len: usize) -> Self {
+        Self {
+            heap_ptr,
+            len,
+            pc: None,
+        }
+    }
+
+    fn new_with_pc(heap_ptr: u64, len: usize, pc: u64) -> Self {
+        Self {
+            heap_ptr,
+            len,
+            pc: Some(pc),
+        }
+    }
+}
+
 /// Manages memory for the vm.  Tracks permissions at the byte level.
 /// Checks memory has been initialised before it's read.
 pub struct Memory {
@@ -195,7 +223,7 @@ pub struct Memory {
     heap: Heap,
 
     // Maps the ptr returned by alloc_bytes() back to the heap ptr and len.
-    allocations: BTreeMap<u64, (u64, usize)>,
+    allocations: BTreeMap<u64, MEntry>,
 }
 
 fn copy_mmaps(mmaps: &RBTree<MMapAdapter>) -> RBTree<MMapAdapter> {
@@ -226,6 +254,17 @@ impl Memory {
             heap: self.heap.clone(),
             allocations: self.allocations.clone(),
         }
+    }
+
+    pub fn new_allocations(&self, newer_memory: &Self) -> Vec<MEntry> {
+        let mut result = Vec::new();
+        for (addr, me) in &newer_memory.allocations {
+            if !self.allocations.contains_key(addr) {
+                result.push(me.clone());
+            }
+        }
+
+        result
     }
 
     /*
@@ -469,7 +508,7 @@ impl Memory {
     /// # Errors
     ///
     /// The function returns an error if it fails to allocate memory or if the permissions are invalid.
-    pub fn alloc_bytes(&mut self, bytes: Vec<u8>, perms: u8) -> Result<Addr> {
+    pub fn alloc_common(&mut self, bytes: Vec<u8>, perms: u8, pc: Option<u64>) -> Result<Addr> {
         // We allocate an extra double word before and after the block to
         // detect overwrites.
         let len = bytes.len();
@@ -479,8 +518,23 @@ impl Memory {
         // mmap just the central part that may be used.
         let ptr = Addr(heap_ptr.0 + 4);
         self.mmap_bytes(ptr, bytes, perms)?;
-        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
+        match pc {
+            Some(pc) => self
+                .allocations
+                .insert(ptr.0, MEntry::new_with_pc(heap_ptr.0, heap_len, pc)),
+            None => self
+                .allocations
+                .insert(ptr.0, MEntry::new(heap_ptr.0, heap_len)),
+        };
         Ok(ptr)
+    }
+
+    pub fn alloc_bytes(&mut self, bytes: Vec<u8>, perms: u8) -> Result<Addr> {
+        self.alloc_common(bytes, perms, None)
+    }
+
+    pub fn alloc_with_pc(&mut self, bytes: Vec<u8>, perms: u8, pc: u64) -> Result<Addr> {
+        self.alloc_common(bytes, perms, Some(pc))
     }
 
     pub fn alloc_with<F>(&mut self, count: usize, perms: u8, func: F) -> Result<Addr>
@@ -498,7 +552,8 @@ impl Memory {
         let mut bytes = vec![0u8; count];
         func(ptr, &mut bytes)?;
         self.mmap_bytes(ptr, bytes, perms)?;
-        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
+        self.allocations
+            .insert(ptr.0, MEntry::new(heap_ptr.0, heap_len));
 
         Ok(ptr)
     }
@@ -533,14 +588,15 @@ impl Memory {
         let next = ((heap_ptr.0 + 8 + align - 1) / align) * align;
         let ptr = Addr(next);
         self.mmap_bytes(ptr, bytes, perms)?;
-        self.allocations.insert(ptr.0, (heap_ptr.0, heap_len));
+        self.allocations
+            .insert(ptr.0, MEntry::new(heap_ptr.0, heap_len));
         Ok(ptr)
     }
 
     // Free returns the bytes that made up the allocation.  Useful for
     // bouncing block manager buffers between host and guest.
     pub fn free(&mut self, ptr: Addr) -> Result<Vec<u8>> {
-        if let Some((heap_ptr, _extra_len)) = self.allocations.remove(&ptr.0) {
+        if let Some(MEntry { heap_ptr, .. }) = self.allocations.remove(&ptr.0) {
             self.heap.free(Addr(heap_ptr))?;
             self.unmap(ptr)
         } else {
@@ -564,6 +620,18 @@ impl Memory {
         })?;
 
         Ok(std::str::from_utf8(&buffer).unwrap().to_owned())
+    }
+
+    /// Returns the total amount of memory currently mapped.  This includes
+    /// extra that we use for alignment or overrun detection unfortunately.  So
+    /// this number is only really useful to spot memory leaks.
+    pub fn total_allocated(&self) -> u64 {
+        let mut total = 0;
+        for (_ptr, MEntry { len, .. }) in &self.allocations {
+            total += len;
+        }
+
+        total as u64
     }
 }
 

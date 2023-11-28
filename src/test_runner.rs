@@ -172,7 +172,29 @@ fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestR
     }
 
     let icount_begin = fix.vm.stats.instrs;
-    let result = (t.func)(&mut fix);
+    let orig_memory = fix.vm.mem.snapshot();
+    let mut result = (t.func)(&mut fix);
+
+    // Check for memory leaks, but only if the test passed
+    if result.is_ok() {
+        let leaks = orig_memory.new_allocations(&fix.vm.mem);
+        if !leaks.is_empty() {
+            warn!("There were memory leaks:");
+            for MEntry { heap_ptr, len, pc } in leaks {
+                let loc = if let Some(pc) = pc {
+                    fix.get_loc_from_addr(Addr(pc)).unwrap()
+                } else {
+                    String::new()
+                };
+                warn!("    0x{:x}+{:x} {}", heap_ptr, len, loc);
+            }
+            warn!("Source locations may be incorrect due to tail-call optimisation.");
+            result = Err(anyhow!("Guest has memory leaks"));
+        } else {
+            debug!("no memory leaks");
+        }
+    }
+
     let icount_end = fix.vm.stats.instrs;
 
     match result {
