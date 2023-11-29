@@ -27,6 +27,12 @@ pub fn dm_bm_destroy(fix: &mut Fixture, bm: Addr) -> Result<()> {
     Ok(())
 }
 
+pub fn dm_bm_flush(fix: &mut Fixture, bm: Addr) -> Result<()> {
+    fix.vm.set_reg(A0, bm.0);
+    fix.call("dm_bm_flush")?;
+    Ok(())
+}
+
 pub fn dm_bm_block_size(fix: &mut Fixture, bm: Addr) -> Result<u64> {
     fix.vm.set_reg(A0, bm.0);
     fix.call("dm_bm_block_size")?;
