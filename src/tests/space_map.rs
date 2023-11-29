@@ -130,6 +130,7 @@ pub trait SpaceMap {
     fn addr(&self) -> Addr;
     fn get_bm(&self) -> Addr;
     fn commit(&mut self, fix: &mut Fixture) -> Result<()>;
+    fn destroy(&mut self, fix: &mut Fixture) -> Result<()>;
 }
 
 // the factory trait
@@ -153,6 +154,7 @@ pub fn test_boundary_size(fix: &mut Fixture, builder: &dyn SpaceMapBuilder) -> R
     sm.commit(fix)?;
     ensure!(nr_blocks == sm_get_nr_blocks(fix, sm.addr())?);
     ensure!(0 == sm_get_nr_free(fix, sm.addr())?);
+    sm.destroy(fix)?;
 
     Ok(())
 }
@@ -191,6 +193,7 @@ pub fn test_commit_cost(fix: &mut Fixture, builder: &dyn SpaceMapBuilder) -> Res
 
     // verify performance errors
     stats_compare(stats.first().unwrap(), stats.last().unwrap(), 0.01)?;
+    sm.destroy(fix)?;
 
     Ok(())
 }
@@ -208,6 +211,7 @@ pub fn test_inc_cost(fix: &mut Fixture, builder: &dyn SpaceMapBuilder) -> Result
         tracker.end(fix, &bm)?;
         sm.commit(fix)?;
     }
+    sm.destroy(fix)?;
 
     Ok(())
 }
@@ -247,6 +251,7 @@ pub fn test_wrapping_around(fix: &mut Fixture, builder: &dyn SpaceMapBuilder) ->
         sm.commit(fix)?;
         commit_begin = alloc_begin;
     }
+    sm.destroy(fix)?;
 
     Ok(())
 }

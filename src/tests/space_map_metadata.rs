@@ -4,6 +4,7 @@ use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::space_map::{self, *};
 use crate::wrappers::block_manager::*;
+use crate::wrappers::space_map::*;
 use crate::wrappers::transaction_manager::*;
 
 use anyhow::Result;
@@ -42,6 +43,15 @@ impl space_map::SpaceMap for MetadataSpaceMap {
         dm_tm_pre_commit(fix, self.tm)?;
         dm_tm_commit(fix, self.tm, self.sb)?;
         self.sb = dm_bm_write_lock_zero(fix, self.bm, 0, Addr(0))?;
+
+        Ok(())
+    }
+
+    fn destroy(&mut self, fix: &mut Fixture) -> Result<()> {
+        dm_bm_unlock(fix, self.sb)?;
+        dm_tm_destroy(fix, self.tm)?;
+        sm_destroy(fix, self.sm)?;
+        dm_bm_destroy(fix, self.bm)?;
 
         Ok(())
     }

@@ -57,6 +57,16 @@ impl space_map::SpaceMap for DiskSpaceMap {
 
         Ok(())
     }
+
+    fn destroy(&mut self, fix: &mut Fixture) -> Result<()> {
+        dm_bm_unlock(fix, self.sb)?;
+        dm_tm_destroy(fix, self.tm)?;
+        sm_destroy(fix, self.sm_meta)?;
+        sm_destroy(fix, self.sm_disk)?;
+        dm_bm_destroy(fix, self.bm)?;
+
+        Ok(())
+    }
 }
 
 //-------------------------------
