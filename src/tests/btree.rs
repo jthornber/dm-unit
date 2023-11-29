@@ -510,6 +510,7 @@ impl<'a> Drop for BTreeTest<'a> {
             dm_bm_unlock(self.fix, sb).expect("unlock superblock");
         }
         dm_tm_destroy(self.fix, self.tm).expect("destroy tm");
+        sm_destroy(self.fix, self.sm).expect("destroy sm");
         dm_bm_destroy(self.fix, self.bm).expect("destroy bm");
     }
 }
