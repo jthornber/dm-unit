@@ -141,6 +141,34 @@ impl BMInner {
         }
     }
 
+    /// Clears the locks including guest ptrs from memory.
+    fn clear_all_locks(&mut self, mem: &mut Memory) -> Result<()> {
+        use Lock::*;
+
+        let mut locks = BTreeMap::new();
+        std::mem::swap(&mut locks, &mut self.locks);
+
+        for (_, l) in locks {
+            match l {
+                Read { guest_ptr, .. } => {
+                    mem.free(guest_ptr)?;
+                }
+                Write { guest_ptr, .. } => {
+                    mem.free(guest_ptr)?;
+                }
+                Dirty { guest_ptr, .. } => {
+                    mem.free(guest_ptr)?;
+                }
+
+                // Clean data is moved back to the host.
+                Clean { .. } => { // do nothing},
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /*
         fn v_check(&self, vm: &mut VM, guest_ptr: Addr, v_ptr: Addr) -> Result<()> {
             use Reg::*;
@@ -726,6 +754,11 @@ impl BlockManager {
         BlockManager {
             inner: Mutex::new(BMInner::new(nr_blocks, bm_ptr)),
         }
+    }
+
+    pub fn clear_all_locks(&self, mem: &mut Memory) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.clear_all_locks(mem)
     }
 
     pub fn residency(&self) -> usize {

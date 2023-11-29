@@ -8,6 +8,7 @@ use crate::stubs::*;
 use crate::test_runner::*;
 use crate::wrappers::block_manager::*;
 use crate::wrappers::btree::*;
+use crate::wrappers::space_map::*;
 use crate::wrappers::transaction_manager::*;
 
 use anyhow::{anyhow, ensure, Result};
@@ -341,7 +342,7 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
     let bm = dm_bm_create(fix, 1024)?;
-    let (tm, _sm) = dm_tm_create(fix, bm, 0)?;
+    let (tm, sm) = dm_tm_create(fix, bm, 0)?;
 
     let vtype: BTreeValueType<Value64> = BTreeValueType {
         context: Addr(0),
@@ -358,6 +359,11 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
 
     let root = dm_btree_empty(fix, &info)?;
     dm_btree_del(fix, &info, root)?;
+    dm_bm_flush(fix, bm)?;
+    dm_tm_destroy(fix, tm)?;
+    sm_destroy(fix, sm)?;
+    dm_bm_destroy(fix, bm)?;
+
     Ok(())
 }
 
