@@ -7,7 +7,6 @@ use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};
 use libc::ENOMEM;
-use log::*;
 
 use Reg::*;
 
@@ -114,7 +113,7 @@ fn test_write_lock(fix: &mut Fixture) -> Result<()> {
     // Now we shouldn't be able to read or write
     ensure!(fix.vm.mem.read(data, &mut buf, PERM_READ).is_err());
     ensure!(fix.vm.mem.write(data, &buf, PERM_WRITE).is_err());
-    // dm_bm_flush(fix, bm)?;
+
     dm_bm_destroy(fix, bm)?;
 
     Ok(())
