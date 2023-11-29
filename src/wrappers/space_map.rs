@@ -5,7 +5,6 @@ use crate::guest::*;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::*;
 use std::io;
 use std::io::{Read, Write};
 
@@ -111,14 +110,12 @@ pub fn sm_extend(fix: &mut Fixture, sm_ptr: Addr, extra_blocks: u64) -> Result<(
 
 pub fn sm_get_nr_blocks(fix: &mut Fixture, sm_ptr: Addr) -> Result<u64> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
-    debug!("v");
 
     fix.vm.set_reg(A0, sm_ptr.0);
     let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
     fix.vm.set_reg(A1, result_ptr.0);
 
     fix.call_at_with_errno(sm.get_nr_blocks)?;
-    debug!("^");
     Ok(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?)
 }
 
