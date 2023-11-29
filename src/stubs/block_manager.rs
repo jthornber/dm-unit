@@ -7,7 +7,6 @@ use crate::stubs::block_device::*;
 
 use anyhow::{anyhow, Result};
 use crc32c::crc32c;
-use log::*;
 use std::sync::Arc;
 use thinp::io_engine::*;
 
@@ -19,7 +18,6 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
     let bdev_ptr = Addr(fix.vm.reg(A0));
     let bdev = read_guest::<BlockDevice>(&fix.vm.mem, bdev_ptr)?;
 
-    debug!("inode address: {:?}", bdev.inode);
     let inode = read_guest::<INode>(&fix.vm.mem, bdev.inode)?;
     let block_size = fix.vm.reg(A1);
     let _max_held_per_thread = fix.vm.reg(A2);
@@ -31,14 +29,18 @@ pub fn bm_create(fix: &mut Fixture) -> Result<()> {
         .mem
         .alloc_bytes(vec![0u8; 4], PERM_READ | PERM_WRITE)?;
     let bm = Arc::new(BlockManager::new(nr_blocks, guest_addr));
-    fix.contexts.insert(guest_addr, bm);
+    fix.contexts.insert(guest_addr, (bm, bdev_ptr));
     fix.vm.ret(guest_addr.0);
     Ok(())
 }
 
 pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
     let bm_ptr = Addr(fix.vm.reg(A0));
-    let bm: Box<Arc<BlockManager>> = fix.contexts.remove(&bm_ptr);
+    let context: Box<(Arc<BlockManager>, Addr)> = fix.contexts.remove(&bm_ptr);
+    let (bm, bdev_ptr) = Box::into_inner(context);
+
+    let bdev = read_guest::<BlockDevice>(&fix.vm.mem, bdev_ptr)?;
+    let inode_ptr = bdev.inode;
 
     if bm.get_nr_held_blocks() > 0 {
         return Err(anyhow!(
@@ -46,7 +48,11 @@ pub fn bm_destroy(fix: &mut Fixture) -> Result<()> {
         ));
     }
 
+    bm.clear_all_locks(&mut fix.vm.mem)?;
+
     fix.vm.mem.free(bm_ptr)?;
+    fix.vm.mem.free(bdev_ptr)?;
+    fix.vm.mem.free(inode_ptr)?;
     fix.vm.ret(0);
     Ok(())
 }
@@ -65,10 +71,8 @@ pub fn bm_nr_blocks(fix: &mut Fixture) -> Result<()> {
 }
 
 pub fn get_bm(fix: &Fixture, bm_ptr: Addr) -> Arc<BlockManager> {
-    fix.contexts
-        .get::<Arc<BlockManager>>(&bm_ptr)
-        .unwrap()
-        .clone()
+    let context = fix.contexts.get::<(Arc<BlockManager>, Addr)>(&bm_ptr);
+    context.unwrap().0.clone()
 }
 
 pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
