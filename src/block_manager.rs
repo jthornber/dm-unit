@@ -141,6 +141,13 @@ impl BMInner {
         }
     }
 
+    fn free_gb(mem: &mut Memory, gb_ptr: Addr) -> Result<()> {
+        let gb = read_guest::<GBlock>(mem, gb_ptr)?;
+        mem.free(gb.data)?;
+        mem.free(gb_ptr)?;
+        Ok(())
+    }
+
     /// Clears the locks including guest ptrs from memory.
     fn clear_all_locks(&mut self, mem: &mut Memory) -> Result<()> {
         use Lock::*;
@@ -151,13 +158,13 @@ impl BMInner {
         for (_, l) in locks {
             match l {
                 Read { guest_ptr, .. } => {
-                    mem.free(guest_ptr)?;
+                    Self::free_gb(mem, guest_ptr)?;
                 }
                 Write { guest_ptr, .. } => {
-                    mem.free(guest_ptr)?;
+                    Self::free_gb(mem, guest_ptr)?;
                 }
                 Dirty { guest_ptr, .. } => {
-                    mem.free(guest_ptr)?;
+                    Self::free_gb(mem, guest_ptr)?;
                 }
 
                 // Clean data is moved back to the host.

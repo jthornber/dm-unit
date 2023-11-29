@@ -7,6 +7,7 @@ use crate::wrappers::block_manager::*;
 
 use anyhow::{ensure, Result};
 use libc::ENOMEM;
+use log::*;
 
 use Reg::*;
 
@@ -37,6 +38,7 @@ fn test_block_size(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
     let bm = dm_bm_create(fix, 1024)?;
     let bs = dm_bm_block_size(fix, bm)?;
+    dm_bm_destroy(fix, bm)?;
     assert!(bs == 4096);
     Ok(())
 }
@@ -48,6 +50,7 @@ fn test_nr_blocks(fix: &mut Fixture) -> Result<()> {
     let bm = dm_bm_create(fix, nr_blocks)?;
     let nr_blocks = dm_bm_nr_blocks(fix, bm)?;
     assert!(nr_blocks == dm_bm_nr_blocks(fix, bm)?);
+    dm_bm_destroy(fix, bm)?;
     Ok(())
 }
 
@@ -79,6 +82,7 @@ fn test_read_lock(fix: &mut Fixture) -> Result<()> {
 
     dm_bm_unlock(fix, b1)?;
     dm_bm_unlock(fix, b2)?;
+    dm_bm_destroy(fix, bm)?;
 
     // confirm we can't read from the data
     ensure!(fix.vm.mem.read(data1, &mut buf, PERM_READ).is_err());
@@ -105,10 +109,13 @@ fn test_write_lock(fix: &mut Fixture) -> Result<()> {
     ensure!(dm_bm_write_lock(fix, bm, 0, validator).is_err());
 
     dm_bm_unlock(fix, b)?;
+    ensure!(dm_bm_unlock(fix, bm).is_err());
 
     // Now we shouldn't be able to read or write
     ensure!(fix.vm.mem.read(data, &mut buf, PERM_READ).is_err());
     ensure!(fix.vm.mem.write(data, &buf, PERM_WRITE).is_err());
+    // dm_bm_flush(fix, bm)?;
+    dm_bm_destroy(fix, bm)?;
 
     Ok(())
 }

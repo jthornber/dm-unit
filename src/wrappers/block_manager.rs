@@ -50,11 +50,8 @@ fn lock_(fix: &mut Fixture, lock_fn: &str, bm: Addr, b: u64, validator: Addr) ->
     fix.vm.set_reg(A1, b);
     fix.vm.set_reg(A2, validator.0);
 
-    let result = fix
-        .vm
-        .mem
-        .alloc_bytes(vec![0u8; 8], PERM_READ | PERM_WRITE)?;
-    fix.vm.set_reg(A3, result.0);
+    let (mut fix, result_ptr) = auto_alloc(&mut *fix, 8)?;
+    fix.vm.set_reg(A3, result_ptr.0);
 
     fix.call(lock_fn)?;
 
@@ -62,9 +59,7 @@ fn lock_(fix: &mut Fixture, lock_fn: &str, bm: Addr, b: u64, validator: Addr) ->
     if r != 0 {
         return Err(anyhow!("{} failed: {}", lock_fn, r));
     }
-    let block = fix.vm.mem.read_into::<u64>(result, PERM_READ)?;
-    fix.vm.mem.free(result)?;
-    Ok(Addr(block))
+    Ok(Addr(fix.vm.mem.read_into::<u64>(result_ptr, PERM_READ)?))
 }
 
 pub fn dm_bm_read_lock(fix: &mut Fixture, bm: Addr, b: u64, validator: Addr) -> Result<Addr> {
