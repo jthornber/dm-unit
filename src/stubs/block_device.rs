@@ -1,6 +1,5 @@
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::*;
 use std::io;
 use std::io::{Read, Write};
 
@@ -90,7 +89,6 @@ pub fn mk_block_device(mem: &mut Memory, dev_node: u32, nr_sectors: u64) -> Resu
         ro: false,
     };
     let inode_ptr = alloc_guest::<INode>(mem, &inode, PERM_READ | PERM_WRITE)?;
-    debug!("allocated inode at {:?}", inode_ptr);
     let bdev = BlockDevice {
         inode: inode_ptr,
         dev_node,
