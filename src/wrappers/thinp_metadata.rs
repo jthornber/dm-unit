@@ -21,8 +21,8 @@ pub fn dm_pool_metadata_open(
 ) -> Result<Addr> {
     fix.vm.set_reg(A0, bdev_ptr.0);
     fix.vm.set_reg(A1, data_block_size);
-    fix.vm.set_reg(A2, if use_rtree { 1 } else { 0 });
-    fix.vm.set_reg(A3, if format { 1 } else { 0 });
+    // fix.vm.set_reg(A2, if use_rtree { 1 } else { 0 });
+    fix.vm.set_reg(A2, if format { 1 } else { 0 });
     fix.call("dm_pool_metadata_open")?;
 
     // FIXME: check for ERR_PTR
