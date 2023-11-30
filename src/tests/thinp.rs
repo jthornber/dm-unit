@@ -300,8 +300,7 @@ impl ThinPool {
         use thinp::thin::block_time::BlockTime;
 
         let mut path = Vec::new();
-        let blocks: BTreeMap<u64, BlockTime> =
-            btree_to_map(&mut path, engine, false, root)?;
+        let blocks: BTreeMap<u64, BlockTime> = btree_to_map(&mut path, engine, false, root)?;
 
         // Build a histogram of run lengths
         let mut last_entry: Option<(u64, BlockTime)> = None;
@@ -423,6 +422,7 @@ fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
 
     t.commit(fix)?;
     t.check(fix)?;
+    t.close(fix)?;
 
     Ok(())
 }
