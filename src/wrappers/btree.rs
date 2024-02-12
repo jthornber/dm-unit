@@ -240,6 +240,7 @@ pub fn dm_btree_lookup_next<G: Guest>(
     Ok((rkeys, value))
 }
 
+/// Returns the new root
 pub fn dm_btree_remove<G: Guest>(
     fix: &mut Fixture,
     info: &BTreeInfo<G>,

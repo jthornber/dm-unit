@@ -444,6 +444,12 @@ impl<'a> BTreeTest<'a> {
         Ok(())
     }
 
+    pub fn remove(&mut self, key: u64) -> Result<()> {
+        let keys = vec![key];
+        self.root = dm_btree_remove(self.fix, &self.info, self.root, &keys)?;
+        Ok(())
+    }
+
     // This uses Rust code, rather than doing look ups via the kernel
     // code.
     pub fn check_keys_present(&self, keys: &[u64]) -> Result<()> {
@@ -874,13 +880,43 @@ fn test_redistribute3_right_only(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
-/*
-fn test_split_one_into_two_bad_redistribute(fix: &mut Fixture) -> Result<()> {
+fn test_remove_random(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
+    let nr_entries = 100000u64;
+    let mut keys: Vec<u64> = (0..nr_entries).collect();
+
+    let mut bt = BTreeTest::new(fix)?;
+    let commit_interval = 100;
+
+    // First pass inserts, subsequent passes overwrite
+    let mut commit_counter = commit_interval;
+
+    bt.stats_start();
+    bt.begin()?;
+    for k in &keys {
+        bt.insert(*k)?;
+
+        if commit_counter == 0 {
+            bt.commit()?;
+            bt.begin()?;
+            commit_counter = commit_interval;
+        }
+        commit_counter -= 1;
+    }
+    bt.commit()?;
+    bt.stats_report("insert", keys.len() as u64)?;
+
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
+    keys.shuffle(&mut rng);
+
+    for (i, k) in keys.iter().enumerate() {
+        bt.remove(*k)?;
+
+        ensure!(bt.lookup(*k).is_err());
+    }
 
     Ok(())
 }
-*/
 
 //-------------------------------
 
@@ -934,6 +970,11 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
             test!("left-only", test_redistribute3_left_only)
             test!("right-below-target", test_redistribute3_right_below_target)
             test!("right-only", test_redistribute3_right_only)
+        }
+
+        test_section! {
+            "remove/",
+            test!("random", test_remove_random)
         }
     };
 
