@@ -409,7 +409,7 @@ fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
     t.create_thin(fix, 0)?;
 
     for snap in 1..count {
-        t.create_snap(fix, snap, snap - 1)?;
+        t.create_snap(fix, snap, 0)?;
     }
 
     // A commit is needed, otherwise delete will not work (not sure why,
