@@ -292,7 +292,7 @@ fn relocate(mem: &mut Memory, rtype: RelocationType, p: u64, s: u64, a: u64) -> 
                 (v & 0xfff) | imm20 | imm19_12 | imm11 | imm10_1
             })?;
         }
-        Rcall => {
+        Rcall | Rcall_plt => {
             // S + A - P, U + I type (two instructions)
             let offset = (s as u32).wrapping_add(a as u32).wrapping_sub(p as u32);
 
