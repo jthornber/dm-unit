@@ -122,3 +122,29 @@ pub fn alloc_context_alloc(
         Err(anyhow!("dm_alloc_context_alloc() failed"))
     }
 }
+
+pub fn extent_allocator_lock_region(
+    fix: &mut Fixture,
+    ea_addr: Addr,
+    begin: u64,
+    end: u64,
+) -> Result<()> {
+    fix.vm.set_reg(A0, ea_addr.0);
+    fix.vm.set_reg(A1, begin);
+    fix.vm.set_reg(A2, end);
+    fix.call_with_errno("dm_extent_allocator_lock_region")?;
+    Ok(())
+}
+
+pub fn extent_allocator_unlock_region(
+    fix: &mut Fixture,
+    ea_addr: Addr,
+    begin: u64,
+    end: u64,
+) -> Result<()> {
+    fix.vm.set_reg(A0, ea_addr.0);
+    fix.vm.set_reg(A1, begin);
+    fix.vm.set_reg(A2, end);
+    fix.call_with_errno("dm_extent_allocator_unlock_region")?;
+    Ok(())
+}

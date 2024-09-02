@@ -394,6 +394,160 @@ fn test_shared_contexts(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+//--------------------------------
+
+fn test_lock_unlock_region(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let nr_blocks = 1024;
+    let ea = extent_allocator_create(fix, nr_blocks)?;
+
+    // Lock a region
+    extent_allocator_lock_region(fix, ea, 100, 200)?;
+
+    // Try to allocate from the locked region
+    let context = alloc_context_get(fix, ea)?;
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+
+    for _ in 0..(nr_blocks - 100) {
+        let block = alloc_context_alloc(fix, context, &allocated)?;
+        ensure!(block.is_some());
+        let block = block.unwrap();
+        ensure!(block < 100 || block >= 200);
+    }
+
+    // Unlock the region
+    extent_allocator_unlock_region(fix, ea, 100, 200)?;
+
+    // Now we should be able to allocate from the previously locked region
+    let block = alloc_context_alloc(fix, context, &allocated)?;
+    ensure!(block.is_some());
+    let block = block.unwrap();
+    ensure!(block >= 100 && block < 200);
+
+    alloc_context_put(fix, context)?;
+    extent_allocator_destroy(fix, ea)?;
+    Ok(())
+}
+
+fn test_lock_persistence_through_reset(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let nr_blocks = 1024;
+    let ea = extent_allocator_create(fix, nr_blocks)?;
+
+    // Lock a region
+    extent_allocator_lock_region(fix, ea, 300, 400)?;
+
+    // Reset the allocator
+    extent_allocator_reset(fix, ea)?;
+
+    // Try to allocate from the locked region
+    let context = alloc_context_get(fix, ea)?;
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+
+    for _ in 0..(nr_blocks - 100) {
+        let block = alloc_context_alloc(fix, context, &allocated)?;
+        ensure!(block.is_some());
+        let block = block.unwrap();
+        ensure!(block < 300 || block >= 400);
+    }
+
+    alloc_context_put(fix, context)?;
+    extent_allocator_destroy(fix, ea)?;
+    Ok(())
+}
+
+fn test_lock_persistence_through_oos(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let nr_blocks = 1024;
+    let ea = extent_allocator_create(fix, nr_blocks)?;
+
+    // Lock a region
+    extent_allocator_lock_region(fix, ea, 500, 600)?;
+
+    // Allocate all available blocks to trigger OOS
+    let context = alloc_context_get(fix, ea)?;
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+
+    let mut allocated_blocks = 0;
+    while allocated_blocks < nr_blocks - 100 {
+        let block = alloc_context_alloc(fix, context, &allocated)?;
+        if let Some(b) = block {
+            ensure!(b < 500 || b >= 600);
+            allocated_blocks += 1;
+        } else {
+            break;
+        }
+    }
+
+    // Ensure we've allocated all available blocks except the locked region
+    ensure!(allocated_blocks == nr_blocks - 100);
+
+    // Try to allocate one more block, which should fail and trigger a reset
+    let result = alloc_context_alloc(fix, context, &allocated)?;
+    ensure!(result.is_none());
+
+    // Now try to allocate again, it should still respect the locked region
+    for _ in 0..50 {
+        let block = alloc_context_alloc(fix, context, &allocated)?;
+        ensure!(block.is_none());
+    }
+
+    extent_allocator_unlock_region(fix, ea, 500, 600)?;
+
+    // Now the allocations should succeed
+    for _ in 0..50 {
+        let block = alloc_context_alloc(fix, context, &allocated)?;
+        if let Some(b) = block {
+            ensure!(b >= 500 || b < 600);
+        } else {
+            ensure!(false);
+        }
+    }
+    alloc_context_put(fix, context)?;
+    extent_allocator_destroy(fix, ea)?;
+    Ok(())
+}
+
+fn test_multiple_locks(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let nr_blocks = 1024;
+    let ea = extent_allocator_create(fix, nr_blocks)?;
+
+    // Lock multiple regions
+    extent_allocator_lock_region(fix, ea, 100, 200)?;
+    extent_allocator_lock_region(fix, ea, 300, 400)?;
+    extent_allocator_lock_region(fix, ea, 500, 600)?;
+
+    // Try to allocate
+    let context = alloc_context_get(fix, ea)?;
+    let allocated = Arc::new(Mutex::new(RoaringBitmap::new()));
+
+    for _ in 0..600 {
+        let block = alloc_context_alloc(fix, context, &allocated)?;
+        ensure!(block.is_some());
+        let block = block.unwrap();
+        ensure!(
+            (block < 100)
+                || (block >= 200 && block < 300)
+                || (block >= 400 && block < 500)
+                || block >= 600
+        );
+    }
+
+    // Unlock one region
+    extent_allocator_unlock_region(fix, ea, 300, 400)?;
+
+    // Now we should be able to allocate from the unlocked region
+    let block = alloc_context_alloc(fix, context, &allocated)?;
+    ensure!(block.is_some());
+    let block = block.unwrap();
+    ensure!(block >= 300 && block < 400);
+
+    alloc_context_put(fix, context)?;
+    extent_allocator_destroy(fix, ea)?;
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(tests: &mut TestSet) -> Result<()> {
@@ -422,14 +576,22 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
         test!("create", test_create)
         test!("no-preallocations", test_no_preallocations)
         test!("single-leaf", test_single_leaf)
+
         test!("prealloc/linear-start", test_prealloc_linear_start)
         test!("prealloc/linear-middle", test_prealloc_linear_middle)
         test!("prealloc/linear-end", test_prealloc_linear_end)
         test!("prealloc/random", test_prealloc_random)
         test!("prealloc/many-contexts", test_prealloc_many_contexts)
+
         test!("reset/no-holders", test_reset_no_holders)
         test!("reset/many-holders", test_reset_many_holders)
+
         test!("shared-contexts", test_shared_contexts)
+
+        test!("locking/single", test_lock_unlock_region)
+        test!("locking/persistence-through-reset", test_lock_persistence_through_reset)
+        test!("locking/persistence-through-oos", test_lock_persistence_through_oos)
+        test!("locking/multiple", test_multiple_locks)
     };
 
     Ok(())
