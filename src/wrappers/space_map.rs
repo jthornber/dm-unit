@@ -31,8 +31,8 @@ pub struct SpaceMap {
     new_block_in_range: Addr,
     root_size: Addr,
     copy_root: Addr,
-    next_free_run: Addr,
     register_threshold_callback: Addr,
+    next_free_run: Addr,
 }
 
 impl Guest for SpaceMap {
@@ -55,8 +55,8 @@ impl Guest for SpaceMap {
         w.write_u64::<LittleEndian>(self.new_block_in_range.0)?;
         w.write_u64::<LittleEndian>(self.root_size.0)?;
         w.write_u64::<LittleEndian>(self.copy_root.0)?;
-        w.write_u64::<LittleEndian>(self.next_free_run.0)?;
         w.write_u64::<LittleEndian>(self.register_threshold_callback.0)?;
+        w.write_u64::<LittleEndian>(self.next_free_run.0)?;
         Ok(())
     }
 
@@ -75,8 +75,8 @@ impl Guest for SpaceMap {
         let new_block_in_range = Addr(r.read_u64::<LittleEndian>()?);
         let root_size = Addr(r.read_u64::<LittleEndian>()?);
         let copy_root = Addr(r.read_u64::<LittleEndian>()?);
-        let next_free_run = Addr(r.read_u64::<LittleEndian>()?);
         let register_threshold_callback = Addr(r.read_u64::<LittleEndian>()?);
+        let next_free_run = Addr(r.read_u64::<LittleEndian>()?);
 
         Ok(SpaceMap {
             destroy,
@@ -250,6 +250,7 @@ pub fn sm_next_free_run(
     end: u64,
 ) -> Result<(u64, u64)> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+
     let (mut fix, result_begin_ptr) = auto_alloc(&mut *fix, 8)?;
     let (mut fix, result_end_ptr) = auto_alloc(&mut *fix, 8)?;
 
