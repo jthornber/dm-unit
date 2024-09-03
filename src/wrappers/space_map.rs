@@ -31,12 +31,13 @@ pub struct SpaceMap {
     new_block_in_range: Addr,
     root_size: Addr,
     copy_root: Addr,
+    next_free_run: Addr,
     register_threshold_callback: Addr,
 }
 
 impl Guest for SpaceMap {
     fn guest_len() -> usize {
-        120
+        128
     }
 
     fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
@@ -54,6 +55,7 @@ impl Guest for SpaceMap {
         w.write_u64::<LittleEndian>(self.new_block_in_range.0)?;
         w.write_u64::<LittleEndian>(self.root_size.0)?;
         w.write_u64::<LittleEndian>(self.copy_root.0)?;
+        w.write_u64::<LittleEndian>(self.next_free_run.0)?;
         w.write_u64::<LittleEndian>(self.register_threshold_callback.0)?;
         Ok(())
     }
@@ -73,6 +75,7 @@ impl Guest for SpaceMap {
         let new_block_in_range = Addr(r.read_u64::<LittleEndian>()?);
         let root_size = Addr(r.read_u64::<LittleEndian>()?);
         let copy_root = Addr(r.read_u64::<LittleEndian>()?);
+        let next_free_run = Addr(r.read_u64::<LittleEndian>()?);
         let register_threshold_callback = Addr(r.read_u64::<LittleEndian>()?);
 
         Ok(SpaceMap {
@@ -90,6 +93,7 @@ impl Guest for SpaceMap {
             new_block_in_range,
             root_size,
             copy_root,
+            next_free_run,
             register_threshold_callback,
         })
     }
@@ -237,6 +241,30 @@ pub fn sm_copy_root(fix: &mut Fixture, sm_ptr: Addr, bytes: &mut [u8]) -> Result
         .map_err(|_| anyhow!("couldn't copy root"))?;
 
     Ok(())
+}
+
+pub fn sm_next_free_run(
+    fix: &mut Fixture,
+    sm_ptr: Addr,
+    begin: u64,
+    end: u64,
+) -> Result<(u64, u64)> {
+    let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
+    let (mut fix, result_begin_ptr) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, result_end_ptr) = auto_alloc(&mut *fix, 8)?;
+
+    fix.vm.set_reg(A0, sm_ptr.0);
+    fix.vm.set_reg(A1, begin);
+    fix.vm.set_reg(A2, end);
+    fix.vm.set_reg(A3, result_begin_ptr.0);
+    fix.vm.set_reg(A4, result_end_ptr.0);
+
+    fix.call_at_with_errno(sm.next_free_run)?;
+
+    let result_begin = fix.vm.mem.read_into::<u64>(result_begin_ptr, PERM_READ)?;
+    let result_end = fix.vm.mem.read_into::<u64>(result_end_ptr, PERM_READ)?;
+
+    Ok((result_begin, result_end))
 }
 
 pub fn sm_register_threshold_callback(
