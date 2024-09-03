@@ -139,7 +139,7 @@ impl Fixture {
 
     pub fn put_lock(&mut self, kind: LockType, addr: Addr) -> Result<()> {
         if let Err(l) = self.lock_check.unlock(kind, addr) {
-            return Err(anyhow!("lock mismatch: {:?}", l));
+            Err(anyhow!("lock mismatch: {:?}", l))
         } else {
             Ok(())
         }
@@ -214,9 +214,9 @@ impl Fixture {
                         let loc = self.get_source_location()?;
                         warn!("{}: unstubbed global called '{}'", loc, global);
                         return Err(anyhow!("unstubbed global access '{}'", global));
-                    } else {
-                        return Err(VmErr::EBreak.into());
                     }
+
+                    return Err(VmErr::EBreak.into());
                 }
                 err => err?,
             }
@@ -297,9 +297,9 @@ impl Fixture {
         if r != 0 {
             if r < 0 {
                 return Err(anyhow!("{} failed: {}", tm_func, error_string(-r)));
-            } else {
-                return Err(anyhow!("{} failed: {}", tm_func, r));
             }
+
+            return Err(anyhow!("{} failed: {}", tm_func, r));
         }
         Ok(())
     }
@@ -310,9 +310,9 @@ impl Fixture {
         if r != 0 {
             if r < 0 {
                 return Err(anyhow!("failed: {}", error_string(-r)));
-            } else {
-                return Err(anyhow!("failed: {}", r));
             }
+
+            return Err(anyhow!("failed: {}", r));
         }
         Ok(())
     }
@@ -406,7 +406,6 @@ impl Fixture {
         };
 
         let exit_callback = {
-            let name = name;
             move |fix: &mut Fixture| {
                 fix.trace_exit(&name, fix.vm.reg(A0));
                 fix.vm.pop_reg(Ra)?;
