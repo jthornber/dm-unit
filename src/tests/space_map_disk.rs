@@ -8,7 +8,7 @@ use crate::wrappers::space_map::*;
 use crate::wrappers::space_map_disk::*;
 use crate::wrappers::transaction_manager::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use fixedbitset::FixedBitSet;
 use rand::Rng;
 
@@ -253,6 +253,71 @@ fn test_large_random(fix: &mut Fixture) -> Result<()> {
     }
     test_free_runs(fix, &bitset)
 }
+
+//-------------------------------
+
+pub fn test_nr_free_all(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let builder = DiskSMBuilder;
+    let nr_blocks = 10 * 1024;
+
+    let mut sm = builder.create(fix, nr_blocks)?;
+    sm.commit(fix)?;
+
+    ensure!(sm_get_nr_free(fix, sm.addr())? == nr_blocks);
+
+    sm.destroy(fix)?;
+    Ok(())
+}
+
+pub fn test_nr_free_none(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let builder = DiskSMBuilder;
+    let nr_blocks = 10 * 1024;
+
+    let mut sm = builder.create(fix, nr_blocks)?;
+
+    sm_inc_block(fix, sm.addr(), 0, nr_blocks)?;
+
+    sm.commit(fix)?;
+
+    ensure!(sm_get_nr_free(fix, sm.addr())? == 0);
+
+    sm.destroy(fix)?;
+    Ok(())
+}
+
+pub fn test_nr_free_across_transactions(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+    let builder = DiskSMBuilder;
+    let nr_blocks = 10 * 1024;
+
+    let mut sm = builder.create(fix, nr_blocks)?;
+
+    // Allocate half the blocks in the current transaction
+    sm_inc_block(fix, sm.addr(), 0, nr_blocks / 2)?;
+
+    // Commit the transaction
+    sm.commit(fix)?;
+
+    // half the blocks should be free
+    ensure!(sm_get_nr_free(fix, sm.addr())? == nr_blocks / 2);
+
+    sm_dec_block(fix, sm.addr(), 0, nr_blocks / 2)?;
+
+    // The blocks will be reported as free, but they won't really be available
+    // until after the next commit.
+    ensure!(sm_get_nr_free(fix, sm.addr())? == nr_blocks);
+
+    sm.commit(fix)?;
+
+    // All should still be free after the commit
+    ensure!(sm_get_nr_free(fix, sm.addr())? == nr_blocks);
+
+    sm.destroy(fix)?;
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(tests: &mut TestSet) -> Result<()> {
@@ -300,6 +365,13 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
         test!("sparse-free", test_large_sparse_free)
         test!("sparse-random", test_large_random)
     };
+
+    test_section! {
+        "/pdata/space-map/disk/nr-free/",
+        test!("all", test_nr_free_all)
+        test!("none", test_nr_free_none)
+        test!("across-transactions", test_nr_free_across_transactions)
+    }
 
     Ok(())
 }
