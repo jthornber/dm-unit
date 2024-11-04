@@ -4,14 +4,13 @@ use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_EXEC};
 use crate::emulator::riscv::Reg;
 use crate::emulator::vm::*;
+use crate::errno::*;
 use crate::guest::*;
 use crate::lock_check::*;
 
 use anyhow::{anyhow, Context, Result};
-use libc::{c_int, strerror_r};
 use log::*;
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::CStr;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,7 +102,7 @@ impl Fixture {
         }
 
         let heap_begin = Addr(1024 * 1024 * 1024 * 3);
-        let heap_end = Addr(heap_begin.0 + (32 * 1024 * 1024));
+        let heap_end = Addr(heap_begin.0 + (256 * 1024 * 1024));
         let mut mem = Memory::new(heap_begin, heap_end);
         let loader_info = load_modules(&mut mem, &modules[0..])?;
         Ok((loader_info, mem))
@@ -445,25 +444,6 @@ impl Fixture {
                 count -= 1;
             }
         }
-    }
-}
-
-//-------------------------------
-
-// FIXME: move somewhere else
-pub fn error_string(errno: i32) -> String {
-    let mut buf = [0_i8; 512];
-
-    let p = buf.as_mut_ptr();
-    unsafe {
-        if strerror_r(errno as c_int, p, buf.len()) < 0 {
-            panic!("strerror_r failure");
-        }
-
-        let p = p as *const _;
-        std::str::from_utf8(CStr::from_ptr(p).to_bytes())
-            .unwrap()
-            .to_owned()
     }
 }
 
