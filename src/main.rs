@@ -9,7 +9,6 @@ use dm_unit::tests::btree;
 use dm_unit::tests::bufio;
 use dm_unit::tests::cache;
 use dm_unit::tests::extent_allocator;
-use dm_unit::tests::rtree;
 use dm_unit::tests::space_map_disk;
 use dm_unit::tests::space_map_metadata;
 use dm_unit::tests::thinp;
@@ -30,7 +29,6 @@ fn all_tests() -> Result<TestSet> {
     block_manager::register_tests(&mut tests)?;
     btree::register_tests(&mut tests)?;
     cache::register_tests(&mut tests)?;
-    rtree::register_tests(&mut tests)?;
     extent_allocator::register_tests(&mut tests)?;
     space_map_disk::register_tests(&mut tests)?;
     space_map_metadata::register_tests(&mut tests)?;
@@ -43,7 +41,6 @@ fn benchmark_tests() -> Result<TestSet> {
     let mut tests = TestSet::default();
 
     bench::btree::register_bench(&mut tests)?;
-    bench::rtree::register_bench(&mut tests)?;
 
     Ok(tests)
 }

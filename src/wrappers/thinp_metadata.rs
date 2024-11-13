@@ -3,8 +3,9 @@ use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use log::*;
 use std::io;
 use std::io::{Cursor, Read, Write};
 
@@ -16,12 +17,10 @@ pub fn dm_pool_metadata_open(
     fix: &mut Fixture,
     bdev_ptr: Addr,
     data_block_size: u64,
-    use_rtree: bool,
     format: bool,
 ) -> Result<Addr> {
     fix.vm.set_reg(A0, bdev_ptr.0);
     fix.vm.set_reg(A1, data_block_size);
-    // fix.vm.set_reg(A2, if use_rtree { 1 } else { 0 });
     fix.vm.set_reg(A2, if format { 1 } else { 0 });
     fix.call("dm_pool_metadata_open")?;
 
@@ -236,7 +235,8 @@ pub fn dm_thin_insert_block(
     fix.vm.set_reg(A0, td.0);
     fix.vm.set_reg(A1, thin_block);
     fix.vm.set_reg(A2, data_block);
-    fix.call_with_errno("dm_thin_insert_block")
+    fix.call_with_errno("dm_thin_insert_block")?;
+    Ok(())
 }
 
 pub fn dm_thin_remove_block(fix: &mut Fixture, td: Addr, thin_block: u64) -> Result<()> {

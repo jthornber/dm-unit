@@ -24,8 +24,6 @@ use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
 use crate::tests::btree::*;
-use crate::tools::pdata::rtree_walker::*;
-use crate::utils::rtree;
 use crate::wrappers::thinp_metadata::*;
 
 //-------------------------------
@@ -36,7 +34,6 @@ struct ThinPool {
     bm_ptr: Addr,
     pmd: Addr,
     baseline: Stats,
-    use_rtree: bool,
 }
 
 struct ThinDev {
@@ -92,10 +89,9 @@ impl ThinPool {
         nr_metadata_blocks: u64,
         data_block_size: u64,
         nr_data_blocks: u64,
-        use_rtree: bool,
     ) -> Result<Self> {
         let bdev_ptr = mk_block_device(&mut fix.vm.mem, 0, 8 * nr_metadata_blocks)?;
-        let pmd = dm_pool_metadata_open(fix, bdev_ptr, data_block_size, use_rtree, true)?;
+        let pmd = dm_pool_metadata_open(fix, bdev_ptr, data_block_size, true)?;
         dm_pool_resize_data_dev(fix, pmd, nr_data_blocks)?;
         let bm_ptr = dm_pool_get_block_manager(fix, pmd)?;
         let bm = get_bm(fix, bm_ptr);
@@ -106,7 +102,6 @@ impl ThinPool {
             bm_ptr,
             pmd,
             baseline,
-            use_rtree,
         })
     }
 
@@ -135,8 +130,8 @@ impl ThinPool {
         dm_pool_create_thin(fix, self.pmd, thin_id)
     }
 
-    fn create_snap(&mut self, fix: &mut Fixture, origin_id: ThinId, snap_id: ThinId) -> Result<()> {
-        dm_pool_create_snap(fix, self.pmd, origin_id, snap_id)
+    fn create_snap(&mut self, fix: &mut Fixture, snap_id: ThinId, origin_id: ThinId) -> Result<()> {
+        dm_pool_create_snap(fix, self.pmd, snap_id, origin_id)
     }
 
     fn delete_thin(&mut self, fix: &mut Fixture, thin_id: ThinId) -> Result<()> {
@@ -202,15 +197,11 @@ impl ThinPool {
         let report = std::sync::Arc::new(mk_quiet_report());
         let engine = get_bm(fix, self.bm_ptr);
 
-        if self.use_rtree {
-            crate::tools::thin::check::check_rtree(engine, report)?;
-        } else {
-            let space_maps = check_with_maps(engine, report)?;
-            let metadata_sm = space_maps.metadata_sm.lock().unwrap();
-            Self::log_space_map_usage(metadata_sm.deref(), "metadata")?;
-            let data_sm = space_maps.data_sm.lock().unwrap();
-            Self::log_space_map_usage(data_sm.deref(), "data")?;
-        }
+        let space_maps = check_with_maps(engine, report)?;
+        let metadata_sm = space_maps.metadata_sm.lock().unwrap();
+        Self::log_space_map_usage(metadata_sm.deref(), "metadata")?;
+        let data_sm = space_maps.data_sm.lock().unwrap();
+        Self::log_space_map_usage(data_sm.deref(), "data")?;
 
         Ok(())
     }
@@ -223,11 +214,7 @@ impl ThinPool {
         let mut path = Vec::new();
         let roots = btree_to_map(&mut path, engine.clone(), false, sb.mapping_root)?;
         for (thin_id, root) in roots {
-            let residency = if self.use_rtree {
-                rtree::calc_residency(bm.clone(), root)?
-            } else {
-                calc_residency::<Value64>(&bm, root)?
-            };
+            let residency = calc_residency::<Value64>(&bm, root)?;
 
             debug!("residency of thin {} = {}", thin_id, residency);
         }
@@ -247,48 +234,6 @@ impl ThinPool {
             "residency of metadata sm overflow: {}",
             calc_residency::<Value32>(&bm, root.ref_count_root)?
         );
-        Ok(())
-    }
-
-    fn append_rtree_histogram(
-        engine: Arc<dyn IoEngine>,
-        root: u64,
-        histogram: &mut BTreeMap<usize, usize>,
-    ) -> Result<()> {
-        use crate::tools::pdata::rtree::Mapping;
-
-        let (entries, _) = extract_rtree_entries(engine, root)?;
-
-        // Build a histogram of run lengths
-        let mut last_entry: Option<Mapping> = None;
-        let mut run_length: usize = 0;
-
-        for m in entries {
-            match last_entry {
-                Some(last)
-                    if last.thin_begin + last.len as u64 == m.thin_begin
-                        && last.data_begin + last.len as u64 == m.data_begin =>
-                {
-                    // Blocks and keys are both adjacent, increment run length
-                    run_length += m.len as usize;
-                }
-                _ => {
-                    // Blocks or keys are not adjacent or this is the first entry,
-                    // count the run length and start a new run
-                    if let Some(_last) = last_entry {
-                        *histogram.entry(run_length).or_insert(0) += 1;
-                    }
-                    run_length = m.len as usize;
-                }
-            }
-            last_entry = Some(m);
-        }
-
-        // Record the last run
-        if let Some(_last) = last_entry {
-            *histogram.entry(run_length).or_insert(0) += 1;
-        }
-
         Ok(())
     }
 
@@ -343,11 +288,7 @@ impl ThinPool {
 
         let mut histogram = BTreeMap::new();
         for (_thin_id, root) in roots {
-            if self.use_rtree {
-                Self::append_rtree_histogram(engine.clone(), root, &mut histogram)?;
-            } else {
-                Self::append_btree_histogram(engine.clone(), root, &mut histogram)?;
-            }
+            Self::append_btree_histogram(engine.clone(), root, &mut histogram)?;
         }
 
         Ok(histogram)
@@ -371,8 +312,7 @@ impl ThinPool {
 
 fn test_create(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
-    let use_rtree = fix.args.contains("rtree");
-    let mut t = ThinPool::new(fix, 1024, 64, 102400, use_rtree)?;
+    let mut t = ThinPool::new(fix, 1024, 64, 102400)?;
     t.commit(fix)?;
     t.check(fix)?;
     t.close(fix)?;
@@ -381,8 +321,7 @@ fn test_create(fix: &mut Fixture) -> Result<()> {
 
 fn test_create_many_thins(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
-    let use_rtree = fix.args.contains("rtree");
-    let mut t = ThinPool::new(fix, 10240, 64, 102400, use_rtree)?;
+    let mut t = ThinPool::new(fix, 10240, 64, 102400)?;
     for tid in 0..1000 {
         t.create_thin(fix, tid)?;
     }
@@ -404,8 +343,7 @@ fn test_create_rolling_snaps(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
     let count = 1000;
-    let use_rtree = fix.args.contains("rtree");
-    let mut t = ThinPool::new(fix, 10240, 64, 102400, use_rtree)?;
+    let mut t = ThinPool::new(fix, 10240, 64, 102400)?;
     t.create_thin(fix, 0)?;
 
     for snap in 1..count {
@@ -432,8 +370,7 @@ fn do_provision_single_thin(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<()
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, 102400, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
     pool.create_thin(fix, 0)?;
     let mut td = pool.open_thin(fix, 0)?;
 
@@ -537,8 +474,7 @@ fn do_provision_recursive_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
     let mut thin_id = 0;
     pool.create_thin(fix, 0)?;
     let mut td = pool.open_thin(fix, 0)?;
@@ -591,8 +527,7 @@ fn do_provision_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64]) -> Result<(
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
     let mut thin_id = 0;
     pool.create_thin(fix, 0)?;
     let mut td = pool.open_thin(fix, 0)?;
@@ -660,8 +595,7 @@ fn test_discard_single_thin(fix: &mut Fixture) -> Result<()> {
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, 102400, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, 102400)?;
     pool.create_thin(fix, 0)?;
     let mut td = pool.open_thin(fix, 0)?;
 
@@ -715,8 +649,7 @@ fn do_discard_rolling_snap(fix: &mut Fixture, thin_blocks: &[u64], nr_blocks: u6
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, thin_blocks.len() as u64)?;
     let mut thin_id = 0;
     let bm = get_bm(fix, pool.bm_ptr);
     pool.create_thin(fix, 0)?;
@@ -781,8 +714,7 @@ fn test_delete_frees_blocks(fix: &mut Fixture) -> Result<()> {
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64)?;
 
     let mut td = create_separate_thins(fix, &mut pool, nr_thins)?;
 
@@ -887,8 +819,7 @@ where
 
     standard_globals(fix)?;
 
-    let use_rtree = fix.args.contains("rtree");
-    let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64, use_rtree)?;
+    let mut pool = ThinPool::new(fix, 10240, 64, nr_blocks * nr_thins as u64)?;
 
     let mut td = func(fix, &mut pool, nr_thins)?;
 
@@ -944,6 +875,65 @@ fn test_fragment_snapshots(fix: &mut Fixture) -> Result<()> {
 
 //-------------------------------
 
+fn test_delete_large(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let nr_blocks = 1_000_000;
+    let mut pool = ThinPool::new(fix, 102400, 64, nr_blocks * 2 as u64)?;
+
+    // Create a thin device
+    let thin_id = 0;
+    pool.create_thin(fix, thin_id)?;
+    let mut thin = pool.open_thin(fix, thin_id)?;
+
+    // Fully populate it
+    let commit_interval = 1000;
+    for thin_b in 0..nr_blocks {
+        let data_b = thin.alloc_data_block(fix)?;
+        thin.insert_block(fix, thin_b, data_b)?;
+        if thin_b % commit_interval == 0 {
+            pool.commit(fix)?;
+        }
+    }
+    pool.commit(fix)?;
+
+    for snap in 1..6 {
+        // Take a snapshot
+        debug!("snap {}", snap);
+        pool.create_snap(fix, snap, 0)?;
+
+        // Now we scatter new blocks across the origin to ensure the two mapping trees
+        // don't share any btree nodes.
+        debug!("scattering new allocations across origin");
+        for thin_b in (0..nr_blocks).step_by(48) {
+            let data_b = thin.alloc_data_block(fix)?;
+            thin.insert_block(fix, thin_b, data_b)?;
+        }
+        pool.commit(fix)?;
+        debug!("committed");
+    }
+
+    pool.close_thin(fix, thin)?;
+
+    // We're interested in how long it takes to delete the thin, including the
+    // subsequent commit.
+    debug!("deleting origin");
+    pool.stats_start(fix);
+    {
+        pool.delete_thin(fix, thin_id)?;
+        pool.commit(fix)?;
+    }
+    pool.stats_report(fix, &"thin delete".to_string(), 1)?;
+
+    // Tidy up
+    pool.check(fix)?;
+    pool.close(fix)?;
+
+    Ok(())
+}
+
+//-------------------------------
+
 pub fn register_tests(tests: &mut TestSet) -> Result<()> {
     let kmodules = vec![PDATA_MOD, THIN_MOD];
     let mut prefix: Vec<&'static str> = Vec::new();
@@ -980,6 +970,8 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
         test!("delete-frees-blocks", test_delete_frees_blocks)
         test!("fragmentation/thins", test_fragment_thins)
         test!("fragmentation/snapshots", test_fragment_snapshots)
+
+        test!("delete/large", test_delete_large)
     }
 
     Ok(())
