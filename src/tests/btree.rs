@@ -644,7 +644,6 @@ fn mk_node(fix: &mut Fixture, key_begin: u64, nr_entries: usize) -> Result<(Auto
     let mut buffer = vec![0u8; BLOCK_SIZE];
     let mut w = Cursor::new(&mut buffer);
     pack_node(&node, &mut w)?;
-    drop(w);
 
     let (mut fix, block) = auto_alloc(fix, BLOCK_SIZE)?;
     fix.vm.mem.write(block, &buffer, PERM_WRITE)?;
@@ -909,9 +908,8 @@ fn test_remove_random(fix: &mut Fixture) -> Result<()> {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
     keys.shuffle(&mut rng);
 
-    for (i, k) in keys.iter().enumerate() {
+    for k in &keys {
         bt.remove(*k)?;
-
         ensure!(bt.lookup(*k).is_err());
     }
 
