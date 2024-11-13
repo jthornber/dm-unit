@@ -1,10 +1,12 @@
 use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
+use crate::errno::*;
 use crate::fixture::*;
 use crate::guest::*;
 
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use libc::ENOSPC;
 use std::io;
 use std::io::{Read, Write};
 
@@ -248,7 +250,7 @@ pub fn sm_next_free_run(
     sm_ptr: Addr,
     begin: u64,
     end: u64,
-) -> Result<(u64, u64)> {
+) -> Result<Option<(u64, u64)>> {
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
 
     let (mut fix, result_begin_ptr) = auto_alloc(&mut *fix, 8)?;
@@ -260,12 +262,24 @@ pub fn sm_next_free_run(
     fix.vm.set_reg(A3, result_begin_ptr.0);
     fix.vm.set_reg(A4, result_end_ptr.0);
 
-    fix.call_at_with_errno(sm.next_free_run)?;
+    fix.call_at(sm.next_free_run)?;
+    let r = fix.vm.reg(A0) as i64 as i32;
+    if r == -ENOSPC {
+        return Ok(None);
+    }
+
+    if r != 0 {
+        if r < 0 {
+            return Err(anyhow!("failed: {}", error_string(-r)));
+        }
+
+        return Err(anyhow!("failed: {}", r));
+    }
 
     let result_begin = fix.vm.mem.read_into::<u64>(result_begin_ptr, PERM_READ)?;
     let result_end = fix.vm.mem.read_into::<u64>(result_end_ptr, PERM_READ)?;
 
-    Ok((result_begin, result_end))
+    Ok(Some((result_begin, result_end)))
 }
 
 pub fn sm_register_threshold_callback(

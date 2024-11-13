@@ -159,15 +159,15 @@ fn test_free_runs(fix: &mut Fixture, bitset: &FixedBitSet) -> Result<()> {
     let mut free_runs = Vec::new();
     let mut begin = 0;
     while begin < nr_blocks {
-        match sm_next_free_run(fix, sm.addr(), begin, nr_blocks) {
-            Ok((run_begin, run_end)) => {
+        match sm_next_free_run(fix, sm.addr(), begin, nr_blocks)? {
+            Some((run_begin, run_end)) => {
                 if run_begin >= nr_blocks {
                     break;
                 }
                 free_runs.push((run_begin, run_end));
                 begin = run_end;
             }
-            Err(_) => break, // No more free runs found
+            None => break, // No more free runs found
         }
     }
 
