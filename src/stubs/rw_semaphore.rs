@@ -13,7 +13,6 @@ use Reg::*;
 
 //-------------------------------
 
-
 fn lock_(fix: &mut Fixture, kind: LockType) -> Result<()> {
     let ptr = Addr(fix.vm.reg(A0));
     fix.get_lock(kind, ptr);
