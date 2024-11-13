@@ -908,6 +908,7 @@ fn link_modules<P: AsRef<Path>>(paths: &[P], output: &Path) -> Result<()> {
         "-melf64lriscv",
         "-T",
         "misc/module.lds",
+        "--allow-multiple-definition",
         "-o",
         output.to_str().unwrap(),
     ];

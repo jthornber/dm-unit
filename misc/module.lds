@@ -16,3 +16,5 @@ SECTIONS {
  .got (NOLOAD) : { BYTE(0) }
  .got.plt (NOLOAD) : { BYTE(0) }
 }
+PROVIDE(__start_alloc_tags = 0);
+PROVIDE(__stop_alloc_tags = 0);
