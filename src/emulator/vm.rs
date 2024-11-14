@@ -6,7 +6,8 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
-use crate::emulator::ir::*;
+use crate::emulator::ir::ir::*;
+use crate::emulator::ir::optimise::*;
 use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 
@@ -891,20 +892,16 @@ impl VM {
         bb.hits += 1;
 
         if self.jit && bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
-            /*
             debug!("riscv ({} instructions):", bb.instrs.len());
             for (inst, _width) in &bb.instrs {
                 debug!("    {}", inst);
             }
-            */
 
             let ir = renumber(&to_ir(&bb.instrs, true));
-            /*
             debug!("ir ({} instructions):", ir.len());
             for inst in &ir {
                 debug!("    {}", inst);
             }
-            */
 
             bb.ir = Some(ir);
         }

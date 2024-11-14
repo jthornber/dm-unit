@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::emulator::ir::*;
+use crate::emulator::ir::ir::*;
 use crate::emulator::memory::*;
 use crate::emulator::riscv::{self, *};
 

@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 
-use crate::emulator::ir_optimise::*;
+use crate::emulator::ir::from_riscv::*;
+use crate::emulator::ir::optimise::*;
 use crate::emulator::riscv::{self, *};
-use crate::emulator::riscv_to_ir::*;
 
 //------------------------------------------------------------------
 
@@ -325,7 +325,7 @@ impl std::fmt::Display for IR {
 pub fn to_ir(insts: &[(Inst, u8)], opt: bool) -> Vec<IR> {
     let ir = riscv_to_ir(insts);
     if opt {
-        optimise(&ir)
+        optimise(&ir[..])
     } else {
         ir
     }

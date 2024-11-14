@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::emulator::ir::*;
+use crate::emulator::ir::ir::*;
 
 use ImmOp::*;
 use RValue::*;
