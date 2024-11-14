@@ -1,4 +1,5 @@
 pub mod ir;
+pub mod ir_optimise;
 pub mod loader;
 pub mod memory;
 pub mod riscv;

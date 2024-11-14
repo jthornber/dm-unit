@@ -20,6 +20,10 @@ struct Builder {
 }
 
 impl Builder {
+    fn buffer(self) -> Vec<IR> {
+        self.buffer
+    }
+
     fn push(&mut self, inst: IR) {
         self.buffer.push(inst);
     }
@@ -616,7 +620,7 @@ fn xlate_inst(b: &mut Builder, inst: &Inst, width: u8) {
     }
 }
 
-pub fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
+fn riscv_to_ir_(b: &mut Builder, insts: &[(Inst, u8)]) {
     let live_regs = collect_regs(insts);
     if live_regs.contains(&riscv::Reg::Zero) {
         let zero = b.def_greg(&riscv::Reg::Zero);
@@ -657,6 +661,12 @@ pub fn riscv_to_ir(b: &mut Builder, insts: &[(Inst, u8)]) {
         let rs2 = b.ref_greg(greg);
         b.push(Sd { rs1, rs2 });
     }
+}
+
+pub fn riscv_to_ir(insts: &[(Inst, u8)]) -> Vec<IR> {
+    let mut b = Builder::default();
+    riscv_to_ir_(&mut b, insts);
+    b.buffer()
 }
 
 //----------------------------------
