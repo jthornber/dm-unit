@@ -1,3 +1,5 @@
+pub mod array;
+pub mod array_metadata;
 pub mod block_manager;
 pub mod btree;
 pub mod btree_metadata;

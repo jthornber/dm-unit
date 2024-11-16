@@ -4,6 +4,7 @@ use dm_unit::bench;
 use dm_unit::capture_log::*;
 use dm_unit::path_formatter::*;
 use dm_unit::test_runner::*;
+use dm_unit::tests::array;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
 use dm_unit::tests::bufio;
@@ -25,6 +26,7 @@ use std::sync::{Arc, Mutex};
 fn all_tests() -> Result<TestSet> {
     let mut tests = TestSet::default();
 
+    array::register_tests(&mut tests)?;
     bufio::register_tests(&mut tests)?;
     block_manager::register_tests(&mut tests)?;
     btree::register_tests(&mut tests)?;
