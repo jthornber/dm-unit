@@ -20,7 +20,6 @@ use rand::SeedableRng;
 use std::collections::BTreeSet;
 use std::io;
 use std::io::{Cursor, Read, Write};
-use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use thinp::io_engine::BLOCK_SIZE;
@@ -344,17 +343,10 @@ fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     let bm = dm_bm_create(fix, 1024)?;
     let (tm, sm) = dm_tm_create(fix, bm, 0)?;
 
-    let vtype: BTreeValueType<Value64> = BTreeValueType {
-        context: Addr(0),
-        inc_fn: Addr(0),
-        dec_fn: Addr(0),
-        eq_fn: Addr(0),
-        rust_value_type: PhantomData,
-    };
     let info = BTreeInfo {
         tm,
         levels: 1,
-        vtype,
+        vtype: BTreeValueType::<Value64>::default(),
     };
 
     let root = dm_btree_empty(fix, &info)?;
@@ -391,17 +383,10 @@ impl<'a> BTreeTest<'a> {
 
         // FIXME: we should increment the superblock within the sm
 
-        let vtype: BTreeValueType<Value64> = BTreeValueType {
-            context: Addr(0),
-            inc_fn: Addr(0),
-            dec_fn: Addr(0),
-            eq_fn: Addr(0),
-            rust_value_type: PhantomData,
-        };
         let info = BTreeInfo {
             tm,
             levels: 1,
-            vtype,
+            vtype: BTreeValueType::<Value64>::default(),
         };
         let root = dm_btree_empty(fix, &info)?;
         let baseline = {

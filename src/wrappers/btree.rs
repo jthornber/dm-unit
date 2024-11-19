@@ -22,6 +22,18 @@ pub struct BTreeValueType<G: Guest> {
     pub rust_value_type: PhantomData<G>,
 }
 
+impl<G: Guest> Default for BTreeValueType<G> {
+    fn default() -> Self {
+        BTreeValueType {
+            context: Addr(0),
+            inc_fn: Addr(0),
+            dec_fn: Addr(0),
+            eq_fn: Addr(0),
+            rust_value_type: PhantomData,
+        }
+    }
+}
+
 impl<G: Guest> Guest for BTreeValueType<G> {
     fn guest_len() -> usize {
         // 4 functions ptrs and a u32
