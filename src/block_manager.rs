@@ -639,6 +639,7 @@ impl BMInner {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(path)?;
         let zeroes = [0u8; 4096];
 

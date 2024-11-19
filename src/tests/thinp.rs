@@ -50,6 +50,7 @@ impl ThinDev {
     }
 }
 
+#[allow(dead_code)]
 struct DebugReportInner {}
 
 impl ReportInner for DebugReportInner {
@@ -764,11 +765,8 @@ fn test_delete_frees_blocks(fix: &mut Fixture) -> Result<()> {
     );
 
     // close all the thins
-    let iter = td.into_iter();
-    for td in iter {
-        if let Some(t) = td {
-            pool.close_thin(fix, t)?;
-        }
+    for t in td.into_iter().flatten() {
+        pool.close_thin(fix, t)?;
     }
     pool.close_thin(fix, thin)?;
 

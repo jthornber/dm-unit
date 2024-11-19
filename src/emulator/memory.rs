@@ -784,7 +784,7 @@ pub struct Heap {
 impl Heap {
     pub fn new(begin: Addr, end: Addr) -> Self {
         let len = end.0 - begin.0;
-        assert!(len.count_ones() == 1);
+        assert!(len.is_power_of_two());
         let order = len.trailing_zeros() as usize;
         let order = order - MIN_BLOCK_SHIFT;
         let allocator = BuddyAllocator::new(order);

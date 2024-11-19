@@ -197,7 +197,7 @@ fn single_instr(
                         let rs1 = reg(rs1);
                         let rs2 = reg(rs2);
                         if rs2 == 0 {
-                            core::u64::MAX
+                            u64::MAX
                         } else {
                             rs1.wrapping_div(rs2)
                         }
@@ -212,7 +212,7 @@ fn single_instr(
                         let rs1 = reg(rs1) as u32;
                         let rs2 = reg(rs2) as u32;
                         let v = if rs2 == 0 {
-                            core::u32::MAX
+                            u32::MAX
                         } else {
                             rs1.wrapping_div(rs2)
                         };

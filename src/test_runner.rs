@@ -37,6 +37,7 @@ fn read_kernel_version<P: AsRef<Path>>(kernel_dir: P) -> Result<KernelVersion> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(path)?;
     let reader = BufReader::new(makefile);
 
@@ -246,8 +247,8 @@ impl TestRunner<'_> {
         self.jit = true;
     }
 
-    pub fn append_arg(&mut self, arg: &String) {
-        self.args.insert(arg.clone());
+    pub fn append_arg(&mut self, arg: &str) {
+        self.args.insert(arg.to_owned());
     }
 
     pub fn get_kernel_dir(&self) -> &Path {

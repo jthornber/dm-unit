@@ -257,7 +257,7 @@ fn opt_simplify(instrs: &[IR]) -> Vec<IR> {
     for ir in instrs {
         match ir {
             Assign { rd, rval } => {
-                let rval = simplify(rval, &mut defs);
+                let rval = simplify(rval, &defs);
                 r.push(Assign { rd: *rd, rval });
                 defs.insert(*rd, rval);
             }

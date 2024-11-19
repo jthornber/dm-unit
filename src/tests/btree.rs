@@ -31,6 +31,7 @@ use thinp::pdata::unpack::*;
 
 //-------------------------------
 
+/*
 struct NoopVisitor {}
 
 impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
@@ -54,7 +55,6 @@ impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
     }
 }
 
-/*
 #[allow(dead_code)]
 fn check_btree(root: u64) -> Result<()> {
     let walker = BTreeWalker::new(get_bm()?, false);
