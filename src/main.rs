@@ -61,45 +61,6 @@ fn get_result_set() -> Result<String> {
     }
 }
 
-/*
-fn main() -> Result<()> {
-    env_logger::init();
-
-    let parser = Command::new("dm-unit")
-        .version("0")
-        .about("Unit test framework for device mapper kernel modules")
-        .arg(
-            arg!(-k --"kernel-dir" <KERNEL_DIR>)
-                .help("Location of kernel source that contains built kernel modules to be tested.")
-                .required(true),
-        )
-        .arg(
-            arg!(-j <JOBS>)
-                .value_parser(value_parser!(usize))
-                .help("Number of tests to run concurrently.")
-                .required(false),
-        )
-        .arg(arg!(-t <FILTER>).help("regex filter to select which tests to run"))
-        .arg(
-            Arg::new("JIT")
-                .long("jit")
-                .action(ArgAction::SetTrue)
-                .help("Turn on the experimental jit compiler"),
-        )
-        .arg(
-            Arg::new("BENCH")
-                .long("bench")
-                .action(ArgAction::SetTrue)
-                .help("Run benchmarks"),
-        );
-
-    let matches = parser.get_matches();
-    let kernel_dir = Path::new(matches.get_one::<String>("kernel-dir").unwrap());
-
-    let mut runner = TestRunner::new(kernel_dir)?;
->>>>>>> hank/2023-08-22-shrink-value-size-v2-merged-ea
-*/
-
 fn get_rx(matches: &ArgMatches) -> Result<Regex> {
     let empty_pattern = "".to_string();
     let pattern = matches
@@ -148,6 +109,16 @@ fn list(matches: &ArgMatches) -> Result<()> {
 
     let mut pf = PathFormatter::new();
     for (p, _) in tests.into_inner() {
+        // Do we only want to list failures?
+        if *matches.get_one::<bool>("FAILURES").unwrap_or(&false) {
+            if let Some(r) = results.get(&p) {
+                if r.pass {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
         pf.print(&p);
         if let Some(r) = results.get(&p) {
             println!(" {}", if r.pass { "PASS" } else { "FAIL" });
@@ -241,10 +212,17 @@ fn main() -> Result<()> {
     )
     .subcommand(
         Command::new("list")
-            .about("List available tests")            .arg(Arg::new("FILTER")
+            .about("List available tests")
+                .arg(Arg::new("FILTER")
                 .index(1)
                 .required(false)
                 .help("regex filter to select which tests to run"))
+                .arg(Arg::new("FAILURES")
+                    .required(false)
+                    .long("failures")
+                    .action(ArgAction::SetTrue)
+                    .help("select failing tests"))
+
     )
     .subcommand(
         Command::new("log")
@@ -262,14 +240,6 @@ fn main() -> Result<()> {
                     .help("Location of kernel source that contains built kernel modules to be tested.")
                     .required(true),
             )
-            /*
-            .arg(
-                arg!(-j <JOBS>)
-                    .value_parser(value_parser!(usize))
-                    .help("Number of tests to run concurrently.")
-                    .required(false),
-            )
-            */
                     .arg(
             Arg::new("BENCH")
                 .long("bench")
