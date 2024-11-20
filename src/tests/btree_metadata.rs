@@ -2,6 +2,7 @@ use crate::block_manager::*;
 use crate::fixture::*;
 use crate::tests::persistent_metadata::PersistentMetadata;
 use crate::wrappers::btree::*;
+use crate::wrappers::btree_cursor::*;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -70,6 +71,10 @@ impl<'a> BTreeMetadata<'a> {
         let keys = vec![key];
         self.root = dm_btree_remove(self.md.fix, &self.info, self.root, &keys)?;
         Ok(())
+    }
+
+    pub fn get_cursor(&mut self) -> Result<BTreeCursor<u64>> {
+        init_btree_cursor(self.md.fix, &self.info, self.root, true)
     }
 }
 

@@ -7,6 +7,7 @@ use dm_unit::test_runner::*;
 use dm_unit::tests::array;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
+use dm_unit::tests::btree_cursor;
 use dm_unit::tests::bufio;
 use dm_unit::tests::cache;
 use dm_unit::tests::extent_allocator;
@@ -30,6 +31,7 @@ fn all_tests() -> Result<TestSet> {
     bufio::register_tests(&mut tests)?;
     block_manager::register_tests(&mut tests)?;
     btree::register_tests(&mut tests)?;
+    btree_cursor::register_tests(&mut tests)?;
     cache::register_tests(&mut tests)?;
     extent_allocator::register_tests(&mut tests)?;
     space_map_disk::register_tests(&mut tests)?;
