@@ -1,4 +1,5 @@
 pub mod array;
+pub mod array_cursor;
 pub mod array_metadata;
 pub mod block_manager;
 pub mod btree;

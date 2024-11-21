@@ -2,6 +2,7 @@ use crate::block_manager::*;
 use crate::fixture::*;
 use crate::tests::persistent_metadata::PersistentMetadata;
 use crate::wrappers::array::*;
+use crate::wrappers::array_cursor::*;
 use crate::wrappers::btree::BTreeValueType;
 
 use anyhow::Result;
@@ -80,6 +81,10 @@ impl<'a> ArrayMetadata<'a> {
         )?;
         self.array_size = new_size;
         Ok(())
+    }
+
+    pub fn get_cursor(&mut self) -> Result<ArrayCursor<u64>> {
+        init_array_cursor(self.md.fix, &self.info, self.root)
     }
 }
 
