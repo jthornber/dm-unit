@@ -525,8 +525,14 @@ impl BMInner {
                 );
                 Ok(())
             }
-            Some(Lock::Dirty { .. }) => Err(anyhow!("block {} is not locked", gb.loc)),
-            Some(Lock::Clean { .. }) => Err(anyhow!("block {} is not locked", gb.loc)),
+            Some(l @ Lock::Dirty { .. }) => {
+                self.locks.insert(gb.loc, l);
+                Err(anyhow!("block {} is not locked", gb.loc))
+            }
+            Some(l @ Lock::Clean { .. }) => {
+                self.locks.insert(gb.loc, l);
+                Err(anyhow!("block {} is not locked", gb.loc))
+            }
             None => Err(anyhow!("block {} has never been locked", gb.loc)),
         }
     }
