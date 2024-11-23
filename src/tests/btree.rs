@@ -340,21 +340,9 @@ fn enable_traces(fix: &mut Fixture) -> Result<()> {
 fn test_del_empty(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
-    let bm = dm_bm_create(fix, 1024)?;
-    let (tm, sm) = dm_tm_create(fix, bm, 0)?;
-
-    let info = BTreeInfo {
-        tm,
-        levels: 1,
-        vtype: BTreeValueType::<Value64>::default(),
-    };
-
-    let root = dm_btree_empty(fix, &info)?;
-    dm_btree_del(fix, &info, root)?;
-    dm_bm_flush(fix, bm)?;
-    dm_tm_destroy(fix, tm)?;
-    sm_destroy(fix, sm)?;
-    dm_bm_destroy(fix, bm)?;
+    let mut bt = BTreeTest::new(fix)?;
+    bt.begin()?;
+    bt.delete()?;
 
     Ok(())
 }
@@ -447,6 +435,12 @@ impl<'a> BTreeTest<'a> {
         dm_tm_commit(self.fix, self.tm, self.sb.unwrap())?;
         self.sb = None;
         Ok(())
+    }
+
+    // This function takes ownership as the btree is no longer valid
+    pub fn delete(mut self) -> Result<()> {
+        dm_btree_del(self.fix, &self.info, self.root)?;
+        self.commit()
     }
 
     pub fn stats_start(&mut self) {
