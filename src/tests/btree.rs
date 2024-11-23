@@ -359,7 +359,7 @@ pub struct BTreeTest<'a> {
     tm: Addr,
     sm: Addr,
     sb: Option<Addr>,
-    info: BTreeInfo<Value64>,
+    info: BTreeInfoPtr<Value64>,
     root: u64,
     baseline: Stats,
 }
@@ -371,11 +371,7 @@ impl<'a> BTreeTest<'a> {
 
         // FIXME: we should increment the superblock within the sm
 
-        let info = BTreeInfo {
-            tm,
-            levels: 1,
-            vtype: BTreeValueType::<Value64>::default(),
-        };
+        let info = alloc_btree_info(fix, tm, 1, BTreeValueType::<Value64>::default())?;
         let root = dm_btree_empty(fix, &info)?;
         let baseline = {
             let bm = get_bm(fix, bm);
@@ -491,6 +487,7 @@ impl<'a> BTreeTest<'a> {
 
 impl<'a> Drop for BTreeTest<'a> {
     fn drop(&mut self) {
+        free_btree_info(self.fix, &mut self.info).expect("release dm_btree_info");
         if let Some(sb) = self.sb {
             dm_bm_unlock(self.fix, sb).expect("unlock superblock");
         }
