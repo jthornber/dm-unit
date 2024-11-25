@@ -11,6 +11,7 @@ use crate::lock_check::*;
 use anyhow::{anyhow, Context, Result};
 use log::*;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::c_int;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -287,6 +288,12 @@ impl Fixture {
         self.call_at(self.lookup_fn(func)?)?;
         // debug!("<<< {}()", func);
         Ok(())
+    }
+
+    pub fn call_return_errno(&mut self, func: &str) -> Result<c_int> {
+        self.call_at(self.lookup_fn(func)?)?;
+        let r = self.vm.reg(A0) as i64 as i32;
+        return Ok(r);
     }
 
     // Use this to call functions that return an int errno.
