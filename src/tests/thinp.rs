@@ -215,7 +215,7 @@ impl ThinPool {
         let mut path = Vec::new();
         let roots = btree_to_map(&mut path, engine.clone(), false, sb.mapping_root)?;
         for (thin_id, root) in roots {
-            let residency = calc_residency::<Value64>(&bm, root)?;
+            let residency = calc_residency::<u64>(&bm, root)?;
 
             debug!("residency of thin {} = {}", thin_id, residency);
         }
@@ -227,13 +227,13 @@ impl ThinPool {
         );
         debug!(
             "residency of data sm overflow: {}",
-            calc_residency::<Value32>(&bm, root.ref_count_root)?
+            calc_residency::<u32>(&bm, root.ref_count_root)?
         );
 
         let root = unpack::<SMRoot>(&sb.metadata_sm_root[0..])?;
         debug!(
             "residency of metadata sm overflow: {}",
-            calc_residency::<Value32>(&bm, root.ref_count_root)?
+            calc_residency::<u32>(&bm, root.ref_count_root)?
         );
         Ok(())
     }

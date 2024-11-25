@@ -12,14 +12,11 @@ use crate::wrappers::space_map::*;
 use crate::wrappers::transaction_manager::*;
 
 use anyhow::{anyhow, ensure, Result};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::*;
-use nom::{number::complete::*, IResult};
 use rand::prelude::*;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
-use std::io;
-use std::io::{Cursor, Read, Write};
+use std::io::Cursor;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use thinp::io_engine::BLOCK_SIZE;
@@ -60,7 +57,7 @@ fn check_btree(root: u64) -> Result<()> {
     let visitor = NoopVisitor {};
     let mut path = Vec::new();
 
-    walker.walk::<NoopVisitor, Value64>(&mut path, &visitor, root)?;
+    walker.walk::<NoopVisitor, u64>(&mut path, &visitor, root)?;
 
     Ok(())
 }
@@ -177,21 +174,21 @@ fn key_to_value(k: u64) -> u64 {
     k + 12345
 }
 
-impl NodeVisitor<Value64> for EntryVisitor {
+impl NodeVisitor<u64> for EntryVisitor {
     fn visit(
         &self,
         _path: &[u64],
         _kr: &KeyRange,
         _header: &NodeHeader,
         keys: &[u64],
-        values: &[Value64],
+        values: &[u64],
     ) -> btree::Result<()> {
         for (i, k) in keys.iter().enumerate() {
             let v = values[i];
-            if v.0 != key_to_value(*k) {
+            if v != key_to_value(*k) {
                 return Err(BTreeError::ValueError(format!(
                     "Key has bad value: {} -> {}",
-                    k, v.0
+                    k, v
                 )));
             }
 
@@ -218,7 +215,7 @@ fn check_keys_present(bm: &Arc<BlockManager>, root: u64, keys: &[u64]) -> Result
     };
 
     let mut path = Vec::new();
-    walker.walk::<EntryVisitor, Value64>(&mut path, &visitor, root)?;
+    walker.walk::<EntryVisitor, u64>(&mut path, &visitor, root)?;
 
     let seen = visitor.seen.lock().unwrap();
     for k in keys {
@@ -228,66 +225,6 @@ fn check_keys_present(bm: &Arc<BlockManager>, root: u64, keys: &[u64]) -> Result
     }
 
     Ok(())
-}
-
-//-------------------------------
-
-/// A little wrapper to let us store u64's in btrees.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Value64(u64);
-
-impl Guest for Value64 {
-    fn guest_len() -> usize {
-        8
-    }
-
-    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
-        w.write_u64::<LittleEndian>(self.0)
-    }
-
-    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
-        let v = r.read_u64::<LittleEndian>()?;
-        Ok(Value64(v))
-    }
-}
-
-impl Unpack for Value64 {
-    fn disk_size() -> u32 {
-        8
-    }
-
-    fn unpack(data: &[u8]) -> nom::IResult<&[u8], Self> {
-        let (i, v) = le_u64(data)?;
-        Ok((i, Value64(v)))
-    }
-}
-
-impl Pack for Value64 {
-    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> io::Result<()> {
-        w.write_u64::<LittleEndian>(self.0)?;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Value32(u32);
-
-impl Unpack for Value32 {
-    fn disk_size() -> u32 {
-        4
-    }
-
-    fn unpack(data: &[u8]) -> IResult<&[u8], Self> {
-        let (i, v) = le_u32(data)?;
-        Ok((i, Value32(v)))
-    }
-}
-
-impl Pack for Value32 {
-    fn pack<W: WriteBytesExt>(&self, w: &mut W) -> io::Result<()> {
-        w.write_u32::<LittleEndian>(self.0)?;
-        Ok(())
-    }
 }
 
 #[allow(dead_code)]
@@ -359,7 +296,7 @@ pub struct BTreeTest<'a> {
     tm: Addr,
     sm: Addr,
     sb: Option<Addr>,
-    info: BTreeInfoPtr<Value64>,
+    info: BTreeInfoPtr<u64>,
     root: u64,
     baseline: Stats,
 }
@@ -371,7 +308,7 @@ impl<'a> BTreeTest<'a> {
 
         // FIXME: we should increment the superblock within the sm
 
-        let info = alloc_btree_info(fix, tm, 1, BTreeValueType::<Value64>::default())?;
+        let info = alloc_btree_info(fix, tm, 1, BTreeValueType::<u64>::default())?;
         let root = dm_btree_empty(fix, &info)?;
         let baseline = {
             let bm = get_bm(fix, bm);
@@ -401,7 +338,7 @@ impl<'a> BTreeTest<'a> {
 
     pub fn insert(&mut self, key: u64) -> Result<()> {
         let ks = vec![key];
-        let v = Value64(key_to_value(key));
+        let v = key_to_value(key);
         self.root = dm_btree_insert(self.fix, &self.info, self.root, &ks, &v)?;
         Ok(())
     }
@@ -409,7 +346,7 @@ impl<'a> BTreeTest<'a> {
     pub fn lookup(&mut self, key: u64) -> Result<()> {
         let keys = vec![key];
         let v = dm_btree_lookup(self.fix, &self.info, self.root, &keys)?;
-        ensure!(v == Value64(key_to_value(key)));
+        ensure!(v == key_to_value(key));
         Ok(())
     }
 
@@ -466,7 +403,7 @@ impl<'a> BTreeTest<'a> {
 
     pub fn get_tree_stats(&self) -> Result<TreeStats> {
         let bm = get_bm(self.fix, self.bm);
-        get_tree_stats::<Value64>(&bm, self.root)
+        get_tree_stats::<u64>(&bm, self.root)
     }
 
     pub fn get_bm(&self) -> Arc<BlockManager> {
@@ -475,12 +412,12 @@ impl<'a> BTreeTest<'a> {
 
     pub fn residency(&self) -> Result<usize> {
         let bm = get_bm(self.fix, self.bm);
-        calc_residency::<Value64>(&bm, self.root)
+        calc_residency::<u64>(&bm, self.root)
     }
 
     pub fn print_layout(&self) -> Result<()> {
         let bm = get_bm(self.fix, self.bm);
-        print_layout::<Value64>(&bm, self.root);
+        print_layout::<u64>(&bm, self.root);
         Ok(())
     }
 }
@@ -604,13 +541,11 @@ fn mk_node(fix: &mut Fixture, key_begin: u64, nr_entries: usize) -> Result<(Auto
         block: 1,
         is_leaf: true,
         nr_entries: nr_entries as u32,
-        max_entries: calc_max_entries::<Value64>() as u32,
-        value_size: Value64::guest_len() as u32,
+        max_entries: calc_max_entries::<u64>() as u32,
+        value_size: u64::guest_len() as u32,
     };
     let keys: Vec<u64> = (key_begin..key_begin + nr_entries as u64).collect();
-    let values: Vec<Value64> = (key_begin..key_begin + nr_entries as u64)
-        .map(Value64)
-        .collect();
+    let values: Vec<u64> = (key_begin..key_begin + nr_entries as u64).collect();
     let node = Node::Leaf {
         header,
         keys,
@@ -635,7 +570,7 @@ fn get_node<V: Unpack>(fix: &Fixture, block: Addr, ignore_non_fatal: bool) -> Re
     Ok(node)
 }
 
-fn check_node(node: &Node<Value64>, key_begin: u64, nr_entries: usize) -> Result<()> {
+fn check_node(node: &Node<u64>, key_begin: u64, nr_entries: usize) -> Result<()> {
     let header = node.get_header();
     ensure!(nr_entries as u32 == header.nr_entries);
     ensure!(header.is_leaf);
@@ -646,10 +581,10 @@ fn check_node(node: &Node<Value64>, key_begin: u64, nr_entries: usize) -> Result
         i += 1;
     }
 
-    if let Node::<Value64>::Leaf { values, .. } = node {
+    if let Node::<u64>::Leaf { values, .. } = node {
         i = key_begin;
         for value in values.iter() {
-            ensure!(value.0 == i);
+            ensure!(*value == i);
             i += 1;
         }
     }
@@ -775,8 +710,8 @@ fn test_redistribute_2(fix: &mut Fixture, nr_left: usize, nr_right: usize) -> Re
     let (mut fix, right_ptr) = mk_node(&mut fix, nr_left as u64, nr_right)?;
     redistribute2(&mut fix, left_ptr, right_ptr)?;
 
-    let left = get_node::<Value64>(&fix, left_ptr, true)?;
-    let right = get_node::<Value64>(&fix, right_ptr, true)?;
+    let left = get_node::<u64>(&fix, left_ptr, true)?;
+    let right = get_node::<u64>(&fix, right_ptr, true)?;
     check_node(&left, 0u64, target_left)?;
     check_node(&right, target_left as u64, target_right)?;
 
@@ -823,9 +758,9 @@ fn test_redistribute_3(
     let (mut fix, right_ptr) = mk_node(&mut fix, (nr_left + nr_center) as u64, nr_right)?;
     redistribute3(&mut fix, left_ptr, center_ptr, right_ptr)?;
 
-    let left = get_node::<Value64>(&fix, left_ptr, true)?;
-    let center = get_node::<Value64>(&fix, center_ptr, true)?;
-    let right = get_node::<Value64>(&fix, right_ptr, true)?;
+    let left = get_node::<u64>(&fix, left_ptr, true)?;
+    let center = get_node::<u64>(&fix, center_ptr, true)?;
+    let right = get_node::<u64>(&fix, right_ptr, true)?;
     check_node(&left, 0u64, target_left)?;
     check_node(&center, target_left as u64, target_center)?;
     check_node(&right, (target_left + target_center) as u64, target_right)?;
