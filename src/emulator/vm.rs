@@ -6,7 +6,9 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
-use crate::emulator::ir::*;
+use crate::emulator::ir::interpreter::*;
+use crate::emulator::ir::ir::*;
+use crate::emulator::ir::optimise::*;
 use crate::emulator::memory::*;
 use crate::emulator::riscv::*;
 
@@ -863,8 +865,9 @@ impl VM {
         self.find_bb()
     }
 
-    fn run_ir(&mut self, _ir: &[IR]) -> Result<()> {
-        todo!();
+    fn run_ir(&mut self, ir: &[IR]) -> Result<()> {
+        // FIXME: generate proper VmErr
+        interpret(ir, &mut self.reg, &mut self.mem).map_err(|_| VmErr::DecodeError(0))
     }
 
     fn run_riscv(&mut self, instrs: &[(Inst, u8)]) -> Result<()> {
@@ -890,21 +893,22 @@ impl VM {
 
         bb.hits += 1;
 
-        if self.jit && bb.hits > 100 && bb.instrs.len() >= 4 && bb.ir.is_none() {
-            /*
+        if self.jit
+            && bb.breakpoint == false
+            && bb.hits > 10
+            && bb.instrs.len() >= 4
+            && bb.ir.is_none()
+        {
             debug!("riscv ({} instructions):", bb.instrs.len());
             for (inst, _width) in &bb.instrs {
                 debug!("    {}", inst);
             }
-            */
 
-            let ir = renumber(&to_ir(&bb.instrs, true));
-            /*
+            let ir = renumber(&to_ir(&bb.instrs, false));
             debug!("ir ({} instructions):", ir.len());
             for inst in &ir {
                 debug!("    {}", inst);
             }
-            */
 
             bb.ir = Some(ir);
         }

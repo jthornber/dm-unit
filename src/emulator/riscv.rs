@@ -6,7 +6,7 @@ use std::fmt;
 use std::io::Cursor;
 use std::rc::Weak;
 
-use crate::emulator::ir::IR;
+use crate::emulator::ir::ir::IR;
 
 //-------------------------------
 
