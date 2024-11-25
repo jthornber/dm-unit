@@ -37,10 +37,10 @@ fn do_insert_bench_(
 
         btree.begin()?;
         for k in chunk {
-            insert_tracker.begin(btree.fix, &bm);
+            insert_tracker.begin(btree.md.fixture(), &bm);
             btree.insert(*k)?;
             if track_insertion {
-                insert_tracker.end(btree.fix, &bm)?;
+                insert_tracker.end(btree.md.fixture(), &bm)?;
             }
         }
         btree.commit()?;

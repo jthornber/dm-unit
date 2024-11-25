@@ -3,13 +3,10 @@ use crate::emulator::memory::*;
 use crate::fixture::*;
 use crate::guest::*;
 use crate::stats::*;
-use crate::stubs::block_manager::*;
 use crate::stubs::*;
 use crate::test_runner::*;
-use crate::wrappers::block_manager::*;
+use crate::tests::btree_metadata::BTreeMetadata;
 use crate::wrappers::btree::*;
-use crate::wrappers::space_map::*;
-use crate::wrappers::transaction_manager::*;
 
 use anyhow::{anyhow, ensure, Result};
 use log::*;
@@ -291,105 +288,70 @@ pub struct TreeStats {
 
 #[allow(dead_code)]
 pub struct BTreeTest<'a> {
-    pub fix: &'a mut Fixture,
-    bm: Addr,
-    tm: Addr,
-    sm: Addr,
-    sb: Option<Addr>,
-    info: BTreeInfoPtr<u64>,
-    root: u64,
+    pub md: BTreeMetadata<'a>,
     baseline: Stats,
 }
 
 impl<'a> BTreeTest<'a> {
     pub fn new(fix: &'a mut Fixture) -> Result<Self> {
-        let bm = dm_bm_create(fix, 1024)?;
-        let (tm, sm) = dm_tm_create(fix, bm, 0)?;
-
-        // FIXME: we should increment the superblock within the sm
-
-        let info = alloc_btree_info(fix, tm, 1, BTreeValueType::<u64>::default())?;
-        let root = dm_btree_empty(fix, &info)?;
+        let md = BTreeMetadata::new(fix)?;
         let baseline = {
-            let bm = get_bm(fix, bm);
-            Stats::collect_stats(fix, &bm)
+            let bm = md.get_bm();
+            Stats::collect_stats(md.fixture(), &bm)
         };
 
-        Ok(BTreeTest {
-            fix,
-            bm,
-            tm,
-            sm,
-            sb: None,
-            info,
-            root,
-            baseline,
-        })
+        Ok(BTreeTest { md, baseline })
     }
 
     pub fn begin(&mut self) -> Result<()> {
-        if self.sb.is_some() {
-            return Err(anyhow!("transaction already begun"));
-        }
-
-        self.sb = Some(dm_bm_write_lock_zero(self.fix, self.bm, 0, Addr(0))?);
-        Ok(())
+        self.md.begin()
     }
 
     pub fn insert(&mut self, key: u64) -> Result<()> {
-        let ks = vec![key];
         let v = key_to_value(key);
-        self.root = dm_btree_insert(self.fix, &self.info, self.root, &ks, &v)?;
-        Ok(())
+        self.md.insert(key, &v)
     }
 
     pub fn lookup(&mut self, key: u64) -> Result<()> {
-        let keys = vec![key];
-        let v = dm_btree_lookup(self.fix, &self.info, self.root, &keys)?;
+        let v = self.md.lookup(key)?;
         ensure!(v == key_to_value(key));
         Ok(())
     }
 
     pub fn remove(&mut self, key: u64) -> Result<()> {
-        let keys = vec![key];
-        self.root = dm_btree_remove(self.fix, &self.info, self.root, &keys)?;
-        Ok(())
+        self.md.remove(key)
     }
 
     // This uses Rust code, rather than doing look ups via the kernel
     // code.
     pub fn check_keys_present(&self, keys: &[u64]) -> Result<()> {
-        let bm = get_bm(self.fix, self.bm);
-        check_keys_present(&bm, self.root, keys)
+        let bm = self.md.get_bm();
+        check_keys_present(&bm, self.md.root(), keys)
     }
 
     pub fn commit(&mut self) -> Result<()> {
-        dm_tm_pre_commit(self.fix, self.tm)?;
-        dm_tm_commit(self.fix, self.tm, self.sb.unwrap())?;
-        self.sb = None;
-        Ok(())
+        self.md.commit()
     }
 
     // This function takes ownership as the btree is no longer valid
-    pub fn delete(mut self) -> Result<()> {
-        dm_btree_del(self.fix, &self.info, self.root)?;
-        self.commit()
+    pub fn delete(self) -> Result<()> {
+        self.md.delete()
     }
 
     pub fn stats_start(&mut self) {
-        let bm = get_bm(self.fix, self.bm);
-        self.baseline = Stats::collect_stats(self.fix, &bm);
+        let bm = self.md.get_bm();
+        self.baseline = Stats::collect_stats(self.md.fixture(), &bm);
     }
 
     pub fn stats_delta(&mut self) -> Result<Stats> {
-        let bm = get_bm(self.fix, self.bm);
-        let delta = self.baseline.delta(self.fix, &bm);
+        let bm = self.md.get_bm();
+        let delta = self.baseline.delta(self.md.fixture(), &bm);
         Ok(delta)
     }
 
     pub fn stats_report(&self, desc: &str, count: u64) -> Result<()> {
-        let bm = get_bm(self.fix, self.bm);
-        let delta = self.baseline.delta(self.fix, &bm);
+        let bm = self.md.get_bm();
+        let delta = self.baseline.delta(self.md.fixture(), &bm);
         info!(
             "{}: residency = {}, instrs = {}, read_locks = {:.1}, write_locks = {:.1}",
             desc,
@@ -402,35 +364,23 @@ impl<'a> BTreeTest<'a> {
     }
 
     pub fn get_tree_stats(&self) -> Result<TreeStats> {
-        let bm = get_bm(self.fix, self.bm);
-        get_tree_stats::<u64>(&bm, self.root)
+        let bm = self.md.get_bm();
+        get_tree_stats::<u64>(&bm, self.md.root())
     }
 
     pub fn get_bm(&self) -> Arc<BlockManager> {
-        get_bm(self.fix, self.bm)
+        self.md.get_bm()
     }
 
     pub fn residency(&self) -> Result<usize> {
-        let bm = get_bm(self.fix, self.bm);
-        calc_residency::<u64>(&bm, self.root)
+        let bm = self.get_bm();
+        calc_residency::<u64>(&bm, self.md.root())
     }
 
     pub fn print_layout(&self) -> Result<()> {
-        let bm = get_bm(self.fix, self.bm);
-        print_layout::<u64>(&bm, self.root);
+        let bm = self.get_bm();
+        print_layout::<u64>(&bm, self.md.root());
         Ok(())
-    }
-}
-
-impl<'a> Drop for BTreeTest<'a> {
-    fn drop(&mut self) {
-        free_btree_info(self.fix, &mut self.info).expect("release dm_btree_info");
-        if let Some(sb) = self.sb {
-            dm_bm_unlock(self.fix, sb).expect("unlock superblock");
-        }
-        dm_tm_destroy(self.fix, self.tm).expect("destroy tm");
-        sm_destroy(self.fix, self.sm).expect("destroy sm");
-        dm_bm_destroy(self.fix, self.bm).expect("destroy bm");
     }
 }
 

@@ -1,5 +1,6 @@
 pub mod block_manager;
 pub mod btree;
+pub mod btree_metadata;
 pub mod bufio;
 pub mod cache;
 pub mod extent_allocator;
