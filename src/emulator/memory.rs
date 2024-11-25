@@ -398,6 +398,19 @@ impl Memory {
         self.get_mut_mmap(begin, end, 0, |mut mm| mm.change_perms(begin, end, perms))
     }
 
+    // Dangerous, for use by the JIT only
+    pub fn guest_to_host(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<u64> {
+        let mm = self.get_mmap(begin.0, end.0, perms)?;
+        let mm_begin = (begin.0 - mm.begin) as usize;
+        let mm_end = (end.0 - mm.begin) as usize;
+        let slice = &mm.bytes[mm_begin..mm_end];
+
+        let ptr = slice.as_ptr();
+        let addr = ptr as u64;
+
+        Ok(addr)
+    }
+
     /// Reads bytes from a memory range.  Fails if the bits in 'perms' are
     /// not set for any byte in the range.
     pub fn read(&self, begin: Addr, bytes: &mut [u8], perms: u8) -> Result<()> {
