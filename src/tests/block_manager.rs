@@ -157,17 +157,15 @@ fn test_write_lock(fix: &mut Fixture) -> Result<()> {
         "shouldn't be able to write unlock twice"
     );
 
-    /*
-        // Now we shouldn't be able to read or write
-        ensure!(
-            fix.vm.mem.read(data, &mut buf, PERM_READ).is_err(),
-            "shouldn't be able to read"
-        );
-        ensure!(
-            fix.vm.mem.write(data, &buf, PERM_WRITE).is_err(),
-            "shouldn't be able to write"
-        );
-    */
+    // Now we shouldn't be able to read or write
+    ensure!(
+        fix.vm.mem.read(data, &mut buf, PERM_READ).is_err(),
+        "shouldn't be able to read"
+    );
+    ensure!(
+        fix.vm.mem.write(data, &buf, PERM_WRITE).is_err(),
+        "shouldn't be able to write"
+    );
 
     dm_bm_destroy(fix, bm)?;
 
