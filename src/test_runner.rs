@@ -215,7 +215,7 @@ fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestR
     }
 }
 
-impl<'a> TestRunner<'a> {
+impl TestRunner<'_> {
     pub fn new<P: AsRef<Path>>(kernel_dir: P, tests: TestSet) -> Result<Self> {
         check_kernel_version(&kernel_dir)?;
 
@@ -309,7 +309,7 @@ impl<'a> TestRunner<'a> {
                         p.clone(),
                         TestResult {
                             pass: false,
-                            log: format!("unable to load kernel modules"),
+                            log: "unable to load kernel modules".to_string(),
                             icount: 0,
                         },
                     );

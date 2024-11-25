@@ -16,7 +16,7 @@ use Reg::*;
 const MAX_ERRNO: i64 = 4095;
 
 fn is_err(ptr: u64) -> bool {
-    ptr >= (-MAX_ERRNO as i64) as u64
+    ptr >= { -MAX_ERRNO } as u64
 }
 
 fn ptr_err(ptr: u64) -> i64 {

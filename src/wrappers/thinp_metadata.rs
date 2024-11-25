@@ -3,9 +3,8 @@ use crate::emulator::riscv::*;
 use crate::fixture::*;
 use crate::guest::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::*;
 use std::io;
 use std::io::{Cursor, Read, Write};
 

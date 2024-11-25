@@ -334,30 +334,24 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     let mut defs = BTreeMap::new();
     let mut highest_reg = 0;
     for i in instrs {
-        match i {
-            Assign { rd, rval } => {
-                defs.insert(*rd, *rval);
+        if let Assign { rd, rval } = i {
+            defs.insert(*rd, *rval);
 
-                if rd.0 > highest_reg {
-                    highest_reg = rd.0;
-                }
+            if rd.0 > highest_reg {
+                highest_reg = rd.0;
             }
-            _ => {}
         }
     }
 
     let mut ranges = Vec::new();
     for i in instrs {
-        match i {
-            Assign {
+        if let Assign {
                 rval: Gtoh { guest, len, perms },
                 ..
-            } => {
-                if let Some(range) = extract_range(guest, *len, *perms, &defs) {
-                    ranges.push(range);
-                }
+            } = i {
+            if let Some(range) = extract_range(guest, *len, *perms, &defs) {
+                ranges.push(range);
             }
-            _ => {}
         }
     }
 
@@ -473,11 +467,8 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
 fn opt_redundant_stores(instrs: &[IR]) -> Vec<IR> {
     let mut defs = BTreeMap::new();
     for i in instrs {
-        match i {
-            Assign { rd, rval } => {
-                defs.insert(*rd, *rval);
-            }
-            _ => {}
+        if let Assign { rd, rval } = i {
+            defs.insert(*rd, *rval);
         }
     }
 

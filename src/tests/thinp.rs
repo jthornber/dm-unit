@@ -268,7 +268,7 @@ impl ThinPool {
                     run_length = 1;
                 }
             }
-            last_entry = Some((*k, v.clone()));
+            last_entry = Some((*k, *v));
         }
 
         // Record the last run
@@ -764,8 +764,8 @@ fn test_delete_frees_blocks(fix: &mut Fixture) -> Result<()> {
     );
 
     // close all the thins
-    let mut iter = td.into_iter();
-    while let Some(td) = iter.next() {
+    let iter = td.into_iter();
+    for td in iter {
         if let Some(t) = td {
             pool.close_thin(fix, t)?;
         }
@@ -879,7 +879,7 @@ fn test_delete_large(fix: &mut Fixture) -> Result<()> {
     standard_globals(fix)?;
 
     let nr_blocks = 1_000_000;
-    let mut pool = ThinPool::new(fix, 102400, 64, nr_blocks * 2 as u64)?;
+    let mut pool = ThinPool::new(fix, 102400, 64, nr_blocks * 2_u64)?;
 
     // Create a thin device
     let thin_id = 0;
@@ -923,7 +923,7 @@ fn test_delete_large(fix: &mut Fixture) -> Result<()> {
         pool.delete_thin(fix, thin_id)?;
         pool.commit(fix)?;
     }
-    pool.stats_report(fix, &"thin delete".to_string(), 1)?;
+    pool.stats_report(fix, "thin delete", 1)?;
 
     // Tidy up
     pool.check(fix)?;

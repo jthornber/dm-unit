@@ -254,7 +254,7 @@ pub fn sm_next_free_run(
     let sm = read_guest::<SpaceMap>(&fix.vm.mem, sm_ptr)?;
 
     let (mut fix, result_begin_ptr) = auto_alloc(&mut *fix, 8)?;
-    let (mut fix, result_end_ptr) = auto_alloc(&mut *fix, 8)?;
+    let (mut fix, result_end_ptr) = auto_alloc(&mut fix, 8)?;
 
     fix.vm.set_reg(A0, sm_ptr.0);
     fix.vm.set_reg(A1, begin);

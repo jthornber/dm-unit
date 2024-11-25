@@ -16,19 +16,12 @@ pub struct Lock {
     pub pc: Addr,
 }
 
+#[derive(Default)]
 pub struct LockCheck {
     locks: Vec<Lock>,
     spin_count: usize,
 }
 
-impl Default for LockCheck {
-    fn default() -> Self {
-        LockCheck {
-            locks: Vec::new(),
-            spin_count: 0,
-        }
-    }
-}
 
 impl LockCheck {
     pub fn lock(&mut self, lock_type: LockType, lock_addr: Addr, pc: Addr) {
