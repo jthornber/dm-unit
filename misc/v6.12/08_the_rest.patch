@@ -1,0 +1,896 @@
+diff --git a/drivers/md/dm-thin-metadata.c b/drivers/md/dm-thin-metadata.c
+index f90679cfec5b..90886ecb3704 100644
+--- a/drivers/md/dm-thin-metadata.c
++++ b/drivers/md/dm-thin-metadata.c
+@@ -7,6 +7,7 @@
+ 
+ #include "dm-thin-metadata.h"
+ #include "persistent-data/dm-btree.h"
++#include "persistent-data/dm-extent-allocator.h"
+ #include "persistent-data/dm-space-map.h"
+ #include "persistent-data/dm-space-map-disk.h"
+ #include "persistent-data/dm-transaction-manager.h"
+@@ -152,6 +153,7 @@ struct dm_pool_metadata {
+ 	struct dm_block_manager *bm;
+ 	struct dm_space_map *metadata_sm;
+ 	struct dm_space_map *data_sm;
++	struct dm_extent_allocator *data_extents;
+ 	struct dm_transaction_manager *tm;
+ 	struct dm_transaction_manager *nb_tm;
+ 
+@@ -232,6 +234,7 @@ struct dm_thin_device {
+ 	struct list_head list;
+ 	struct dm_pool_metadata *pmd;
+ 	dm_thin_id id;
++	struct dm_alloc_context data_alloc;
+ 
+ 	int open_count;
+ 	bool changed:1;
+@@ -846,6 +849,12 @@ static int __begin_transaction(struct dm_pool_metadata *pmd)
+ 	return 0;
+ }
+ 
++static void __free_device(struct dm_thin_device *td)
++{
++	dm_alloc_context_put(&td->data_alloc);
++	kfree(td);
++}
++
+ static int __write_changed_details(struct dm_pool_metadata *pmd)
+ {
+ 	int r;
+@@ -874,7 +883,7 @@ static int __write_changed_details(struct dm_pool_metadata *pmd)
+ 			td->changed = false;
+ 		else {
+ 			list_del(&td->list);
+-			kfree(td);
++			__free_device(td);
+ 		}
+ 	}
+ 
+@@ -956,6 +965,7 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
+ {
+ 	int r;
+ 	struct dm_pool_metadata *pmd;
++	uint64_t nr_blocks;
+ 
+ 	pmd = kmalloc(sizeof(*pmd), GFP_KERNEL);
+ 	if (!pmd) {
+@@ -972,6 +982,7 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
+ 	pmd->data_block_size = data_block_size;
+ 	pmd->pre_commit_fn = NULL;
+ 	pmd->pre_commit_context = NULL;
++	pmd->data_extents = NULL;
+ 
+ 	r = __create_persistent_data_objects(pmd, format_device);
+ 	if (r) {
+@@ -981,14 +992,31 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
+ 
+ 	r = __begin_transaction(pmd);
+ 	if (r < 0) {
+-		if (dm_pool_metadata_close(pmd) < 0)
+-			DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
+-		return ERR_PTR(r);
++		DMERR("could not begin transaction");
++		goto bad;
+ 	}
+ 
+ 	__set_metadata_reserve(pmd);
+ 
++	r = dm_sm_get_nr_blocks(pmd->data_sm, &nr_blocks);
++	if (r) {
++		DMERR("could not get size of data device");
++		goto bad;
++	}
++
++	pmd->data_extents = dm_extent_allocator_create(nr_blocks);
++	if (!pmd->data_extents) {
++		DMWARN("could not create data extent allocator");
++		r = -ENOMEM;
++		goto bad;
++	}
++
+ 	return pmd;
++
++bad:
++	if (dm_pool_metadata_close(pmd) < 0)
++		DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
++	return ERR_PTR(r);
+ }
+ 
+ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
+@@ -1003,7 +1031,7 @@ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
+ 			open_devices++;
+ 		else {
+ 			list_del(&td->list);
+-			kfree(td);
++			__free_device(td);
+ 		}
+ 	}
+ 	up_read(&pmd->root_lock);
+@@ -1024,6 +1052,9 @@ int dm_pool_metadata_close(struct dm_pool_metadata *pmd)
+ 	pmd_write_unlock(pmd);
+ 	__destroy_persistent_data_objects(pmd, true);
+ 
++	if (pmd->data_extents)
++		dm_extent_allocator_destroy(pmd->data_extents);
++
+ 	kfree(pmd);
+ 	return 0;
+ }
+@@ -1091,6 +1122,7 @@ static int __open_device(struct dm_pool_metadata *pmd,
+ 	(*td)->creation_time = le32_to_cpu(details_le.creation_time);
+ 	(*td)->snapshotted_time = le32_to_cpu(details_le.snapshotted_time);
+ 
++	dm_alloc_context_get(pmd->data_extents, &(*td)->data_alloc);
+ 	list_add(&(*td)->list, &pmd->thin_devices);
+ 
+ 	return 0;
+@@ -1263,7 +1295,8 @@ static int __delete_device(struct dm_pool_metadata *pmd, dm_thin_id dev)
+ 	}
+ 
+ 	list_del(&td->list);
+-	kfree(td);
++	__free_device(td);
++
+ 	r = dm_btree_remove(&pmd->details_info, pmd->details_root,
+ 			    &key, &pmd->details_root);
+ 	if (r)
+@@ -1849,13 +1882,29 @@ bool dm_thin_aborted_changes(struct dm_thin_device *td)
+ 	return r;
+ }
+ 
+-int dm_pool_alloc_data_block(struct dm_pool_metadata *pmd, dm_block_t *result)
++static int sm_alloc_extent(void *context, uint64_t b, uint64_t e, uint64_t *result)
++{
++	struct dm_pool_metadata *pmd = context;
++	return dm_sm_new_block_in_range(pmd->data_sm, b, e, result);
++}
++
++int dm_thin_alloc_data_block(struct dm_thin_device *td, dm_block_t *result)
+ {
+ 	int r = -EINVAL;
++	struct dm_pool_metadata *pmd = td->pmd;
+ 
+ 	pmd_write_lock(pmd);
+-	if (!pmd->fail_io)
+-		r = dm_sm_new_block(pmd->data_sm, result);
++	if (!pmd->fail_io) {
++		r = dm_alloc_context_alloc(&td->data_alloc, sm_alloc_extent, pmd, result);
++		if (r == -ENOSPC) {
++			/*
++			 * If we've run out of space we retry in case any block have been
++			 * freed since we last resized/reset the extent allocator.
++			 */
++			dm_extent_allocator_reset(pmd->data_extents);
++			r = dm_alloc_context_alloc(&td->data_alloc, sm_alloc_extent, pmd, result);
++		}
++	}
+ 	pmd_write_unlock(pmd);
+ 
+ 	return r;
+@@ -2050,8 +2099,11 @@ int dm_pool_resize_data_dev(struct dm_pool_metadata *pmd, dm_block_t new_count)
+ 	int r = -EINVAL;
+ 
+ 	pmd_write_lock(pmd);
+-	if (!pmd->fail_io)
++	if (!pmd->fail_io) {
+ 		r = __resize_space_map(pmd->data_sm, new_count);
++		if (!r)
++			dm_extent_allocator_resize(pmd->data_extents, new_count);
++	}
+ 	pmd_write_unlock(pmd);
+ 
+ 	return r;
+@@ -2158,3 +2210,47 @@ void dm_pool_issue_prefetches(struct dm_pool_metadata *pmd)
+ 		dm_tm_issue_prefetches(pmd->tm);
+ 	up_read(&pmd->root_lock);
+ }
++
++int dm_pool_lock_data_region(struct dm_pool_metadata *pmd, dm_block_t begin,
++			     dm_block_t end)
++{
++	int r;
++
++	pmd_write_lock(pmd);
++	r = dm_extent_allocator_lock_region(pmd->data_extents, begin, end);
++	pmd_write_unlock(pmd);
++
++	return r;
++}
++
++int dm_pool_unlock_data_region(struct dm_pool_metadata *pmd, dm_block_t begin,
++			       dm_block_t end)
++{
++	int r;
++
++	pmd_write_lock(pmd);
++	r = dm_extent_allocator_unlock_region(pmd->data_extents, begin, end);
++	pmd_write_unlock(pmd);
++
++	return r;
++}
++
++int __find_unused_data(struct dm_pool_metadata *pmd, dm_block_t begin,
++		       dm_block_t end, dm_block_t *data_begin,
++		       dm_block_t *data_end)
++{
++	return -EINVAL;
++}
++
++int dm_pool_find_unused_data(struct dm_pool_metadata *pmd, dm_block_t begin,
++			     dm_block_t end, dm_block_t *data_begin,
++			     dm_block_t *data_end)
++{
++	int r;
++
++	pmd_write_lock(pmd);
++	r = __find_unused_data(pmd, begin, end, data_begin, data_end);
++	pmd_write_unlock(pmd);
++
++	return r;
++}
+diff --git a/drivers/md/dm-thin-metadata.h b/drivers/md/dm-thin-metadata.h
+index 2f64f48b5f19..28a5f230e878 100644
+--- a/drivers/md/dm-thin-metadata.h
++++ b/drivers/md/dm-thin-metadata.h
+@@ -159,7 +159,7 @@ int dm_thin_find_mapped_range(struct dm_thin_device *td,
+ /*
+  * Obtain an unused block.
+  */
+-int dm_pool_alloc_data_block(struct dm_pool_metadata *pmd, dm_block_t *result);
++int dm_thin_alloc_data_block(struct dm_thin_device *td, dm_block_t *result);
+ 
+ /*
+  * Insert or remove block.
+@@ -237,6 +237,26 @@ void dm_pool_register_pre_commit_callback(struct dm_pool_metadata *pmd,
+ 					  dm_pool_pre_commit_fn fn,
+ 					  void *context);
+ 
++int dm_pool_lock_data_region(struct dm_pool_metadata *pmd, dm_block_t begin,
++			     dm_block_t end);
++
++int dm_pool_unlock_data_region(struct dm_pool_metadata *pmd, dm_block_t begin,
++			       dm_block_t end);
++
++int dm_pool_find_unused_data(struct dm_pool_metadata *pmd, dm_block_t begin,
++			     dm_block_t end, dm_block_t *data_begin,
++			     dm_block_t *data_end);
++
++int dm_pool_lock_data_region(struct dm_pool_metadata *pmd, dm_block_t begin,
++			     dm_block_t end);
++
++int dm_pool_unlock_data_region(struct dm_pool_metadata *pmd, dm_block_t begin,
++			       dm_block_t end);
++
++int dm_pool_find_unused_data(struct dm_pool_metadata *pmd, dm_block_t begin,
++			     dm_block_t end, dm_block_t *data_begin,
++			     dm_block_t *data_end);
++
+ /*----------------------------------------------------------------*/
+ 
+ #endif
+diff --git a/drivers/md/dm-thin.c b/drivers/md/dm-thin.c
+index 89632ce97760..e72bf24cc234 100644
+--- a/drivers/md/dm-thin.c
++++ b/drivers/md/dm-thin.c
+@@ -1550,12 +1550,12 @@ static int alloc_data_block(struct thin_c *tc, dm_block_t *result)
+ 		}
+ 	}
+ 
+-	r = dm_pool_alloc_data_block(pool->pmd, result);
++	r = dm_thin_alloc_data_block(tc->td, result);
+ 	if (r) {
+ 		if (r == -ENOSPC)
+ 			set_pool_mode(pool, PM_OUT_OF_DATA_SPACE);
+ 		else
+-			metadata_operation_failed(pool, "dm_pool_alloc_data_block", r);
++			metadata_operation_failed(pool, "dm_thin_alloc_data_block", r);
+ 		return r;
+ 	}
+ 
+@@ -3832,6 +3832,117 @@ static int process_release_metadata_snap_mesg(unsigned int argc, char **argv, st
+ 	return r;
+ }
+ 
++/*--------------------------------*/
++
++struct trim_context {
++	struct completion completion;
++	atomic_t pending_bios;
++};
++
++static void discard_endio(struct bio *bio)
++{
++	struct trim_context *ctx = bio->bi_private;
++	if (atomic_dec_and_test(&ctx->pending_bios))
++		complete(&ctx->completion);
++	bio_put(bio);
++}
++
++/**
++ * Discards free space on the data device within a region.  If too many discards are
++ * needed then it will adjust data_begin to indicate the undiscarded remainder.
++ */
++static int trim_region(struct pool *pool, dm_block_t *data_begin,
++		       dm_block_t data_end)
++{
++	int r = 0;
++	dm_block_t b = *data_begin;
++	dm_block_t run_begin, run_end;
++	struct blk_plug plug;
++	struct bio *bio = NULL;
++	sector_t s, len;
++	struct trim_context ctx;
++
++	init_completion(&ctx.completion);
++	atomic_set(&ctx.pending_bios, 0);
++
++	blk_start_plug(&plug);
++
++	while (!r) {
++		r = dm_pool_find_unused_data(pool->pmd, b, data_end, &run_begin,
++					     &run_end);
++		if (r) {
++			if (r == -ENOSPC) {
++				/* nothing more to discard */
++				b = data_end;
++				r = 0;
++			}
++			break;
++		}
++
++		/* queue passdown */
++		s = block_to_sectors(pool, run_begin);
++		len = block_to_sectors(pool, run_end - run_begin);
++		r = __blkdev_issue_discard(pool->data_dev, s, len, GFP_NOIO,
++					   &bio);
++		if (!r && bio) {
++			atomic_inc(&ctx.pending_bios);
++			bio->bi_end_io = discard_endio;
++			bio->bi_private = &ctx;
++		}
++		b = run_end;
++	}
++
++	/* unplug */
++	blk_finish_plug(&plug);
++
++	/* wait for discards to complete */
++	if (atomic_read(&ctx.pending_bios) > 0)
++		wait_for_completion_io(&ctx.completion);
++
++	*data_begin = b;
++	return r;
++}
++
++static int process_trim(unsigned int argc, char **argv, struct pool *pool)
++{
++	int r;
++	dm_block_t begin, end;
++
++	r = check_arg_count(argc, 3);
++	if (r)
++		return r;
++
++	/* parse args */
++	if (kstrtoull(argv[1], 10, (unsigned long long *)&begin)) {
++		DMWARN("trim message: bad begin '%s'", argv[1]);
++		return -EINVAL;
++	}
++
++	if (kstrtoull(argv[1], 10, (unsigned long long *)&end)) {
++		DMWARN("trim message: bad begin '%s'", argv[1]);
++		return -EINVAL;
++	}
++
++	// lock region in allocators
++	r = dm_pool_lock_data_region(pool->pmd, begin, end);
++	if (r) {
++		return r;
++	}
++
++	/* wait for all in flight io to complete so we know the locked region has taken effect */
++
++	while (begin >= end) {
++		r = trim_region(pool, &begin, end);
++		if (r)
++			break;
++	}
++
++	dm_pool_unlock_data_region(pool->pmd, begin, end);
++	return r;
++}
++
++/*--------------------------------*/
++
+ /*
+  * Messages supported:
+  *   create_thin	<dev_id>
+@@ -3840,6 +3951,7 @@ static int process_release_metadata_snap_mesg(unsigned int argc, char **argv, st
+  *   set_transaction_id <current_trans_id> <new_trans_id>
+  *   reserve_metadata_snap
+  *   release_metadata_snap
++ *   trim <data block begin> <data block end>
+  */
+ static int pool_message(struct dm_target *ti, unsigned int argc, char **argv,
+ 			char *result, unsigned int maxlen)
+@@ -3872,6 +3984,9 @@ static int pool_message(struct dm_target *ti, unsigned int argc, char **argv,
+ 	else if (!strcasecmp(argv[0], "release_metadata_snap"))
+ 		r = process_release_metadata_snap_mesg(argc, argv, pool);
+ 
++	else if (!strcasecmp(argv[0], "trim"))
++		r = process_trim(argc, argv, pool);
++
+ 	else
+ 		DMWARN("Unrecognised thin pool target message received: %s", argv[0]);
+ 
+@@ -4112,7 +4227,7 @@ static struct target_type pool_target = {
+ 	.name = "thin-pool",
+ 	.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE |
+ 		    DM_TARGET_IMMUTABLE,
+-	.version = {1, 23, 0},
++	.version = {1, 24, 0},
+ 	.module = THIS_MODULE,
+ 	.ctr = pool_ctr,
+ 	.dtr = pool_dtr,
+diff --git a/drivers/md/persistent-data/dm-space-map-common.c b/drivers/md/persistent-data/dm-space-map-common.c
+index 3a19124ee279..47a3dbefae4c 100644
+--- a/drivers/md/persistent-data/dm-space-map-common.c
++++ b/drivers/md/persistent-data/dm-space-map-common.c
+@@ -138,6 +138,16 @@ static unsigned int dm_bitmap_word_used(void *addr, unsigned int b)
+ 	return !(~bits & mask);
+ }
+ 
++static unsigned int dm_bitmap_word_unused(void *addr, unsigned int b)
++{
++	__le64 *words_le = addr;
++	__le64 *w_le = words_le + (b >> ENTRIES_SHIFT);
++
++	uint64_t bits = le64_to_cpu(*w_le);
++
++	return bits == 0;
++}
++
+ static unsigned int sm_lookup_bitmap(void *addr, unsigned int b)
+ {
+ 	__le64 *words_le = addr;
+@@ -189,6 +199,61 @@ static int sm_find_free(void *addr, unsigned int begin, unsigned int end,
+ 	return -ENOSPC;
+ }
+ 
++static int sm_find_free_run(void *addr, unsigned int begin, unsigned int end,
++			    unsigned int *run_begin, unsigned int *run_end)
++{
++	unsigned int c = begin;
++
++	/* find the start of a free run */
++	while (c < end) {
++		if (!(c & (ENTRIES_PER_WORD - 1))) {
++			if (dm_bitmap_word_unused(addr, c)) {
++				*run_begin = c;
++				break;
++			}
++			if (dm_bitmap_word_used(addr, c)) {
++				c += ENTRIES_PER_WORD;
++				continue;
++			}
++		}
++
++		if (!sm_lookup_bitmap(addr, c)) {
++			*run_begin = c;
++			break;
++		}
++
++		c++;
++	}
++
++	if (c >= end)
++		return -ENOSPC;
++
++	/* find the end of the free run */
++	*run_end = c + 1;
++	while (*run_end < end) {
++		if (!(*run_end & (ENTRIES_PER_WORD - 1))) {
++			if (dm_bitmap_word_used(addr, *run_end))
++				break;
++			if (dm_bitmap_word_unused(addr, *run_end)) {
++				*run_end += ENTRIES_PER_WORD;
++				continue;
++			}
++		}
++
++		if (sm_lookup_bitmap(addr, *run_end))
++			break;
++
++		(*run_end)++;
++	}
++
++	if (*run_end > end) {
++		/* we skipped over a zeroed word and overshot */
++		*run_end = end;
++	}
++
++	return 0;
++}
++
+ /*----------------------------------------------------------------*/
+ 
+ static int sm_ll_init(struct ll_disk *ll, struct dm_transaction_manager *tm)
+@@ -397,7 +462,7 @@ int sm_ll_find_common_free_block(struct ll_disk *old_ll, struct ll_disk *new_ll,
+ 	uint32_t count;
+ 
+ 	do {
+-		r = sm_ll_find_free_block(new_ll, begin, new_ll->nr_blocks, b);
++		r = sm_ll_find_free_block(new_ll, begin, end, b);
+ 		if (r)
+ 			break;
+ 
+@@ -417,6 +482,94 @@ int sm_ll_find_common_free_block(struct ll_disk *old_ll, struct ll_disk *new_ll,
+ 	return r;
+ }
+ 
++int sm_ll_find_free_run(struct ll_disk *ll, dm_block_t begin, dm_block_t end,
++			dm_block_t *result_b, dm_block_t *result_e)
++{
++	int r;
++	struct disk_index_entry ie_disk;
++	dm_block_t i, index_begin = begin;
++	dm_block_t index_end = dm_sector_div_up(end, ll->entries_per_block);
++
++	begin = do_div(index_begin, ll->entries_per_block);
++	end = do_div(end, ll->entries_per_block);
++	if (end == 0)
++		end = ll->entries_per_block;
++
++	for (i = index_begin; i < index_end; i++, begin = 0) {
++		struct dm_block *blk;
++		unsigned int position, run_end;
++		uint32_t bit_end;
++
++		r = ll->load_ie(ll, i, &ie_disk);
++		if (r < 0)
++			return r;
++
++		if (le32_to_cpu(ie_disk.nr_free) == 0)
++			continue;
++
++		r = dm_tm_read_lock(ll->tm, le64_to_cpu(ie_disk.blocknr),
++				    &dm_sm_bitmap_validator, &blk);
++		if (r < 0)
++			return r;
++
++		bit_end = (i == index_end - 1) ? end : ll->entries_per_block;
++
++		r = sm_find_free_run(
++			dm_bitmap_data(blk),
++			max_t(unsigned int, begin,
++			      le32_to_cpu(ie_disk.none_free_before)),
++			bit_end, &position, &run_end);
++
++		dm_tm_unlock(ll->tm, blk);
++
++		if (r == 0) {
++			*result_b = i * ll->entries_per_block +
++				    (dm_block_t)position;
++			*result_e =
++				i * ll->entries_per_block + (dm_block_t)run_end;
++			return 0;
++		}
++
++		if (r != -ENOSPC)
++			return r;
++
++		// If we didn't find a run in this bitmap, continue to the next one
++	}
++
++	return -ENOSPC;
++}
++
++int sm_ll_find_common_free_run(struct ll_disk *old_ll, struct ll_disk *new_ll,
++			       dm_block_t begin, dm_block_t end,
++			       dm_block_t *result_b, dm_block_t *result_e)
++{
++	int r;
++	dm_block_t old_b, old_e, new_b, new_e;
++
++	do {
++		r = sm_ll_find_free_run(new_ll, begin, end, &new_b, &new_e);
++		if (r)
++			return r;
++
++		r = sm_ll_find_free_run(old_ll, new_b, new_e, &old_b, &old_e);
++		if (r == -ENOSPC) {
++			/* No overlap, try again from the end of the new run */
++			begin = new_e;
++			continue;
++		}
++		if (r)
++			return r;
++
++		/* We found an overlapping free run */
++		*result_b = old_b;
++		*result_e = min(old_e, new_e);
++		return 0;
++
++	} while (begin < end);
++
++	return -ENOSPC;
++}
++
+ /*----------------------------------------------------------------*/
+ 
+ int sm_ll_insert(struct ll_disk *ll, dm_block_t b,
+diff --git a/drivers/md/persistent-data/dm-space-map-common.h b/drivers/md/persistent-data/dm-space-map-common.h
+index e83d1f225078..4de203a0036e 100644
+--- a/drivers/md/persistent-data/dm-space-map-common.h
++++ b/drivers/md/persistent-data/dm-space-map-common.h
+@@ -123,6 +123,16 @@ int sm_ll_find_free_block(struct ll_disk *ll, dm_block_t begin,
+ int sm_ll_find_common_free_block(struct ll_disk *old_ll, struct ll_disk *new_ll,
+ 				 dm_block_t begin, dm_block_t end, dm_block_t *result);
+ 
++/* This will not guarantee to return the longest run possible.  The internal
++ * representation may encourage particular boundaries to be observed.
++ */
++int sm_ll_find_free_run(struct ll_disk *ll, dm_block_t begin, dm_block_t end,
++			dm_block_t *result_b, dm_block_t *result_e);
++
++int sm_ll_find_common_free_run(struct ll_disk *old_ll, struct ll_disk *new_ll,
++			       dm_block_t begin, dm_block_t end,
++			       dm_block_t *result_b, dm_block_t *result_e);
++
+ /*
+  * The next three functions return (via nr_allocations) the net number of
+  * allocations that were made.  This number may be negative if there were
+diff --git a/drivers/md/persistent-data/dm-space-map-disk.c b/drivers/md/persistent-data/dm-space-map-disk.c
+index f4241f54e20e..f7fd4f64dbc3 100644
+--- a/drivers/md/persistent-data/dm-space-map-disk.c
++++ b/drivers/md/persistent-data/dm-space-map-disk.c
+@@ -29,7 +29,7 @@ struct sm_disk {
+ 	struct ll_disk old_ll;
+ 
+ 	dm_block_t begin;
+-	dm_block_t nr_allocated_this_transaction;
++	int64_t nr_allocated_this_transaction;
+ };
+ 
+ static void sm_disk_destroy(struct dm_space_map *sm)
+@@ -155,6 +155,28 @@ static int sm_disk_new_block(struct dm_space_map *sm, dm_block_t *b)
+ 	return r;
+ }
+ 
++static int sm_disk_new_block_in_range(struct dm_space_map *sm, dm_block_t b, dm_block_t e, dm_block_t *result)
++{
++	int r;
++	int32_t nr_allocations;
++	struct sm_disk *smd = container_of(sm, struct sm_disk, sm);
++
++	/*
++	 * Any block we allocate has to be free in both the old and current ll.
++	 */
++	r = sm_ll_find_common_free_block(&smd->old_ll, &smd->ll, b, e, result);
++	if (r)
++		return r;
++
++	r = sm_ll_inc(&smd->ll, *result, *result + 1, &nr_allocations);
++	if (!r)
++		smd->nr_allocated_this_transaction += nr_allocations;
++
++	return r;
++}
++
++//--------------------
++
+ static int sm_disk_commit(struct dm_space_map *sm)
+ {
+ 	int r;
+@@ -195,6 +217,29 @@ static int sm_disk_copy_root(struct dm_space_map *sm, void *where_le, size_t max
+ 	return 0;
+ }
+ 
++static int sm_disk_next_free_run(struct dm_space_map *sm, dm_block_t b,
++				 dm_block_t e, dm_block_t *result_b,
++				 dm_block_t *result_e)
++{
++	int r;
++	struct sm_disk *smd = container_of(sm, struct sm_disk, sm);
++
++	/*
++	 * We need to find a run that's free in both the old and current ll.
++	 */
++	r = sm_ll_find_common_free_run(&smd->old_ll, &smd->ll, b, e, result_b,
++				       result_e);
++	if (r)
++		return r;
++
++	/*
++	 * We don't actually allocate the blocks here, just report the free run.
++	 * The caller will decide how to use this information.
++	 */
++
++	return 0;
++}
++
+ /*----------------------------------------------------------------*/
+ 
+ static struct dm_space_map ops = {
+@@ -208,10 +253,12 @@ static struct dm_space_map ops = {
+ 	.inc_blocks = sm_disk_inc_blocks,
+ 	.dec_blocks = sm_disk_dec_blocks,
+ 	.new_block = sm_disk_new_block,
++	.new_block_in_range = sm_disk_new_block_in_range,
+ 	.commit = sm_disk_commit,
+ 	.root_size = sm_disk_root_size,
+ 	.copy_root = sm_disk_copy_root,
+-	.register_threshold_callback = NULL
++	.register_threshold_callback = NULL,
++	.next_free_run = sm_disk_next_free_run,
+ };
+ 
+ struct dm_space_map *dm_sm_disk_create(struct dm_transaction_manager *tm,
+diff --git a/drivers/md/persistent-data/dm-space-map-metadata.c b/drivers/md/persistent-data/dm-space-map-metadata.c
+index d48c4fafc779..3df0f6a11d87 100644
+--- a/drivers/md/persistent-data/dm-space-map-metadata.c
++++ b/drivers/md/persistent-data/dm-space-map-metadata.c
+@@ -574,6 +574,7 @@ static const struct dm_space_map ops = {
+ 	.commit = sm_metadata_commit,
+ 	.root_size = sm_metadata_root_size,
+ 	.copy_root = sm_metadata_copy_root,
++	.next_free_run = NULL,
+ 	.register_threshold_callback = sm_metadata_register_threshold_callback
+ };
+ 
+@@ -653,6 +654,13 @@ static int sm_bootstrap_new_block(struct dm_space_map *sm, dm_block_t *b)
+ 	return 0;
+ }
+ 
++static int sm_bootstrap_new_block_in_range(struct dm_space_map *sm,
++					   dm_block_t b, dm_block_t e,
++					   dm_block_t *result)
++{
++	BUG();
++}
++
+ static int sm_bootstrap_inc_blocks(struct dm_space_map *sm, dm_block_t b, dm_block_t e)
+ {
+ 	int r;
+@@ -708,9 +716,11 @@ static const struct dm_space_map bootstrap_ops = {
+ 	.inc_blocks = sm_bootstrap_inc_blocks,
+ 	.dec_blocks = sm_bootstrap_dec_blocks,
+ 	.new_block = sm_bootstrap_new_block,
++	.new_block_in_range = sm_bootstrap_new_block_in_range,
+ 	.commit = sm_bootstrap_commit,
+ 	.root_size = sm_bootstrap_root_size,
+ 	.copy_root = sm_bootstrap_copy_root,
++	.next_free_run = NULL,
+ 	.register_threshold_callback = NULL
+ };
+ 
+diff --git a/drivers/md/persistent-data/dm-space-map.h b/drivers/md/persistent-data/dm-space-map.h
+index 6bf69922b5ad..22b4409b725d 100644
+--- a/drivers/md/persistent-data/dm-space-map.h
++++ b/drivers/md/persistent-data/dm-space-map.h
+@@ -40,7 +40,8 @@ struct dm_space_map {
+ 	 */
+ 	int (*get_nr_free)(struct dm_space_map *sm, dm_block_t *count);
+ 
+-	int (*get_count)(struct dm_space_map *sm, dm_block_t b, uint32_t *result);
++	int (*get_count)(struct dm_space_map *sm, dm_block_t b,
++			 uint32_t *result);
+ 	int (*count_is_more_than_one)(struct dm_space_map *sm, dm_block_t b,
+ 				      int *result);
+ 	int (*set_count)(struct dm_space_map *sm, dm_block_t b, uint32_t count);
+@@ -54,6 +55,8 @@ struct dm_space_map {
+ 	 * new_block will increment the returned block.
+ 	 */
+ 	int (*new_block)(struct dm_space_map *sm, dm_block_t *b);
++	int (*new_block_in_range)(struct dm_space_map *sm, dm_block_t b,
++				  dm_block_t e, dm_block_t *result);
+ 
+ 	/*
+ 	 * The root contains all the information needed to fix the space map.
+@@ -61,7 +64,8 @@ struct dm_space_map {
+ 	 * along with other info.
+ 	 */
+ 	int (*root_size)(struct dm_space_map *sm, size_t *result);
+-	int (*copy_root)(struct dm_space_map *sm, void *copy_to_here_le, size_t len);
++	int (*copy_root)(struct dm_space_map *sm, void *copy_to_here_le,
++			 size_t len);
+ 
+ 	/*
+ 	 * You can register one threshold callback which is edge-triggered
+@@ -71,6 +75,14 @@ struct dm_space_map {
+ 					   dm_block_t threshold,
+ 					   dm_sm_threshold_fn fn,
+ 					   void *context);
++
++	/*
++	 * Find the next run of free blocks in within the given range.
++	 * We don't allocate the blocks here, just report the free run.
++         */
++	int (*next_free_run)(struct dm_space_map *sm, dm_block_t b,
++			     dm_block_t e, dm_block_t *result_b,
++			     dm_block_t *result_e);
+ };
+ 
+ /*----------------------------------------------------------------*/
+@@ -86,7 +98,8 @@ static inline int dm_sm_extend(struct dm_space_map *sm, dm_block_t extra_blocks)
+ 	return sm->extend(sm, extra_blocks);
+ }
+ 
+-static inline int dm_sm_get_nr_blocks(struct dm_space_map *sm, dm_block_t *count)
++static inline int dm_sm_get_nr_blocks(struct dm_space_map *sm,
++				      dm_block_t *count)
+ {
+ 	return sm->get_nr_blocks(sm, count);
+ }
+@@ -119,7 +132,8 @@ static inline int dm_sm_commit(struct dm_space_map *sm)
+ 	return sm->commit(sm);
+ }
+ 
+-static inline int dm_sm_inc_blocks(struct dm_space_map *sm, dm_block_t b, dm_block_t e)
++static inline int dm_sm_inc_blocks(struct dm_space_map *sm, dm_block_t b,
++				   dm_block_t e)
+ {
+ 	return sm->inc_blocks(sm, b, e);
+ }
+@@ -129,7 +143,8 @@ static inline int dm_sm_inc_block(struct dm_space_map *sm, dm_block_t b)
+ 	return dm_sm_inc_blocks(sm, b, b + 1);
+ }
+ 
+-static inline int dm_sm_dec_blocks(struct dm_space_map *sm, dm_block_t b, dm_block_t e)
++static inline int dm_sm_dec_blocks(struct dm_space_map *sm, dm_block_t b,
++				   dm_block_t e)
+ {
+ 	return sm->dec_blocks(sm, b, e);
+ }
+@@ -144,26 +159,45 @@ static inline int dm_sm_new_block(struct dm_space_map *sm, dm_block_t *b)
+ 	return sm->new_block(sm, b);
+ }
+ 
++static inline int dm_sm_new_block_in_range(struct dm_space_map *sm,
++					   dm_block_t b, dm_block_t e,
++					   dm_block_t *result)
++{
++	return sm->new_block_in_range(sm, b, e, result);
++}
++
+ static inline int dm_sm_root_size(struct dm_space_map *sm, size_t *result)
+ {
+ 	return sm->root_size(sm, result);
+ }
+ 
+-static inline int dm_sm_copy_root(struct dm_space_map *sm, void *copy_to_here_le, size_t len)
++static inline int dm_sm_copy_root(struct dm_space_map *sm,
++				  void *copy_to_here_le, size_t len)
+ {
+ 	return sm->copy_root(sm, copy_to_here_le, len);
+ }
+ 
++static inline int dm_sm_next_free_run(struct dm_space_map *sm, dm_block_t begin,
++				      dm_block_t end, dm_block_t *result_begin,
++				      dm_block_t *result_end)
++{
++	if (sm->next_free_run) {
++		return sm->next_free_run(sm, begin, end, result_begin,
++					 result_end);
++	}
++	return -EINVAL;
++}
++
+ static inline int dm_sm_register_threshold_callback(struct dm_space_map *sm,
+ 						    dm_block_t threshold,
+ 						    dm_sm_threshold_fn fn,
+ 						    void *context)
+ {
+ 	if (sm->register_threshold_callback)
+-		return sm->register_threshold_callback(sm, threshold, fn, context);
++		return sm->register_threshold_callback(sm, threshold, fn,
++						       context);
+ 
+ 	return -EINVAL;
+ }
+ 
+-
+-#endif	/* _LINUX_DM_SPACE_MAP_H */
++#endif /* _LINUX_DM_SPACE_MAP_H */

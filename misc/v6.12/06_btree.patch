@@ -1,0 +1,13 @@
+diff --git a/drivers/md/persistent-data/dm-btree.c b/drivers/md/persistent-data/dm-btree.c
+index 0c7a2e8d1846..8e93c9c56608 100644
+--- a/drivers/md/persistent-data/dm-btree.c
++++ b/drivers/md/persistent-data/dm-btree.c
+@@ -579,7 +579,7 @@ static void redistribute2(struct btree_node *left, struct btree_node *right)
+  * Redistribute entries between three nodes.  Assumes the central
+  * node is empty.
+  */
+-static void redistribute3(struct btree_node *left, struct btree_node *center,
++extern void redistribute3(struct btree_node *left, struct btree_node *center,
+ 			  struct btree_node *right)
+ {
+ 	unsigned int nr_left = le32_to_cpu(left->header.nr_entries);

@@ -1,0 +1,14 @@
+diff --git a/.gitignore b/.gitignore
+index 56972adb5031..f56a8c536c4e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -38,7 +38,9 @@
+ *.mod.c
+ *.o
+ *.o.*
++*.orig
+ *.patch
++*.rej
+ *.rmeta
+ *.rpm
+ *.rsi

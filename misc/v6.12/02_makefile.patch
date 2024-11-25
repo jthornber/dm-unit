@@ -1,0 +1,35 @@
+diff --git a/Makefile b/Makefile
+index 68a8faff2543..52521eafedd5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -877,6 +877,13 @@ ifdef CONFIG_ZERO_CALL_USED_REGS
+ KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
+ endif
+ 
++ifdef CONFIG_NO_AUTO_INLINE
++KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
++		   $(call cc-option, -fno-inline-small-functions) \
++		   $(call cc-option, -fno-inline-functions-called-once) \
++		   -fno-ipa-cp -fno-ipa-sra -fno-tree-dce
++endif
++
+ ifdef CONFIG_FUNCTION_TRACER
+ ifdef CONFIG_FTRACE_MCOUNT_USE_CC
+   CC_FLAGS_FTRACE	+= -mrecord-mcount
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index fa8f2da87a0a..bb9187b7183d 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -1050,11 +1050,8 @@ config DMI
+ 	  However, even with this option, the resultant kernel should
+ 	  continue to boot on existing non-UEFI platforms.
+ 
+-config CC_HAVE_STACKPROTECTOR_TLS
+-	def_bool $(cc-option,-mstack-protector-guard=tls -mstack-protector-guard-reg=tp -mstack-protector-guard-offset=0)
+-
+ config STACKPROTECTOR_PER_TASK
+-	def_bool y
++	def_bool n
+ 	depends on !RANDSTRUCT
+ 	depends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_TLS
+ 

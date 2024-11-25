@@ -1,0 +1,67 @@
+diff --git a/include/linux/slab.h b/include/linux/slab.h
+index b35e2db7eb0e..875d55ef8ddb 100644
+--- a/include/linux/slab.h
++++ b/include/linux/slab.h
+@@ -866,8 +896,10 @@ void *__kmalloc_large_node_noprof(size_t size, gfp_t flags, int node)
+  *	Try really hard to succeed the allocation but fail
+  *	eventually.
+  */
+-static __always_inline __alloc_size(1) void *kmalloc_noprof(size_t size, gfp_t flags)
++static __always_inline __alloc_size(1) void *kmalloc_noprof(size_t size,
++							    gfp_t flags)
+ {
++#if 0
+ 	if (__builtin_constant_p(size) && size) {
+ 		unsigned int index;
+ 
+@@ -879,18 +911,25 @@ static __always_inline __alloc_size(1) void *kmalloc_noprof(size_t size, gfp_t f
+ 				kmalloc_caches[kmalloc_type(flags, _RET_IP_)][index],
+ 				flags, size);
+ 	}
++#endif
+ 	return __kmalloc_noprof(size, flags);
+ }
+-#define kmalloc(...)				alloc_hooks(kmalloc_noprof(__VA_ARGS__))
++#define kmalloc(...) alloc_hooks(kmalloc_noprof(__VA_ARGS__))
+ 
+-#define kmem_buckets_alloc(_b, _size, _flags)	\
+-	alloc_hooks(__kmalloc_node_noprof(PASS_BUCKET_PARAMS(_size, _b), _flags, NUMA_NO_NODE))
++#define kmem_buckets_alloc(_b, _size, _flags)                            \
++	alloc_hooks(__kmalloc_node_noprof(PASS_BUCKET_PARAMS(_size, _b), \
++					  _flags, NUMA_NO_NODE))
+ 
+-#define kmem_buckets_alloc_track_caller(_b, _size, _flags)	\
+-	alloc_hooks(__kmalloc_node_track_caller_noprof(PASS_BUCKET_PARAMS(_size, _b), _flags, NUMA_NO_NODE, _RET_IP_))
++#define kmem_buckets_alloc_track_caller(_b, _size, _flags)           \
++	alloc_hooks(__kmalloc_node_track_caller_noprof(              \
++		PASS_BUCKET_PARAMS(_size, _b), _flags, NUMA_NO_NODE, \
++		_RET_IP_))
+ 
+-static __always_inline __alloc_size(1) void *kmalloc_node_noprof(size_t size, gfp_t flags, int node)
++static __always_inline __alloc_size(1) void *kmalloc_node_noprof(size_t size,
++								 gfp_t flags,
++								 int node)
+ {
++#if 0
+ 	if (__builtin_constant_p(size) && size) {
+ 		unsigned int index;
+ 
+@@ -899,12 +938,14 @@ static __always_inline __alloc_size(1) void *kmalloc_node_noprof(size_t size, gf
+ 
+ 		index = kmalloc_index(size);
+ 		return __kmalloc_cache_node_noprof(
+-				kmalloc_caches[kmalloc_type(flags, _RET_IP_)][index],
+-				flags, node, size);
++			kmalloc_caches[kmalloc_type(flags, _RET_IP_)][index],
++			flags, node, size);
+ 	}
+-	return __kmalloc_node_noprof(PASS_BUCKET_PARAMS(size, NULL), flags, node);
++#endif
++	return __kmalloc_node_noprof(PASS_BUCKET_PARAMS(size, NULL), flags,
++				     node);
+ }
+-#define kmalloc_node(...)			alloc_hooks(kmalloc_node_noprof(__VA_ARGS__))
++#define kmalloc_node(...) alloc_hooks(kmalloc_node_noprof(__VA_ARGS__))
+ 
+ /**
+  * kmalloc_array - allocate memory for an array.

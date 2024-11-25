@@ -1,0 +1,51 @@
+diff --git a/drivers/md/dm-bufio.c b/drivers/md/dm-bufio.c
+index 23e0b71b991e..c0437fdcd6f3 100644
+--- a/drivers/md/dm-bufio.c
++++ b/drivers/md/dm-bufio.c
+@@ -114,7 +114,7 @@ static void lru_destroy(struct lru *lru)
+ /*
+  * Insert a new entry into the lru.
+  */
+-static void lru_insert(struct lru *lru, struct lru_entry *le)
++static noinline void lru_insert(struct lru *lru, struct lru_entry *le)
+ {
+ 	/*
+ 	 * Don't be tempted to set to 1, makes the lru aspect
+@@ -235,7 +235,7 @@ static void lru_remove(struct lru *lru, struct lru_entry *le)
+ /*
+  * Mark as referenced.
+  */
+-static inline void lru_reference(struct lru_entry *le)
++static noinline void lru_reference(struct lru_entry *le)
+ {
+ 	atomic_set(&le->referenced, 1);
+ }
+@@ -254,7 +254,8 @@ enum evict_result {
+ 
+ typedef enum evict_result (*le_predicate)(struct lru_entry *le, void *context);
+ 
+-static struct lru_entry *lru_evict(struct lru *lru, le_predicate pred, void *context, bool no_sleep)
++struct lru_entry *lru_evict(struct lru *lru, le_predicate pred, void *context,
++			    bool no_sleep)
+ {
+ 	unsigned long tested = 0;
+ 	struct list_head *h = lru->cursor;
+@@ -551,7 +565,7 @@ static void cache_init(struct dm_buffer_cache *bc, unsigned int num_locks, bool
+ 	lru_init(&bc->lru[LIST_DIRTY]);
+ }
+ 
+-static void cache_destroy(struct dm_buffer_cache *bc)
++static noinline void cache_destroy(struct dm_buffer_cache *bc)
+ {
+ 	unsigned int i;
+ 
+@@ -845,7 +865,8 @@ static bool __cache_insert(struct rb_root *root, struct dm_buffer *b)
+ 	return true;
+ }
+ 
+-static bool cache_insert(struct dm_buffer_cache *bc, struct dm_buffer *b)
++static noinline bool cache_insert(struct dm_buffer_cache *bc,
++				  struct dm_buffer *b)
+ {
+ 	bool r;
+ 
