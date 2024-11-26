@@ -346,9 +346,10 @@ fn opt_gtoh(instrs: &[IR]) -> Vec<IR> {
     let mut ranges = Vec::new();
     for i in instrs {
         if let Assign {
-                rval: Gtoh { guest, len, perms },
-                ..
-            } = i {
+            rval: Gtoh { guest, len, perms },
+            ..
+        } = i
+        {
             if let Some(range) = extract_range(guest, *len, *perms, &defs) {
                 ranges.push(range);
             }

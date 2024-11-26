@@ -22,7 +22,6 @@ pub struct LockCheck {
     spin_count: usize,
 }
 
-
 impl LockCheck {
     pub fn lock(&mut self, lock_type: LockType, lock_addr: Addr, pc: Addr) {
         self.locks.push(Lock {

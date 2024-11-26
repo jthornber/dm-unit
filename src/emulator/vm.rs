@@ -893,12 +893,7 @@ impl VM {
 
         bb.hits += 1;
 
-        if self.jit
-            && !bb.breakpoint
-            && bb.hits > 10
-            && bb.instrs.len() >= 4
-            && bb.ir.is_none()
-        {
+        if self.jit && !bb.breakpoint && bb.hits > 10 && bb.instrs.len() >= 4 && bb.ir.is_none() {
             debug!("riscv ({} instructions):", bb.instrs.len());
             for (inst, _width) in &bb.instrs {
                 debug!("    {}", inst);
