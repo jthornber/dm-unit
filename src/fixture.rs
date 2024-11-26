@@ -11,7 +11,6 @@ use crate::lock_check::*;
 use anyhow::{anyhow, Context, Result};
 use log::*;
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::c_int;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -91,6 +90,44 @@ pub const CACHE_SMQ_MOD: KernelModule = KernelModule {
     basename: "dm-cache-smq",
     relative_path: "drivers/md/dm-cache-smq.ko",
 };
+
+#[derive(Debug)]
+pub struct CallError {
+    pub func: String,
+    pub ret: i32,
+}
+
+impl CallError {
+    pub fn new(func: &str, ret: i32) -> Self {
+        Self {
+            func: func.to_string(),
+            ret,
+        }
+    }
+
+    pub fn errno(&self) -> Option<i32> {
+        match self.ret {
+            r if r < 0 => Some(-r),
+            _ => None,
+        }
+    }
+
+    pub fn is_errno(&self, errno: std::ffi::c_int) -> bool {
+        self.ret == -errno
+    }
+}
+
+impl std::error::Error for CallError {}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.ret < 0 {
+            write!(f, "{} failed: {}", self.func, error_string(-self.ret))
+        } else {
+            write!(f, "{} failed: {}", self.func, self.ret)
+        }
+    }
+}
 
 impl Fixture {
     pub fn prep_memory<P: AsRef<Path> + Clone>(
@@ -290,22 +327,21 @@ impl Fixture {
         Ok(())
     }
 
-    pub fn call_return_errno(&mut self, func: &str) -> Result<c_int> {
-        self.call_at(self.lookup_fn(func)?)?;
-        let r = self.vm.reg(A0) as i64 as i32;
-        Ok(r)
-    }
-
     // Use this to call functions that return an int errno.
+    // To extract the returned errno, the caller has to downcast the returned
+    // error object to CallError, e.g.,
+    //
+    // let e = fix.call_with_errno("dm_btree_cursor_next").unwrap_err();
+    // assert!(matches!(e.downcast_ref::<CallError>(),
+    //   Some(err) if err.is_errno(libc::ENODATA)
+    // ));
+    // assert_eq!(e.downcast_ref::<CallError>().and_then(|err| err.errno()),
+    //   Some(libc::ENODATA));
     pub fn call_with_errno(&mut self, tm_func: &str) -> Result<()> {
         self.call(tm_func)?;
         let r = self.vm.reg(A0) as i64 as i32;
         if r != 0 {
-            if r < 0 {
-                return Err(anyhow!("{} failed: {}", tm_func, error_string(-r)));
-            }
-
-            return Err(anyhow!("{} failed: {}", tm_func, r));
+            return Err(anyhow::Error::new(CallError::new(tm_func, r)));
         }
         Ok(())
     }
@@ -314,11 +350,10 @@ impl Fixture {
         self.call_at(loc)?;
         let r = self.vm.reg(A0) as i64 as i32;
         if r != 0 {
-            if r < 0 {
-                return Err(anyhow!("failed: {}", error_string(-r)));
-            }
-
-            return Err(anyhow!("failed: {}", r));
+            return Err(anyhow::Error::new(CallError::new(
+                &format!("call_at {:#x}", loc.0),
+                r,
+            )));
         }
         Ok(())
     }
