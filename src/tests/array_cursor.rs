@@ -1,12 +1,15 @@
+use crate::emulator::memory::Addr;
 use crate::fixture::*;
 use crate::stubs::*;
 use crate::test_runner::*;
+use crate::tests::array::MAX_U64_ENTRIES_PER_BLOCK;
 use crate::tests::array_metadata::ArrayMetadata;
 use crate::wrappers::array_cursor::*;
 
 use anyhow::{anyhow, Result};
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
+use thinp::pdata::btree_walker::btree_to_value_vec;
 
 //-------------------------------
 
@@ -81,6 +84,38 @@ fn test_iterate_populated_array(fix: &mut Fixture) -> Result<()> {
     iterate_populated_array(fix, 1024)
 }
 
+fn test_damaged_array_blocks(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut md = ArrayMetadata::new(fix)?;
+    md.begin()?;
+    md.resize(1024, 0)?;
+    md.commit()?;
+
+    // trash the first array block and remove its validator
+    let bm = md.get_bm();
+    let ablocks = btree_to_value_vec(&mut vec![], bm.clone(), false, md.root())?;
+    let lock = bm.write_lock_zero(md.fixture_mut(), ablocks[0], Addr(0))?;
+    bm.unlock(md.fixture_mut(), lock)?;
+    drop(bm);
+
+    md.begin()?;
+
+    // dm_array_cursor_begin() should fail due to unexpected block type
+    let e = md.get_cursor().unwrap_err();
+
+    // The BlockManager stub is expected to return EINVAL on validator mismatch,
+    // like the dm_bm_validate_buffer() does.
+    // Avoid using the ensure!() macro to compare the error type, as it prevents
+    // the original error from being returned directly.
+    let errno = e.downcast_ref::<CallError>().and_then(|err| err.errno());
+    if errno != Some(libc::EINVAL) {
+        return Err(e);
+    }
+
+    Ok(())
+}
+
 //-------------------------------
 
 pub fn register_tests(tests: &mut TestSet) -> Result<()> {
@@ -111,6 +146,11 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
             "iterate/",
             test!("empty", test_iterate_empty_array)
             test!("populated", test_iterate_populated_array)
+        }
+
+        test_section! {
+            "damaged/",
+            test!("array_blocks", test_damaged_array_blocks)
         }
     };
 
