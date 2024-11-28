@@ -83,7 +83,7 @@ pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
     let v_ptr = Addr(fix.vm.reg(A2));
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
-    let guest_ptr = bm.read_lock(&mut fix.vm.mem, loc, v_ptr)?;
+    let guest_ptr = bm.read_lock(fix, loc, v_ptr)?;
 
     // fill out result ptr
     fix.vm
@@ -104,9 +104,9 @@ fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
     let guest_addr = if zero {
-        bm.write_lock_zero(&mut fix.vm.mem, loc, v_ptr)?
+        bm.write_lock_zero(fix, loc, v_ptr)?
     } else {
-        bm.write_lock(&mut fix.vm.mem, loc, v_ptr)?
+        bm.write_lock(fix, loc, v_ptr)?
     };
 
     // fill out result ptr
