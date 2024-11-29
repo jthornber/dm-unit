@@ -83,15 +83,27 @@ pub fn bm_read_lock(fix: &mut Fixture) -> Result<()> {
     let v_ptr = Addr(fix.vm.reg(A2));
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
-    let guest_ptr = bm.read_lock(fix, loc, v_ptr)?;
 
-    // fill out result ptr
+    let (guest_ptr, r) = match bm.read_lock(fix, loc, v_ptr) {
+        Ok(ptr) => (ptr, 0),
+        Err(e) => {
+            let r = e
+                .downcast_ref::<CallError>()
+                .map_or(-libc::EPERM as i64 as u64, |err| err.ret as i64 as u64);
+            (Addr(0xDEADBEEFDEADBEEF), r)
+        }
+    };
+
+    // Fill out result ptr.
+    // To accurately simulate the behavior dm_bm_read_lock() and test error handling,
+    // this stub function returns an invalid pointer to the guest when error occurs.
+    // The guest is expected to ignore the invalid pointer in such cases.
     fix.vm
         .mem
         .write_out::<u64>(guest_ptr.0, Addr(result_ptr), PERM_WRITE)?;
 
-    // return success
-    fix.vm.ret(0);
+    // return errno
+    fix.vm.ret(r);
     Ok(())
 }
 
@@ -103,19 +115,33 @@ fn write_lock_(fix: &mut Fixture, zero: bool) -> Result<()> {
     let v_ptr = Addr(fix.vm.reg(A2));
     let result_ptr = fix.vm.reg(A3);
     let bm = get_bm(fix, bm_ptr);
-    let guest_addr = if zero {
-        bm.write_lock_zero(fix, loc, v_ptr)?
+
+    let lock_ret = if zero {
+        bm.write_lock_zero(fix, loc, v_ptr)
     } else {
-        bm.write_lock(fix, loc, v_ptr)?
+        bm.write_lock(fix, loc, v_ptr)
     };
 
-    // fill out result ptr
+    let (guest_addr, r) = match lock_ret {
+        Ok(ptr) => (ptr, 0),
+        Err(e) => {
+            let r = e
+                .downcast_ref::<CallError>()
+                .map_or(-libc::EPERM as i64 as u64, |err| err.ret as i64 as u64);
+            (Addr(0xDEADBEEFDEADBEEF), r)
+        }
+    };
+
+    // Fill out result ptr.
+    // To accurately simulate the behavior dm_bm_write_lock() and test error handling,
+    // this stub function returns an invalid pointer to the guest when error occurs.
+    // The guest is expected to ignore the invalid pointer in such cases.
     fix.vm
         .mem
         .write_out::<u64>(guest_addr.0, Addr(result_ptr), PERM_WRITE)?;
 
-    // return success
-    fix.vm.ret(0);
+    // return errno
+    fix.vm.ret(r);
     Ok(())
 }
 
