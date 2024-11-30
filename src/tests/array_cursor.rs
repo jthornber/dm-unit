@@ -116,6 +116,104 @@ fn test_damaged_array_blocks(fix: &mut Fixture) -> Result<()> {
     Ok(())
 }
 
+fn test_cursor_skip(fix: &mut Fixture, counts: &[u32]) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut md = ArrayMetadata::new(fix)?;
+    md.begin()?;
+    md.resize(1024, 0)?;
+    (0..1024).try_for_each(|i| md.set_value(i, &(i as u64)))?;
+    md.commit()?;
+    md.begin()?;
+
+    let mut c = md.get_cursor()?;
+    let mut ret = Ok(());
+    let mut expected = 0;
+    for cnt in counts {
+        dm_array_cursor_skip(md.fixture_mut(), &mut c, *cnt)?;
+        let v = dm_array_cursor_get_value(md.fixture_mut(), &c)?;
+        expected += *cnt;
+        if v != expected as u64 {
+            ret = Err(anyhow!("value mismatch: expected {}, actual {}", expected, v));
+            break;
+        }
+    }
+    dm_array_cursor_end(md.fixture_mut(), &mut c)?;
+    free_array_cursor(md.fixture_mut(), c)?;
+
+    ret
+}
+
+fn test_cursor_skip_pass_the_end(fix: &mut Fixture) -> Result<()> {
+    standard_globals(fix)?;
+
+    let mut md = ArrayMetadata::new(fix)?;
+    md.begin()?;
+    md.resize(1024, 0)?;
+    (0..1024).try_for_each(|i| md.set_value(i, &(i as u64)))?;
+    md.commit()?;
+    md.begin()?;
+
+    let mut c = md.get_cursor()?;
+    let e = dm_array_cursor_skip(md.fixture_mut(), &mut c, 1024).unwrap_err();
+
+    // dm_array_cursor_skip() should fail if there's no more data
+    let errno = e.downcast_ref::<CallError>().and_then(|err| err.errno());
+
+    dm_array_cursor_end(md.fixture_mut(), &mut c)?;
+    free_array_cursor(md.fixture_mut(), c)?;
+
+    if errno != Some(libc::ENODATA) {
+        return Err(e);
+    }
+
+    Ok(())
+}
+
+fn test_skip_from_zero_to_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK - 1])
+}
+
+fn test_skip_from_zero_across_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK])
+}
+
+fn test_skip_from_zero_to_next_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK * 2 - 1])
+}
+
+fn test_skip_from_zero_across_next_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK * 2])
+}
+
+fn test_skip_from_non_zero_to_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[10, MAX_U64_ENTRIES_PER_BLOCK - 11])
+}
+
+fn test_skip_from_non_zero_across_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[10, MAX_U64_ENTRIES_PER_BLOCK - 10])
+}
+
+fn test_skip_from_non_zero_to_next_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[10, MAX_U64_ENTRIES_PER_BLOCK * 2 - 11])
+}
+
+fn test_skip_from_non_zero_across_next_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[10, MAX_U64_ENTRIES_PER_BLOCK * 2 - 10])
+}
+
+fn test_skip_from_aligned_across_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK - 1, 1])
+}
+
+fn test_skip_from_aligned_to_next_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK - 1, MAX_U64_ENTRIES_PER_BLOCK])
+}
+
+fn test_skip_from_aligned_across_next_boundary(fix: &mut Fixture) -> Result<()> {
+    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK - 1, MAX_U64_ENTRIES_PER_BLOCK + 1])
+}
+
 //-------------------------------
 
 pub fn register_tests(tests: &mut TestSet) -> Result<()> {
@@ -146,6 +244,31 @@ pub fn register_tests(tests: &mut TestSet) -> Result<()> {
             "iterate/",
             test!("empty", test_iterate_empty_array)
             test!("populated", test_iterate_populated_array)
+        }
+
+        test!("skip/pass_the_end", test_cursor_skip_pass_the_end)
+
+        test_section! {
+            "skip/from_zero/",
+            test!("to_boundary", test_skip_from_zero_to_boundary)
+            test!("across_boundary", test_skip_from_zero_across_boundary)
+            test!("to_next_boundary", test_skip_from_zero_to_next_boundary)
+            test!("across_next_boundary", test_skip_from_zero_across_next_boundary)
+        }
+
+        test_section! {
+            "skip/from_non_zero/",
+            test!("to_boundary", test_skip_from_non_zero_to_boundary)
+            test!("across_boundary", test_skip_from_non_zero_across_boundary)
+            test!("to_next_boundary", test_skip_from_non_zero_to_next_boundary)
+            test!("across_next_boundary", test_skip_from_non_zero_across_next_boundary)
+        }
+
+        test_section! {
+            "skip/from_aligned/",
+            test!("across_boundary", test_skip_from_aligned_across_boundary)
+            test!("to_next_boundary", test_skip_from_aligned_to_next_boundary)
+            test!("across_next_boundary", test_skip_from_aligned_across_next_boundary)
         }
 
         test_section! {
