@@ -16,18 +16,10 @@ pub struct Lock {
     pub pc: Addr,
 }
 
+#[derive(Default)]
 pub struct LockCheck {
     locks: Vec<Lock>,
     spin_count: usize,
-}
-
-impl Default for LockCheck {
-    fn default() -> Self {
-        LockCheck {
-            locks: Vec::new(),
-            spin_count: 0,
-        }
-    }
 }
 
 impl LockCheck {

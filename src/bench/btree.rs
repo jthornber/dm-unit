@@ -37,10 +37,10 @@ fn do_insert_bench_(
 
         btree.begin()?;
         for k in chunk {
-            insert_tracker.begin(btree.fix, &bm);
+            insert_tracker.begin(btree.md.fixture(), &bm);
             btree.insert(*k)?;
             if track_insertion {
-                insert_tracker.end(btree.fix, &bm)?;
+                insert_tracker.end(btree.md.fixture(), &bm)?;
             }
         }
         btree.commit()?;
@@ -55,7 +55,7 @@ fn do_insert_bench_(
             total,
             stats.nr_leaves,
             stats.nr_entries,
-            residency::<Value64>(&stats)?,
+            residency::<u64>(&stats)?,
             delta.instrs / chunk.len() as u64,
             delta.read_locks / chunk.len() as u64,
             delta.write_locks / chunk.len() as u64,
@@ -101,7 +101,7 @@ fn do_lookup_bench_(fix: &mut Fixture, keys: &[u64], commit_interval: usize) -> 
             total,
             stats.nr_leaves,
             stats.nr_entries,
-            residency::<Value64>(&stats)?,
+            residency::<u64>(&stats)?,
             delta.instrs / chunk.len() as u64,
             delta.read_locks / chunk.len() as u64,
             delta.write_locks / chunk.len() as u64,

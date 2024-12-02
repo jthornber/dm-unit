@@ -11,6 +11,12 @@ pub struct PathFormatter {
     last_path: Vec<String>,
 }
 
+impl Default for PathFormatter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PathFormatter {
     pub fn new() -> Self {
         PathFormatter {

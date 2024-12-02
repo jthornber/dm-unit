@@ -556,7 +556,7 @@ impl Memory {
     {
         // We allocate an extra double word before and after the block to
         // detect overwrites.
-        let len = count as usize;
+        let len = count;
         let heap_len = len + 8;
         let heap_ptr = self.heap.alloc(heap_len)?;
 
@@ -598,7 +598,7 @@ impl Memory {
 
         // mmap just the central part that may be used.
         let align = align as u64;
-        let next = ((heap_ptr.0 + 8 + align - 1) / align) * align;
+        let next = (heap_ptr.0 + 8).div_ceil(align) * align;
         let ptr = Addr(next);
         self.mmap_bytes(ptr, bytes, perms)?;
         self.allocations
@@ -640,7 +640,7 @@ impl Memory {
     /// this number is only really useful to spot memory leaks.
     pub fn total_allocated(&self) -> u64 {
         let mut total = 0;
-        for (_ptr, MEntry { len, .. }) in &self.allocations {
+        for MEntry { len, .. } in self.allocations.values() {
             total += len;
         }
 
@@ -784,7 +784,7 @@ pub struct Heap {
 impl Heap {
     pub fn new(begin: Addr, end: Addr) -> Self {
         let len = end.0 - begin.0;
-        assert!(len.count_ones() == 1);
+        assert!(len.is_power_of_two());
         let order = len.trailing_zeros() as usize;
         let order = order - MIN_BLOCK_SHIFT;
         let allocator = BuddyAllocator::new(order);

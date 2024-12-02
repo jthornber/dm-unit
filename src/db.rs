@@ -164,7 +164,7 @@ impl TestResults {
         let mut stmt = self.conn.prepare("SELECT result_set FROM result_sets")?;
 
         let rows = stmt
-            .query_map(params![], |row| Ok(row.get::<_, String>(0)?))
+            .query_map(params![], |row| row.get::<_, String>(0))
             .unwrap();
 
         let mut results = Vec::new();

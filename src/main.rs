@@ -4,8 +4,11 @@ use dm_unit::bench;
 use dm_unit::capture_log::*;
 use dm_unit::path_formatter::*;
 use dm_unit::test_runner::*;
+use dm_unit::tests::array;
+use dm_unit::tests::array_cursor;
 use dm_unit::tests::block_manager;
 use dm_unit::tests::btree;
+use dm_unit::tests::btree_cursor;
 use dm_unit::tests::bufio;
 use dm_unit::tests::cache;
 use dm_unit::tests::extent_allocator;
@@ -25,9 +28,12 @@ use std::sync::{Arc, Mutex};
 fn all_tests() -> Result<TestSet> {
     let mut tests = TestSet::default();
 
+    array::register_tests(&mut tests)?;
+    array_cursor::register_tests(&mut tests)?;
     bufio::register_tests(&mut tests)?;
     block_manager::register_tests(&mut tests)?;
     btree::register_tests(&mut tests)?;
+    btree_cursor::register_tests(&mut tests)?;
     cache::register_tests(&mut tests)?;
     extent_allocator::register_tests(&mut tests)?;
     space_map_disk::register_tests(&mut tests)?;

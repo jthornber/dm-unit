@@ -412,7 +412,7 @@ fn test_lock_unlock_region(fix: &mut Fixture) -> Result<()> {
         let block = alloc_context_alloc(fix, context, &allocated)?;
         ensure!(block.is_some());
         let block = block.unwrap();
-        ensure!(block < 100 || block >= 200);
+        ensure!(!(100..200).contains(&block));
     }
 
     // Unlock the region
@@ -422,7 +422,7 @@ fn test_lock_unlock_region(fix: &mut Fixture) -> Result<()> {
     let block = alloc_context_alloc(fix, context, &allocated)?;
     ensure!(block.is_some());
     let block = block.unwrap();
-    ensure!(block >= 100 && block < 200);
+    ensure!((100..200).contains(&block));
 
     alloc_context_put(fix, context)?;
     extent_allocator_destroy(fix, ea)?;
@@ -448,7 +448,7 @@ fn test_lock_persistence_through_reset(fix: &mut Fixture) -> Result<()> {
         let block = alloc_context_alloc(fix, context, &allocated)?;
         ensure!(block.is_some());
         let block = block.unwrap();
-        ensure!(block < 300 || block >= 400);
+        ensure!(!(300..400).contains(&block));
     }
 
     alloc_context_put(fix, context)?;
@@ -472,7 +472,7 @@ fn test_lock_persistence_through_oos(fix: &mut Fixture) -> Result<()> {
     while allocated_blocks < nr_blocks - 100 {
         let block = alloc_context_alloc(fix, context, &allocated)?;
         if let Some(b) = block {
-            ensure!(b < 500 || b >= 600);
+            ensure!(!(500..600).contains(&b));
             allocated_blocks += 1;
         } else {
             break;
@@ -528,8 +528,8 @@ fn test_multiple_locks(fix: &mut Fixture) -> Result<()> {
         let block = block.unwrap();
         ensure!(
             (block < 100)
-                || (block >= 200 && block < 300)
-                || (block >= 400 && block < 500)
+                || (200..300).contains(&block)
+                || (400..500).contains(&block)
                 || block >= 600
         );
     }
@@ -541,7 +541,7 @@ fn test_multiple_locks(fix: &mut Fixture) -> Result<()> {
     let block = alloc_context_alloc(fix, context, &allocated)?;
     ensure!(block.is_some());
     let block = block.unwrap();
-    ensure!(block >= 300 && block < 400);
+    ensure!((300..400).contains(&block));
 
     alloc_context_put(fix, context)?;
     extent_allocator_destroy(fix, ea)?;
