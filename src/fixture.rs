@@ -215,6 +215,25 @@ impl Fixture {
         debug.addr2line(&self.kernel_dir, Addr(self.vm.reg(PC)))
     }
 
+    fn get_stack_trace(&self) -> Result<String> {
+        let debug = self.loader_info.debug.lock().unwrap();
+        let pc = self.vm.reg(PC);
+        let mut stack = Vec::new();
+
+        for frame in 0..(self.vm.stack_stack.len() - 1) {
+            let sp = self.vm.stack_stack[frame];
+
+            // Often Ra is stored as the first entry in the frame.  A bit of a hack
+            // but works often enough to give some useful information.
+            let ra = self.vm.mem.read_into(Addr(sp - 8), PERM_READ)?;
+
+            stack.push(debug.addr2line(&self.kernel_dir, Addr(ra))?);
+        }
+        stack.push(debug.addr2line(&self.kernel_dir, Addr(pc))?);
+
+        Ok(stack.join("\n"))
+    }
+
     // Runs the vm, handling any breakpoints.
     fn run_vm(&mut self) -> Result<()> {
         loop {
@@ -312,7 +331,7 @@ impl Fixture {
                     Ok(())
                 } else {
                     Err(e).with_context(|| {
-                        self.get_source_location()
+                        self.get_stack_trace()
                             .unwrap_or(format!("0x{:x}", self.vm.reg(PC)))
                     })
                 }
