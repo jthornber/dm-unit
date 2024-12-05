@@ -1,10 +1,13 @@
 use addr2line::Context;
 use anyhow::{anyhow, Result};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::BTreeMap;
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::emulator::memory::{Addr, Memory, PERM_READ};
+use crate::guest::*;
 
 //-------------------------------------------------------------------
 
@@ -16,6 +19,29 @@ type DebugContext = Context<gimli::EndianArcSlice<gimli::RunTimeEndian>>;
 
 pub struct DebugInfo {
     context: DebugContext,
+}
+
+pub struct StackFrame {
+    pub fp: u64,
+    pub ra: u64,
+}
+
+impl Guest for StackFrame {
+    fn guest_len() -> usize {
+        16
+    }
+
+    fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
+        w.write_u64::<LittleEndian>(self.fp)?;
+        w.write_u64::<LittleEndian>(self.ra)?;
+        Ok(())
+    }
+
+    fn unpack<R: Read>(r: &mut R) -> io::Result<Self> {
+        let fp = r.read_u64::<LittleEndian>()?;
+        let ra = r.read_u64::<LittleEndian>()?;
+        Ok(Self { fp, ra })
+    }
 }
 
 /// Remove the kernel directory prefix from a path

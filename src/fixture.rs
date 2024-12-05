@@ -3,6 +3,7 @@ use crate::emulator::loader::*;
 use crate::emulator::memory::*;
 use crate::emulator::memory::{Addr, PERM_EXEC};
 use crate::emulator::riscv::Reg;
+use crate::emulator::stack_trace::*;
 use crate::emulator::vm::*;
 use crate::errno::*;
 use crate::guest::*;
@@ -216,21 +217,28 @@ impl Fixture {
     }
 
     fn get_stack_trace(&self) -> Result<String> {
+        // We use the debug info to convert the PC to a kernel source line.
         let debug = self.loader_info.debug.lock().unwrap();
-        let pc = self.vm.reg(PC);
         let mut stack = Vec::new();
+        stack.push("".to_string());
 
-        for frame in 0..(self.vm.stack_stack.len() - 1) {
-            let sp = self.vm.stack_stack[frame];
+        let mut fp = self.vm.reg(S0);
+        let mut pc = self.vm.reg(PC);
 
-            // Often Ra is stored as the first entry in the frame.  A bit of a hack
-            // but works often enough to give some useful information.
-            let ra = self.vm.mem.read_into(Addr(sp - 8), PERM_READ)?;
+        loop {
+            stack.push(debug.addr2line(&self.kernel_dir, Addr(pc))?);
 
-            stack.push(debug.addr2line(&self.kernel_dir, Addr(ra))?);
+            if let Ok(frame) =
+                read_guest::<StackFrame>(&self.vm.mem, Addr(fp - StackFrame::guest_len() as u64))
+            {
+                fp = frame.fp;
+                pc = frame.ra;
+            } else {
+                break;
+            }
         }
-        stack.push(debug.addr2line(&self.kernel_dir, Addr(pc))?);
 
+        stack.push("".to_string());
         Ok(stack.join("\n"))
     }
 
