@@ -24,44 +24,6 @@ use thinp::pdata::unpack::*;
 
 //-------------------------------
 
-/*
-struct NoopVisitor {}
-
-impl<V: Unpack> NodeVisitor<V> for NoopVisitor {
-    fn visit(
-        &self,
-        _path: &[u64],
-        _kr: &KeyRange,
-        _header: &NodeHeader,
-        _keys: &[u64],
-        _values: &[V],
-    ) -> btree::Result<()> {
-        Ok(())
-    }
-
-    fn visit_again(&self, _path: &[u64], _b: u64) -> btree::Result<()> {
-        Ok(())
-    }
-
-    fn end_walk(&self) -> btree::Result<()> {
-        Ok(())
-    }
-}
-
-#[allow(dead_code)]
-fn check_btree(root: u64) -> Result<()> {
-    let walker = BTreeWalker::new(get_bm()?, false);
-    let visitor = NoopVisitor {};
-    let mut path = Vec::new();
-
-    walker.walk::<NoopVisitor, u64>(&mut path, &visitor, root)?;
-
-    Ok(())
-}
-*/
-
-//-------------------------------
-
 struct ResidencyVisitor {
     nr_entries: AtomicU32,
     nr_leaves: AtomicU32,

@@ -31,7 +31,7 @@ impl Guest for StackFrame {
         16
     }
 
-    fn pack<W: Write>(&self, w: &mut W, loc: Addr) -> io::Result<()> {
+    fn pack<W: Write>(&self, w: &mut W, _loc: Addr) -> io::Result<()> {
         w.write_u64::<LittleEndian>(self.fp)?;
         w.write_u64::<LittleEndian>(self.ra)?;
         Ok(())
