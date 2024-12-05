@@ -68,10 +68,6 @@ pub struct VM {
     next_bb_hits: u64,
     next_bb_misses: u64,
     jit: bool,
-
-    // This contains previous values for SP, we use it to give
-    // stack traces.
-    pub stack_stack: Vec<u64>,
 }
 
 impl Drop for VM {
@@ -169,7 +165,6 @@ impl VM {
             next_bb_hits: 0,
             next_bb_misses: 0,
             jit,
-            stack_stack: Vec::new(),
         }
     }
 
@@ -181,7 +176,6 @@ impl VM {
             .mmap_zeroes(Addr(base), Addr(top), PERM_READ | PERM_WRITE)
             .map_err(VmErr::BadAccess)?;
         self.reg[Sp as usize] = top;
-        self.stack_stack.push(top);
         Ok(())
     }
 
@@ -195,19 +189,6 @@ impl VM {
 
     pub fn set_reg(&mut self, r: Reg, v: u64) {
         if r != Zero {
-            if r == Sp {
-                // debug!("setting Sp <- {}, stack_stack {:?}", v, &self.stack_stack);
-                let old = self.stack_stack.last().unwrap();
-                if v < *old {
-                    self.stack_stack.push(v);
-                } else {
-                    self.stack_stack.pop();
-                    let old = self.stack_stack.last().unwrap();
-                    if v != *old {
-                        self.stack_stack.push(v);
-                    }
-                }
-            }
             self.reg[r as usize] = v;
         }
     }
