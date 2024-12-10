@@ -207,26 +207,28 @@ impl Fixture {
 
     pub fn get_loc_from_addr(&self, addr: Addr) -> Result<String> {
         let debug = self.loader_info.debug.lock().unwrap();
-        debug.addr2line(&self.kernel_dir, addr)
-    }
-
-    /// Returns the source location of the current instruction.
-    fn get_source_location(&self) -> Result<String> {
-        let debug = self.loader_info.debug.lock().unwrap();
-        debug.addr2line(&self.kernel_dir, Addr(self.vm.reg(PC)))
+        let mut stack = Vec::new();
+        debug.addr2frames(&self.kernel_dir, addr, true, &mut stack)?;
+        if stack.len() > 0 {
+            Ok(stack.last().unwrap().to_string())
+        } else {
+            Ok(format!("{:?}", addr))
+        }
     }
 
     fn get_stack_trace(&self) -> Result<String> {
         // We use the debug info to convert the PC to a kernel source line.
         let debug = self.loader_info.debug.lock().unwrap();
         let mut stack = Vec::new();
-        stack.push("".to_string());
 
         let mut fp = self.vm.reg(S0);
         let mut pc = self.vm.reg(PC);
+        let mut bottom = true;
 
+        // Walk the frame pointers
         loop {
-            stack.push(debug.addr2line(&self.kernel_dir, Addr(pc))?);
+            debug.addr2frames(&self.kernel_dir, Addr(pc), bottom, &mut stack)?;
+            bottom = false;
 
             if let Ok(frame) =
                 read_guest::<StackFrame>(&self.vm.mem, Addr(fp - StackFrame::guest_len() as u64))
@@ -238,8 +240,16 @@ impl Fixture {
             }
         }
 
-        stack.push("".to_string());
-        Ok(stack.join("\n"))
+        // One location per line, with a blank line before and after.
+        let mut str = String::new();
+        str.push_str("\nGuest stack:\n");
+        for loc in stack.iter().rev() {
+            str.push_str(&loc.to_string());
+            str.push_str("\n");
+        }
+        str.push_str("\n");
+
+        Ok(str)
     }
 
     // Runs the vm, handling any breakpoints.
@@ -274,8 +284,9 @@ impl Fixture {
                     }
                 }
                 Err(VmErr::EBreak) => {
-                    if let Some(global) = self.loader_info.get_rmap(Addr(self.vm.reg(Reg::PC))) {
-                        let loc = self.get_source_location()?;
+                    let addr = Addr(self.vm.reg(Reg::PC));
+                    if let Some(global) = self.loader_info.get_rmap(addr) {
+                        let loc = self.get_loc_from_addr(addr)?;
                         warn!("{}: unstubbed global called '{}'", loc, global);
                         return Err(anyhow!("unstubbed global access '{}'", global));
                     }
