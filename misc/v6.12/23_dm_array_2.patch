@@ -1,0 +1,24 @@
+commit 538af1dd455d0b86fbc96de424d47d5e3cb88732
+Author: Joe Thornber <ejt@redhat.com>
+Date:   Wed Dec 11 15:22:44 2024 +0000
+
+    [dm-unit] dm-array fixes patch 2
+
+diff --git a/drivers/md/persistent-data/dm-array.c b/drivers/md/persistent-data/dm-array.c
+index 4866ff56125f..0850dfdffc8c 100644
+--- a/drivers/md/persistent-data/dm-array.c
++++ b/drivers/md/persistent-data/dm-array.c
+@@ -960,10 +960,10 @@ EXPORT_SYMBOL_GPL(dm_array_cursor_begin);
+ 
+ void dm_array_cursor_end(struct dm_array_cursor *c)
+ {
+-	if (c->block) {
++	if (c->block)
+ 		unlock_ablock(c->info, c->block);
+-		dm_btree_cursor_end(&c->cursor);
+-	}
++
++	dm_btree_cursor_end(&c->cursor);
+ }
+ EXPORT_SYMBOL_GPL(dm_array_cursor_end);
+ 

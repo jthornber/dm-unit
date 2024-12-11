@@ -1,0 +1,57 @@
+commit 86d9d6796ee3186c7abc90f4a9bbf2cc4c4294c9
+Author: Joe Thornber <ejt@redhat.com>
+Date:   Wed Dec 11 15:04:34 2024 +0000
+
+    [dm-unit] no-auto-inline
+
+diff --git a/Makefile b/Makefile
+index 52521eafedd5..2b81d38ed13c 100644
+--- a/Makefile
++++ b/Makefile
+@@ -877,12 +877,12 @@ ifdef CONFIG_ZERO_CALL_USED_REGS
+ KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
+ endif
+ 
+-ifdef CONFIG_NO_AUTO_INLINE
+-KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
+-		   $(call cc-option, -fno-inline-small-functions) \
+-		   $(call cc-option, -fno-inline-functions-called-once) \
+-		   -fno-ipa-cp -fno-ipa-sra -fno-tree-dce
+-endif
++# ifdef CONFIG_NO_AUTO_INLINE
++# KBUILD_CFLAGS   += $(call cc-option, -fno-inline-functions) \
++		   # $(call cc-option, -fno-inline-small-functions) \
++		   # $(call cc-option, -fno-inline-functions-called-once) \
++		   # -fno-ipa-cp
++# endif
+ 
+ ifdef CONFIG_FUNCTION_TRACER
+ ifdef CONFIG_FTRACE_MCOUNT_USE_CC
+diff --git a/lib/Kconfig b/lib/Kconfig
+index b38849af6f13..96d9659e2963 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -86,6 +86,23 @@ config ARCH_HAS_FAST_MULTIPLIER
+ config ARCH_USE_SYM_ANNOTATIONS
+ 	bool
+ 
++config NO_AUTO_INLINE
++	bool "Disable compiler auto-inline optimizations"
++	help
++	  This will prevent the compiler from optimizing the kernel by
++	  auto-inlining functions not marked with the inline keyword.
++	  With this option, only functions explicitly marked with
++	  "inline" will be inlined. This will allow the function tracer
++	  to trace more functions because it only traces functions that
++	  the compiler has not inlined.
++
++	  Enabling this function can help debugging a kernel if using
++	  the function tracer. But it can also change how the kernel
++	  works, because inlining functions may change the timing,
++	  which could make it difficult while debugging race conditions.
++
++	  If unsure, select N.
++
+ config INDIRECT_PIO
+ 	bool "Access I/O in non-MMIO mode"
+ 	depends on ARM64
