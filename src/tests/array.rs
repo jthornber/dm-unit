@@ -38,8 +38,7 @@ fn test_resize_array(fix: &mut Fixture, old_size: u32, new_size: u32) -> Result<
     md.begin()?;
     md.resize(new_size, 0)?;
     md.commit()?;
-
-    Ok(())
+    md.complete()
 }
 
 fn test_expand_from_empty_within_boundary(fix: &mut Fixture) -> Result<()> {
@@ -140,8 +139,7 @@ fn test_set_values(fix: &mut Fixture, values: &[(u32, u64)]) -> Result<()> {
         ensure!(md.get_value(*i)? == *v);
         Ok(())
     })?;
-
-    Ok(())
+    md.complete()
 }
 
 fn test_set_values_forward(fix: &mut Fixture) -> Result<()> {

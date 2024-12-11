@@ -6,7 +6,7 @@ use crate::tests::array::MAX_U64_ENTRIES_PER_BLOCK;
 use crate::tests::array_metadata::ArrayMetadata;
 use crate::wrappers::array_cursor::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
 use thinp::pdata::btree_walker::btree_to_value_vec;
@@ -27,6 +27,8 @@ fn test_iterate_empty_array(fix: &mut Fixture) -> Result<()> {
     if errno != Some(libc::ENODATA) {
         return Err(e);
     }
+
+    md.complete()?;
 
     Ok(())
 }
@@ -76,6 +78,7 @@ fn iterate_populated_array(fix: &mut Fixture, nr_entries: usize) -> Result<()> {
     if let Some(e) = last_err {
         return Err(e);
     }
+    md.complete()?;
 
     Ok(())
 }
@@ -112,6 +115,7 @@ fn test_damaged_array_blocks(fix: &mut Fixture) -> Result<()> {
     if errno != Some(libc::EINVAL) {
         return Err(e);
     }
+    md.complete()?;
 
     Ok(())
 }
@@ -134,12 +138,17 @@ fn test_cursor_skip(fix: &mut Fixture, counts: &[u32]) -> Result<()> {
         let v = dm_array_cursor_get_value(md.fixture_mut(), &c)?;
         expected += *cnt;
         if v != expected as u64 {
-            ret = Err(anyhow!("value mismatch: expected {}, actual {}", expected, v));
+            ret = Err(anyhow!(
+                "value mismatch: expected {}, actual {}",
+                expected,
+                v
+            ));
             break;
         }
     }
     dm_array_cursor_end(md.fixture_mut(), &mut c)?;
     free_array_cursor(md.fixture_mut(), c)?;
+    md.complete()?;
 
     ret
 }
@@ -155,7 +164,9 @@ fn test_cursor_skip_pass_the_end(fix: &mut Fixture) -> Result<()> {
     md.begin()?;
 
     let mut c = md.get_cursor()?;
-    let e = dm_array_cursor_skip(md.fixture_mut(), &mut c, 1024).unwrap_err();
+    let r = dm_array_cursor_skip(md.fixture_mut(), &mut c, 1024);
+    ensure!(r.is_err());
+    let e = r.unwrap_err();
 
     // dm_array_cursor_skip() should fail if there's no more data
     let errno = e.downcast_ref::<CallError>().and_then(|err| err.errno());
@@ -166,6 +177,7 @@ fn test_cursor_skip_pass_the_end(fix: &mut Fixture) -> Result<()> {
     if errno != Some(libc::ENODATA) {
         return Err(e);
     }
+    md.complete()?;
 
     Ok(())
 }
@@ -207,11 +219,17 @@ fn test_skip_from_aligned_across_boundary(fix: &mut Fixture) -> Result<()> {
 }
 
 fn test_skip_from_aligned_to_next_boundary(fix: &mut Fixture) -> Result<()> {
-    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK - 1, MAX_U64_ENTRIES_PER_BLOCK])
+    test_cursor_skip(
+        fix,
+        &[MAX_U64_ENTRIES_PER_BLOCK - 1, MAX_U64_ENTRIES_PER_BLOCK],
+    )
 }
 
 fn test_skip_from_aligned_across_next_boundary(fix: &mut Fixture) -> Result<()> {
-    test_cursor_skip(fix, &[MAX_U64_ENTRIES_PER_BLOCK - 1, MAX_U64_ENTRIES_PER_BLOCK + 1])
+    test_cursor_skip(
+        fix,
+        &[MAX_U64_ENTRIES_PER_BLOCK - 1, MAX_U64_ENTRIES_PER_BLOCK + 1],
+    )
 }
 
 //-------------------------------

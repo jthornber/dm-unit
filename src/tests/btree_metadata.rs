@@ -53,7 +53,10 @@ impl<'a> BTreeMetadata<'a> {
     // This function takes ownership as the btree is no longer valid
     pub fn delete(mut self) -> Result<()> {
         dm_btree_del(self.md.fix, &self.info, self.root)?;
-        self.commit()
+        self.commit()?;
+        free_btree_info(self.md.fix, &mut self.info).expect("release dm_btree_info");
+        self.md.complete()?;
+        Ok(())
     }
 
     pub fn insert(&mut self, key: u64, value: &u64) -> Result<()> {
@@ -76,11 +79,11 @@ impl<'a> BTreeMetadata<'a> {
     pub fn get_cursor(&mut self) -> Result<BTreeCursor<u64>> {
         init_btree_cursor(self.md.fix, &self.info, self.root, true)
     }
-}
 
-impl Drop for BTreeMetadata<'_> {
-    fn drop(&mut self) {
+    pub fn complete(mut self) -> Result<()> {
         free_btree_info(self.md.fix, &mut self.info).expect("release dm_btree_info");
+        self.md.complete()?;
+        Ok(())
     }
 }
 

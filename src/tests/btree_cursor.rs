@@ -19,8 +19,7 @@ fn test_iterate_empty_btree(fix: &mut Fixture) -> Result<()> {
     if !matches!(e.downcast_ref::<CallError>(), Some(err) if err.is_errno(libc::ENODATA)) {
         return Err(e);
     }
-
-    Ok(())
+    md.complete()
 }
 
 fn iterate_populated_btree(fix: &mut Fixture, nr_entries: usize) -> Result<()> {
@@ -73,8 +72,7 @@ fn iterate_populated_btree(fix: &mut Fixture, nr_entries: usize) -> Result<()> {
     if let Some(e) = last_err {
         return Err(e);
     }
-
-    Ok(())
+    md.complete()
 }
 
 fn test_iterate_populated_btree(fix: &mut Fixture) -> Result<()> {

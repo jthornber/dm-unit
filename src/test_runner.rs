@@ -139,6 +139,7 @@ impl TestSet {
 pub struct Test {
     kmodules: Vec<KernelModule>,
     func: TestFn,
+    allow_leaks: bool,
 }
 
 impl Test {
@@ -146,6 +147,16 @@ impl Test {
         Test {
             kmodules,
             func: Box::new(func),
+            allow_leaks: false,
+        }
+    }
+
+    // A test that allows memory leaks.
+    pub fn new_leaky(kmodules: Vec<KernelModule>, func: TestFn) -> Self {
+        Test {
+            kmodules,
+            func: Box::new(func),
+            allow_leaks: true,
         }
     }
 }
@@ -177,7 +188,7 @@ fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestR
     let mut result = (t.func)(&mut fix);
 
     // Check for memory leaks, but only if the test passed
-    if result.is_ok() {
+    if result.is_ok() && !t.allow_leaks {
         let leaks = orig_memory.new_allocations(&fix.vm.mem);
         if !leaks.is_empty() {
             warn!("There were memory leaks:");
@@ -191,8 +202,6 @@ fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestR
             }
             warn!("Source locations may be incorrect due to tail-call optimisation.");
             result = Err(anyhow!("Guest has memory leaks"));
-        } else {
-            debug!("no memory leaks");
         }
     }
 

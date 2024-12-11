@@ -6,7 +6,7 @@ use crate::wrappers::block_manager::*;
 use crate::wrappers::space_map::*;
 use crate::wrappers::transaction_manager::*;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
 
 pub struct PersistentMetadata<'a> {
@@ -54,15 +54,14 @@ impl<'a> PersistentMetadata<'a> {
     pub fn get_bm(&self) -> Arc<BlockManager> {
         get_bm(self.fix, self.bm)
     }
-}
 
-impl Drop for PersistentMetadata<'_> {
-    fn drop(&mut self) {
+    pub fn complete(self) -> Result<()> {
         if let Some(sb) = self.sb {
-            dm_bm_unlock(self.fix, sb).expect("unlock superblock");
+            dm_bm_unlock(self.fix, sb).context("unlock superblock")?;
         }
-        dm_tm_destroy(self.fix, self.tm).expect("destroy tm");
-        sm_destroy(self.fix, self.sm).expect("destroy sm");
-        dm_bm_destroy(self.fix, self.bm).expect("destroy bm");
+        dm_tm_destroy(self.fix, self.tm).context("destroy tm")?;
+        sm_destroy(self.fix, self.sm).context("destroy sm")?;
+        dm_bm_destroy(self.fix, self.bm).context("destroy bm")?;
+        Ok(())
     }
 }

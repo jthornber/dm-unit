@@ -5,7 +5,7 @@ use crate::wrappers::array::*;
 use crate::wrappers::array_cursor::*;
 use crate::wrappers::btree::BTreeValueType;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 
 pub struct ArrayMetadata<'a> {
@@ -58,7 +58,9 @@ impl<'a> ArrayMetadata<'a> {
     // This function takes ownership as the array is no longer valid
     pub fn delete(mut self) -> Result<()> {
         dm_array_del(self.md.fix, &self.info, self.root)?;
-        self.commit()
+        self.commit()?;
+        free_array_info(self.md.fix, &mut self.info).context("free dm_array_info")?;
+        self.md.complete()
     }
 
     pub fn set_value(&mut self, index: u32, value: &u64) -> Result<()> {
@@ -86,10 +88,10 @@ impl<'a> ArrayMetadata<'a> {
     pub fn get_cursor(&mut self) -> Result<ArrayCursor<u64>> {
         init_array_cursor(self.md.fix, &self.info, self.root)
     }
-}
 
-impl Drop for ArrayMetadata<'_> {
-    fn drop(&mut self) {
-        free_array_info(self.md.fix, &mut self.info).expect("free dm_array_info");
+    pub fn complete(mut self) -> Result<()> {
+        free_array_info(self.md.fix, &mut self.info).context("free dm_array_info")?;
+        self.md.complete()?;
+        Ok(())
     }
 }

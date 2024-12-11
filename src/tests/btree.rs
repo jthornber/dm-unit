@@ -344,6 +344,11 @@ impl<'a> BTreeTest<'a> {
         print_layout::<u64>(&bm, self.md.root());
         Ok(())
     }
+
+    pub fn complete(self) -> Result<()> {
+        self.md.complete()?;
+        Ok(())
+    }
 }
 
 // keys contains the keys we wish to insert, in the order
@@ -394,6 +399,7 @@ fn do_insert_test_(
     bt.commit()?;
 
     bt.check_keys_present(keys)?;
+    bt.complete()?;
 
     Ok(())
 }
@@ -735,8 +741,7 @@ fn test_remove_random(fix: &mut Fixture) -> Result<()> {
         bt.remove(*k)?;
         ensure!(bt.lookup(*k).is_err());
     }
-
-    Ok(())
+    bt.complete()
 }
 
 //-------------------------------
