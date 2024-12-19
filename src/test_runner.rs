@@ -284,9 +284,15 @@ impl TestRunner<'_> {
 
             let rmem = {
                 let kernel_dir = self.kernel_dir.clone();
-                memories
-                    .entry(modules)
-                    .or_insert_with(|| Fixture::prep_memory(kernel_dir, &t.kmodules))
+                memories.entry(modules).or_insert_with(|| {
+                    let e = Fixture::prep_memory(kernel_dir, &t.kmodules);
+                    if let Err(e) = e {
+                        warn!("{:?}", e);
+                        Err(e)
+                    } else {
+                        e
+                    }
+                })
             };
             match rmem {
                 Ok((loader_info, mem)) => {
@@ -314,12 +320,12 @@ impl TestRunner<'_> {
                         }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
                     results.insert(
                         p.clone(),
                         TestResult {
                             pass: false,
-                            log: "unable to load kernel modules".to_string(),
+                            log: format!("unable to load kernel modules: {:?}", e),
                             icount: 0,
                         },
                     );
