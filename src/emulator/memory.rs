@@ -1,8 +1,6 @@
-use intrusive_collections::intrusive_adapter;
-use intrusive_collections::{Bound, KeyAdapter, RBTree, RBTreeLink};
 use log::*;
-use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeMap, BTreeSet};
+use std::convert::TryInto;
 use std::fmt;
 use std::result;
 use thiserror::Error;
@@ -67,7 +65,7 @@ pub const PERM_WRITE: u8 = 1 << 1;
 pub const PERM_EXEC: u8 = 1 << 2;
 
 /// Memory for a region of the address space.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct MMap {
     perms: u8,
     begin: u64,
@@ -89,6 +87,7 @@ impl MMap {
     /// Checks all 'perms' are present for this region.
     fn check_perms(&self, begin: u64, perms: u8) -> Result<()> {
         if (self.perms & perms) != perms {
+            debug!("bad perms: mm.perms = {}, perms = {}", self.perms, perms);
             return Err(MemErr::BadPerms(Addr(begin), perms));
         }
 
@@ -160,27 +159,188 @@ impl MMap {
             }
         }
     }
-}
 
-struct MMapNode {
-    link: RBTreeLink,
-    mmap: RefCell<MMap>,
-}
-
-impl MMapNode {
-    fn new(mm: MMap) -> Self {
-        MMapNode {
-            link: RBTreeLink::new(),
-            mmap: RefCell::new(mm),
-        }
+    // Checks if the MMap contains the given address.
+    fn contains(&self, addr: u64) -> bool {
+        addr >= self.begin && addr < self.end
     }
 }
 
-intrusive_adapter!(MMapAdapter = Box<MMapNode>: MMapNode { link: RBTreeLink });
-impl<'a> KeyAdapter<'a> for MMapAdapter {
-    type Key = u64;
-    fn get_key(&self, node: &'a MMapNode) -> u64 {
-        node.mmap.borrow().begin
+//-------------------------------------
+
+// Uniform Layer struct
+#[derive(Clone, Debug)]
+struct Layer {
+    // Range covered by this layer.
+    begin: u64,
+    end: u64,
+
+    // Mappings that are either:
+    // - Cross-boundary mappings stored at this level
+    // - Mappings in leaf nodes
+    mappings: Vec<MMap>,
+
+    // Optional children layers for further subdivision.
+    children: Option<Box<[Layer; 256]>>,
+}
+
+impl Layer {
+    // Create a new layer covering the given range.
+    fn new(begin: u64, end: u64) -> Self {
+        Layer {
+            begin,
+            end,
+            mappings: Vec::new(),
+            children: None,
+        }
+    }
+
+    // Calculate the size of the layer's range.
+    fn size(&self) -> u64 {
+        self.end - self.begin
+    }
+
+    // Inserts an MMap into the trie.
+    fn insert(&mut self, mmap: MMap) {
+        // If this layer cannot be subdivided further (e.g., minimum size), store the mapping here.
+        if self.size() <= 256 {
+            self.mappings.push(mmap);
+            return;
+        }
+
+        // Determine if the MMap fits entirely within one child layer.
+        let child_size = self.size() / 256;
+        let first_child_index = ((mmap.begin - self.begin) / child_size) as usize;
+        let last_child_index = ((mmap.end - 1 - self.begin) / child_size) as usize;
+
+        if first_child_index == last_child_index {
+            // The MMap fits entirely within one child layer.
+            // Ensure children exist.
+            if self.children.is_none() {
+                self.create_children();
+            }
+            // Insert into the appropriate child.
+            let child = &mut self.children.as_mut().unwrap()[first_child_index];
+            child.insert(mmap);
+        } else {
+            // The MMap crosses child boundaries; store at this level.
+            self.mappings.push(mmap);
+        }
+    }
+
+    // Looks up an MMap containing the given address.
+    fn lookup(&self, addr: u64) -> Option<&MMap> {
+        // Check if the address is within any of the mappings at this layer.
+        for mm in &self.mappings {
+            if mm.contains(addr) {
+                return Some(mm);
+            }
+        }
+
+        // If not, and if children exist, descend into the appropriate child.
+        if let Some(children) = &self.children {
+            let child_index = self.child_index(addr);
+            return children[child_index].lookup(addr);
+        }
+
+        // Not found.
+        None
+    }
+
+    // Similar to lookup, but returns a mutable reference.
+    fn lookup_mut(&mut self, addr: u64) -> Option<&mut MMap> {
+        // Compute necessary values before mutable borrow begins
+        let begin = self.begin;
+        let size = self.size();
+
+        for mm in &mut self.mappings {
+            if mm.contains(addr) {
+                return Some(mm);
+            }
+        }
+
+        if let Some(children) = &mut self.children {
+            // Use the previously computed values to calculate child_index
+            let child_size = size / 256;
+            let child_index = ((addr - begin) / child_size) as usize;
+            return children[child_index].lookup_mut(addr);
+        }
+
+        None
+    }
+
+    // Removes an MMap starting at the given address.
+    fn remove(&mut self, addr: u64) -> Option<MMap> {
+        // First, try to remove from mappings at this layer.
+        if let Some(pos) = self.mappings.iter().position(|mm| mm.begin == addr) {
+            // Found it in this layer's mappings; remove and return it.
+            return Some(self.mappings.swap_remove(pos));
+        }
+
+        // Precompute child_index if children exist.
+        if self.children.is_some() {
+            let child_index = self.child_index(addr);
+
+            // Now, we can mutably borrow self.children safely.
+            if let Some(children) = &mut self.children {
+                // Attempt to remove from the appropriate child.
+                return children[child_index].remove(addr);
+            }
+        }
+
+        // If no mappings or children are found, return None.
+        None
+    }
+
+    // Helper functions...
+
+    // Creates child layers.
+    fn create_children(&mut self) {
+        let child_size = self.size() / 256;
+        let mut children = Vec::with_capacity(256);
+
+        for i in 0..256 {
+            let child_begin = self.begin + child_size * i as u64;
+            let child_end = child_begin + child_size;
+            children.push(Layer::new(child_begin, child_end));
+        }
+
+        self.children = Some(children.into_boxed_slice().try_into().unwrap());
+    }
+
+    // Determines the index of the child that contains the given address.
+    fn child_index(&self, addr: u64) -> usize {
+        let child_size = self.size() / 256;
+        ((addr - self.begin) / child_size) as usize
+    }
+}
+
+#[derive(Clone)]
+struct Trie {
+    root: Layer,
+}
+
+impl Trie {
+    fn new() -> Self {
+        Trie {
+            root: Layer::new(0, u64::MAX),
+        }
+    }
+
+    fn insert(&mut self, mmap: MMap) {
+        self.root.insert(mmap);
+    }
+
+    fn lookup(&self, addr: u64) -> Option<&MMap> {
+        self.root.lookup(addr)
+    }
+
+    fn lookup_mut(&mut self, addr: u64) -> Option<&mut MMap> {
+        self.root.lookup_mut(addr)
+    }
+
+    fn remove(&mut self, addr: u64) -> Option<MMap> {
+        self.root.remove(addr)
     }
 }
 
@@ -217,7 +377,7 @@ impl MEntry {
 /// Manages memory for the vm.  Tracks permissions at the byte level.
 /// Checks memory has been initialised before it's read.
 pub struct Memory {
-    mmaps: RBTree<MMapAdapter>,
+    mmaps: Trie,
 
     // We always want a heap, so I'm embedding it in the mmu.
     heap: Heap,
@@ -226,23 +386,10 @@ pub struct Memory {
     allocations: BTreeMap<u64, MEntry>,
 }
 
-fn copy_mmaps(mmaps: &RBTree<MMapAdapter>) -> RBTree<MMapAdapter> {
-    let mut cur = mmaps.front();
-    let mut ret = RBTree::new(MMapAdapter::new());
-
-    while let Some(ops) = cur.get() {
-        let mm = ops.mmap.borrow();
-        ret.insert(Box::new(MMapNode::new((*mm).clone())));
-        cur.move_next();
-    }
-
-    ret
-}
-
 impl Memory {
     pub fn new(heap_begin: Addr, heap_end: Addr) -> Self {
         Memory {
-            mmaps: RBTree::new(MMapAdapter::new()),
+            mmaps: Trie::new(),
             heap: Heap::new(heap_begin, heap_end),
             allocations: BTreeMap::new(),
         }
@@ -250,7 +397,7 @@ impl Memory {
 
     pub fn snapshot(&self) -> Self {
         Memory {
-            mmaps: copy_mmaps(&self.mmaps),
+            mmaps: self.mmaps.clone(),
             heap: self.heap.clone(),
             allocations: self.allocations.clone(),
         }
@@ -298,23 +445,20 @@ impl Memory {
     */
 
     fn insert_mm(&mut self, mm: MMap) {
-        self.mmaps.insert(Box::new(MMapNode::new(mm)));
+        self.mmaps.insert(mm);
     }
 
     /// Remove an mmapped area.
     pub fn unmap(&mut self, begin: Addr) -> Result<Vec<u8>> {
-        let mut cur = self.mmaps.find_mut(&begin.0);
+        let mm = self.mmaps.remove(begin.0);
 
-        if cur.is_null() {
-            Err(MemErr::BadFree(begin))
-        } else {
+        if let Some(mut mm) = mm {
             let mut bytes = Vec::new();
 
-            let mut mm = cur.get().unwrap().mmap.borrow_mut();
             std::mem::swap(&mut mm.bytes, &mut bytes);
-            drop(mm);
-            cur.remove();
             Ok(bytes)
+        } else {
+            Err(MemErr::BadFree(begin))
         }
     }
 
@@ -344,44 +488,39 @@ impl Memory {
 
     /// Gets the mmap that contains the given range or returns an error.  Assumes
     /// a single mmap covers the whole range.
-    fn get_mmap(&self, begin: u64, end: u64, perms: u8) -> Result<Ref<MMap>> {
-        let cursor = self.mmaps.upper_bound(Bound::Included(&begin));
+    fn get_mmap(&self, begin: u64, end: u64, perms: u8) -> Result<&MMap> {
+        let mm = self.mmaps.lookup(begin);
+        if let Some(mm) = mm {
+            // begin and end must be within the region
+            if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
+                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+            }
 
-        if cursor.is_null() {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+            mm.check_perms(begin, perms)?;
+
+            Ok(mm)
+        } else {
+            Err(MemErr::UnmappedRegion(Addr(begin), perms))
         }
-
-        let mm = cursor.get().unwrap().mmap.borrow();
-
-        // begin and end must be within the region
-        if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-        }
-
-        mm.check_perms(begin, perms)?;
-
-        Ok(mm)
     }
 
     fn get_mut_mmap<F, V>(&mut self, begin: u64, end: u64, perms: u8, func: F) -> Result<V>
     where
-        F: FnOnce(RefMut<MMap>) -> Result<V>,
+        F: FnOnce(&mut MMap) -> Result<V>,
     {
-        let cursor = self.mmaps.upper_bound_mut(Bound::Included(&begin));
+        let mm = self.mmaps.lookup_mut(begin);
+        if let Some(mm) = mm {
+            // begin and end must be within the region
+            // FIXME: repetition
+            if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
+                return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+            }
 
-        if cursor.is_null() {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
+            mm.check_perms(begin, perms)?;
+            func(mm)
+        } else {
+            Err(MemErr::UnmappedRegion(Addr(begin), perms))
         }
-
-        let mm = cursor.get().unwrap().mmap.borrow_mut();
-
-        // begin and end must be within the region
-        if (begin < mm.begin) || (begin >= mm.end) || (end < mm.begin) || (end > mm.end) {
-            return Err(MemErr::UnmappedRegion(Addr(begin), perms));
-        }
-
-        mm.check_perms(begin, perms)?;
-        func(mm)
     }
 
     /// Checks that a memory region is mapped with the particular permissions.
@@ -395,7 +534,7 @@ impl Memory {
     pub fn change_perms(&mut self, begin: Addr, end: Addr, perms: u8) -> Result<u8> {
         let begin = begin.0;
         let end = end.0;
-        self.get_mut_mmap(begin, end, 0, |mut mm| mm.change_perms(begin, end, perms))
+        self.get_mut_mmap(begin, end, 0, |mm| mm.change_perms(begin, end, perms))
     }
 
     // Dangerous, for use by the JIT only
@@ -443,7 +582,7 @@ impl Memory {
         let begin = begin.0;
         let end = begin + (bytes.len() as u64);
 
-        self.get_mut_mmap(begin, end, perms, |mut mm| {
+        self.get_mut_mmap(begin, end, perms, |mm| {
             let len = end - begin;
             mm.write(begin, &bytes[0..(len as usize)], perms)?;
             Ok(())
@@ -455,7 +594,7 @@ impl Memory {
         let begin = begin.0;
         let end = end.0;
 
-        self.get_mut_mmap(begin, end, perms, |mut mm| {
+        self.get_mut_mmap(begin, end, perms, |mm| {
             mm.zero(begin, end, perms)?;
             Ok(())
         })
@@ -467,7 +606,7 @@ impl Memory {
         let begin = begin.0;
         let end = end.0;
 
-        self.get_mut_mmap(begin, end, 0, |mut mm| {
+        self.get_mut_mmap(begin, end, 0, |mm| {
             mm.forget(begin, end);
             Ok(())
         })
@@ -490,7 +629,7 @@ impl Memory {
 
     pub fn write_out<T: Primitive>(&mut self, v: T, begin: Addr, perms: u8) -> Result<()> {
         let begin = begin.0;
-        self.get_mut_mmap(begin, begin + 1, perms, |mut mm| {
+        self.get_mut_mmap(begin, begin + 1, perms, |mm| {
             let offset = (begin - mm.begin) as usize;
             let bytes = &mut mm.bytes[offset..];
 

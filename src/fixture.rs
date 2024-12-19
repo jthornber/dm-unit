@@ -140,7 +140,7 @@ impl Fixture {
             modules.push(km.path(kernel_dir.clone()));
         }
 
-        let heap_begin = Addr(1024 * 1024 * 1024 * 3);
+        let heap_begin = Addr(1024 * 1024 * 256);
         let heap_end = Addr(heap_begin.0 + (256 * 1024 * 1024));
         let mut mem = Memory::new(heap_begin, heap_end);
         let loader_info = load_modules(&mut mem, &modules[0..])?;
