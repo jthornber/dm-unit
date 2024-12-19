@@ -323,23 +323,41 @@ struct Trie {
 impl Trie {
     fn new() -> Self {
         Trie {
-            root: Layer::new(0, u64::MAX),
+            root: Layer::new(0, 1 << 32),
         }
     }
 
+    fn out_of_bounds(addr: u64) -> bool {
+        addr >= (1 << 32)
+    }
+
     fn insert(&mut self, mmap: MMap) {
+        if Trie::out_of_bounds(mmap.begin) {
+            panic!("MMU only supports a 32bit address space");
+        }
         self.root.insert(mmap);
     }
 
     fn lookup(&self, addr: u64) -> Option<&MMap> {
-        self.root.lookup(addr)
+        if Trie::out_of_bounds(addr) {
+            None
+        } else {
+            self.root.lookup(addr)
+        }
     }
 
     fn lookup_mut(&mut self, addr: u64) -> Option<&mut MMap> {
-        self.root.lookup_mut(addr)
+        if Trie::out_of_bounds(addr) {
+            None
+        } else {
+            self.root.lookup_mut(addr)
+        }
     }
 
     fn remove(&mut self, addr: u64) -> Option<MMap> {
+        if Trie::out_of_bounds(addr) {
+            panic!("MMU only supports a 32bit address space");
+        }
         self.root.remove(addr)
     }
 }
