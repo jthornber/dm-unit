@@ -1,3 +1,4 @@
+pub mod branch_predictor;
 pub mod ir;
 pub mod loader;
 pub mod memory;
