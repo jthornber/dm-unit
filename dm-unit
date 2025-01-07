@@ -1,3 +1,4 @@
 #! /usr/bin/sh
 
-cargo run --release -- $@
+cargo build --release
+time cargo run --release -- $@
