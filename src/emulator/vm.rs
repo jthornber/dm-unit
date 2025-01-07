@@ -6,6 +6,7 @@ use std::fmt;
 use std::rc::Rc;
 use thiserror::Error;
 
+use crate::emulator::branch_predictor::*;
 use crate::emulator::ir::interpreter::*;
 use crate::emulator::ir::ir::*;
 use crate::emulator::ir::optimise::*;
@@ -67,15 +68,27 @@ pub struct VM {
     inst_cache: InstCache,
     next_bb_hits: u64,
     next_bb_misses: u64,
+
+    branch_predictor: BranchPredictor,
+    branch_hits: u64,
+    branch_misses: u64,
     jit: bool,
 }
 
 impl Drop for VM {
     fn drop(&mut self) {
-        let hits = self.next_bb_hits as f64;
-        let total = (self.next_bb_misses + self.next_bb_hits) as f64;
-        let percent = (hits * 100.0) / total;
-        debug!("next bb hits {:.0}%", percent);
+        {
+            let hits = self.next_bb_hits as f64;
+            let total = (self.next_bb_misses + self.next_bb_hits) as f64;
+            let percent = (hits * 100.0) / total;
+            debug!("next bb hits {:.0}%", percent);
+        }
+        {
+            let hits = self.branch_hits as f64;
+            let total = (self.branch_hits + self.branch_misses) as f64;
+            let percent = (hits * 100.0) / total;
+            debug!("branch hits {:.0}%", percent);
+        }
     }
 }
 
@@ -164,6 +177,9 @@ impl VM {
             inst_cache: InstCache::new(),
             next_bb_hits: 0,
             next_bb_misses: 0,
+            branch_predictor: BranchPredictor::default(),
+            branch_hits: 0,
+            branch_misses: 0,
             jit,
         }
     }
@@ -205,8 +221,16 @@ impl VM {
         Addr(self.reg[PC as usize])
     }
 
-    pub fn branch(&mut self, pred: bool, dest: u64, pc_increment: u64) {
-        if pred {
+    // pred indicates if the branch should be taken.
+    pub fn branch(&mut self, taken: bool, dest: u64, pc_increment: u64) {
+        use BranchPrediction::*;
+
+        match self.branch_predictor.branch(Addr(self.reg(PC)), taken) {
+            Hit => self.branch_hits += 1,
+            Miss => self.branch_misses += 1,
+        }
+
+        if taken {
             self.set_reg(PC, dest);
         } else {
             self.inc_pc(pc_increment);

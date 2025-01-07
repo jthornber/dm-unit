@@ -2,36 +2,13 @@ use crate::emulator::memory::*;
 
 //--------------------------------
 
-// A saturating 2bit counter.
-#[derive(Default)]
-struct TwoBitCounter {
-    count: u8,
-}
-
-impl TwoBitCounter {
-    pub fn is_set(&self) -> bool {
-        (self.count & 0b10) == 0b10
-    }
-
-    pub fn inc(&mut self) {
-        if self.count < 3 {
-            self.count += 1;
-        }
-    }
-
-    pub fn dec(&mut self) {
-        if self.count > 0 {
-            self.count -= 1;
-        }
-    }
-}
-
-//--------------------------------
-
 const HISTORY_BITS: usize = 12;
 const HISTORY_MASK: u16 = (1 << HISTORY_BITS) - 1;
+const COUNTS_PER_WORD: usize = 32;
+const NR_U64: usize = ((1 << HISTORY_BITS) + (COUNTS_PER_WORD - 1)) / COUNTS_PER_WORD;
 
-enum BranchPrediction {
+#[derive(Eq, PartialEq, Debug)]
+pub enum BranchPrediction {
     Hit,
     Miss,
 }
@@ -41,17 +18,36 @@ enum BranchPrediction {
 /// The `BranchPredictor` maintains a global history of branch outcomes and uses it,
 /// along with the branch address, to index into a table of `TwoBitCounter`s.
 /// This allows for dynamic prediction of branch behavior based on historical patterns.
-struct BranchPredictor {
+pub struct BranchPredictor {
     history: u16,
-    table: Vec<TwoBitCounter>,
+
+    // This is a table of 2-bit saturating counts stored in u64s.
+    counts: Box<[u64]>,
+}
+
+impl Default for BranchPredictor {
+    fn default() -> Self {
+        let counts = vec![0u64; NR_U64].into_boxed_slice();
+        Self { history: 0, counts }
+    }
 }
 
 impl BranchPredictor {
-    pub fn new() -> Self {
-        let table: Vec<TwoBitCounter> = (0..(1 << HISTORY_BITS))
-            .map(|_| TwoBitCounter::default())
-            .collect();
-        Self { history: 0, table }
+    fn update_counter(&mut self, index: u16, taken: bool) -> bool {
+        let word_index = index as usize / COUNTS_PER_WORD;
+        let word = &mut self.counts[word_index];
+        let shift = 2 * (index % COUNTS_PER_WORD as u16);
+        let mut count = (*word >> shift) & 0b11;
+        let was_set = count >= 2;
+
+        if taken && count < 3 {
+            count += 1;
+        } else if !taken && count > 0 {
+            count -= 1;
+        }
+
+        *word = (*word & !(0b11 << shift)) | (count << shift);
+        was_set
     }
 
     /// Processes a branch outcome and updates the predictor state.
@@ -73,18 +69,94 @@ impl BranchPredictor {
 
         let low_bits = (addr.0 as u16) & HISTORY_MASK;
         let key = low_bits ^ self.history;
-        let count: &mut TwoBitCounter = &mut self.table[key as usize];
-        let result = if count.is_set() == taken { Hit } else { Miss };
 
-        self.history = ((self.history << 1) | if taken { 1 } else { 0 }) & HISTORY_MASK;
+        let was_set = self.update_counter(key, taken);
 
-        if taken {
-            count.inc();
+        self.history = ((self.history << 1) | (taken as u16)) & HISTORY_MASK;
+
+        if was_set == taken {
+            Hit
         } else {
-            count.dec();
+            Miss
+        }
+    }
+}
+
+//--------------------------------
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_counter_increment() {
+        let mut predictor = BranchPredictor::default();
+        let index = 0u16;
+
+        // Initial prediction should be Not Taken (count = 0)
+        let prediction = predictor.update_counter(index, true);
+        assert_eq!(prediction, false); // Since count = 0 (< 2)
+
+        // Increment the counter a few times
+        for _ in 0..3 {
+            predictor.update_counter(index, true);
         }
 
-        result
+        // Now the prediction should be Taken (count >= 2)
+        let prediction = predictor.update_counter(index, true);
+        assert_eq!(prediction, true); // Since count >= 2
+
+        // Counter should be saturated at 3
+        let word = predictor.counts[index as usize / COUNTS_PER_WORD];
+        let shift = 2 * (index % COUNTS_PER_WORD as u16);
+        let count = (word >> shift) & 0b11;
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_update_counter_decrement() {
+        let mut predictor = BranchPredictor::default();
+        let index = 0u16;
+
+        // Set counter to maximum
+        predictor.update_counter(index, true);
+        predictor.update_counter(index, true);
+        predictor.update_counter(index, true);
+
+        // Decrement the counter a few times
+        for _ in 0..3 {
+            predictor.update_counter(index, false);
+        }
+
+        // Now the prediction should be Not Taken (count < 2)
+        let prediction = predictor.update_counter(index, false);
+        assert_eq!(prediction, false);
+
+        // Counter should be at 0
+        let word = predictor.counts[index as usize / COUNTS_PER_WORD];
+        let shift = 2 * (index % COUNTS_PER_WORD as u16);
+        let count = (word >> shift) & 0b11;
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_counter_saturation_hit_rate() {
+        let mut predictor = BranchPredictor::default();
+        let addr = Addr(0x1000);
+        let mut hits = 0;
+        let total = 20;
+
+        // Simulate a branch taken repeatedly
+        for _ in 0..total {
+            if predictor.branch(addr, true) == BranchPrediction::Hit {
+                hits += 1;
+            }
+        }
+
+        let hit_rate = hits as f64 / total as f64;
+        println!("Hit rate after training: {:.2}%", hit_rate * 100.0);
+
+        // Expect a high hit rate after the predictor has trained
+        assert!(hit_rate > 0.8);
     }
 }
 
