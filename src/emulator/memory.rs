@@ -182,16 +182,22 @@ struct Layer {
 
     // Optional children layers for further subdivision.
     children: Option<Box<[Layer; 256]>>,
+
+    // Precomputed shift for child index calculation
+    shift: u32,
 }
 
 impl Layer {
     // Create a new layer covering the given range.
     fn new(begin: u64, end: u64) -> Self {
+        let size = end - begin;
+        let shift = size.trailing_zeros() - 8;
         Layer {
             begin,
             end,
             mappings: Vec::new(),
             children: None,
+            shift,
         }
     }
 
@@ -310,8 +316,7 @@ impl Layer {
 
     // Determines the index of the child that contains the given address.
     fn child_index(&self, addr: u64) -> usize {
-        let child_size = self.size() / 256;
-        ((addr - self.begin) / child_size) as usize
+        ((addr - self.begin) >> self.shift) as usize
     }
 }
 
