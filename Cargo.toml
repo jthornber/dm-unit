@@ -46,3 +46,11 @@ harness = false
 
 [profile.release]
 debug = true
+
+# For flamegraph
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = [
+# "-Clink-arg=-fuse-ld=/usr/local/bin/mold",
+# "-Clink-arg=-Wl,--no-rosegment",
+# ]
