@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::BufWriter;
 
 use crate::block_manager::*;
 use crate::fixture::*;
@@ -39,7 +40,7 @@ impl Stats {
 //-------------------------------
 
 pub struct CostTracker {
-    csv_out: File,
+    csv_out: BufWriter<File>,
     iteration: u64,
     baseline: Stats,
 }
@@ -47,7 +48,8 @@ pub struct CostTracker {
 impl CostTracker {
     pub fn new(path: &str) -> Result<Self> {
         // FIXME: support overwrite
-        let mut csv_out = File::create(path)?;
+        let file = File::create(path)?;
+        let mut csv_out = BufWriter::new(file);
         csv_out.write_all(b"iteration, instructions, read_locks, write_locks, disk_reads\n")?;
 
         Ok(CostTracker {
@@ -82,6 +84,9 @@ impl CostTracker {
             delta.write_locks as f64 / iters as f64,
             delta.disk_reads as f64 / iters as f64
         )?;
+        if self.iteration % 1000 == 0 {
+            self.csv_out.flush()?;
+        }
         Ok(())
     }
 }
