@@ -33,20 +33,29 @@ impl Default for BranchPredictor {
 }
 
 impl BranchPredictor {
-    fn update_counter(&mut self, index: u16, taken: bool) -> bool {
+    pub fn update_counter(&mut self, index: u16, taken: bool) -> bool {
         let word_index = index as usize / COUNTS_PER_WORD;
-        let word = &mut self.counts[word_index];
         let shift = 2 * (index as usize % COUNTS_PER_WORD);
-        let mut count = (*word >> shift) & 0b11;
-        let was_set = count >= 2;
+        let word = &mut self.counts[word_index];
+        let mut count = ((*word >> shift) & 0b11) as u8;
 
-        if taken && count < 3 {
-            count += 1;
-        } else if !taken && count > 0 {
-            count -= 1;
-        }
+        // Determine if the previous count was >= 2
+        let was_set = ((count >> 1) & 1) != 0;
 
-        *word = (*word & !(0b11 << shift)) | (count << shift);
+        // Compute masks
+        let taken_mask = taken as u8;
+        let not_taken_mask = (!taken_mask) & 1;
+
+        // Compute increment and decrement without branches
+        let inc = taken_mask & ((count < 3) as u8);
+        let dec = not_taken_mask & ((count > 0) as u8);
+
+        // Update count branchlessly and ensure it stays within 0..=3
+        count = count.wrapping_add(inc).wrapping_sub(dec) & 0b11;
+
+        // Update the counter in the word
+        *word = (*word & !(0b11 << shift)) | ((count as u64) << shift);
+
         was_set
     }
 
