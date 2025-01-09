@@ -1,4 +1,5 @@
 use log::*;
+use std::collections::HashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryInto;
 use std::fmt;
@@ -181,7 +182,7 @@ struct Layer {
     mappings: Vec<MMap>,
 
     // Optional children layers for further subdivision.
-    children: Option<Box<[Layer; 256]>>,
+    children: Vec<Option<Box<Layer>>>,
 
     // Precomputed shift for child index calculation
     shift: u32,
@@ -196,8 +197,23 @@ impl Layer {
             begin,
             end,
             mappings: Vec::new(),
-            children: None,
+            children: Vec::new(),
             shift,
+        }
+    }
+
+    fn no_children(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    fn has_children(&self) -> bool {
+        !self.no_children()
+    }
+
+    fn create_children(&mut self) {
+        self.children.reserve(256);
+        for _ in 0..256 {
+            self.children.push(None);
         }
     }
 
@@ -221,13 +237,18 @@ impl Layer {
 
         if first_child_index == last_child_index {
             // The MMap fits entirely within one child layer.
-            // Ensure children exist.
-            if self.children.is_none() {
+            if self.no_children() {
                 self.create_children();
             }
-            // Insert into the appropriate child.
-            let child = &mut self.children.as_mut().unwrap()[first_child_index];
-            child.insert(mmap);
+
+            let child = &mut self.children[first_child_index];
+            if child.is_none() {
+                *child = Some(Box::new(Layer::new(
+                    self.begin + child_size * first_child_index as u64,
+                    self.begin + child_size * (first_child_index as u64 + 1),
+                )));
+            }
+            child.as_mut().unwrap().insert(mmap);
         } else {
             // The MMap crosses child boundaries; store at this level.
             self.mappings.push(mmap);
@@ -244,9 +265,11 @@ impl Layer {
         }
 
         // If not, and if children exist, descend into the appropriate child.
-        if let Some(children) = &self.children {
+        if self.has_children() {
             let child_index = self.child_index(addr);
-            return children[child_index].lookup(addr);
+            if let Some(child) = &self.children[child_index] {
+                return child.lookup(addr);
+            }
         }
 
         // Not found.
@@ -256,8 +279,8 @@ impl Layer {
     // Similar to lookup, but returns a mutable reference.
     fn lookup_mut(&mut self, addr: u64) -> Option<&mut MMap> {
         // Compute necessary values before mutable borrow begins
-        let begin = self.begin;
-        let size = self.size();
+        let child_index = self.child_index(addr);
+        let has_children = self.has_children();
 
         for mm in &mut self.mappings {
             if mm.contains(addr) {
@@ -265,11 +288,10 @@ impl Layer {
             }
         }
 
-        if let Some(children) = &mut self.children {
-            // Use the previously computed values to calculate child_index
-            let child_size = size / 256;
-            let child_index = ((addr - begin) / child_size) as usize;
-            return children[child_index].lookup_mut(addr);
+        if has_children {
+            if let Some(child) = &mut self.children[child_index] {
+                return child.lookup_mut(addr);
+            }
         }
 
         None
@@ -284,13 +306,12 @@ impl Layer {
         }
 
         // Precompute child_index if children exist.
-        if self.children.is_some() {
+        if self.has_children() {
             let child_index = self.child_index(addr);
 
             // Now, we can mutably borrow self.children safely.
-            if let Some(children) = &mut self.children {
-                // Attempt to remove from the appropriate child.
-                return children[child_index].remove(addr);
+            if let Some(child) = &mut self.children[child_index] {
+                return child.remove(addr);
             }
         }
 
@@ -298,25 +319,23 @@ impl Layer {
         None
     }
 
-    // Helper functions...
-
-    // Creates child layers.
-    fn create_children(&mut self) {
-        let child_size = self.size() / 256;
-        let mut children = Vec::with_capacity(256);
-
-        for i in 0..256 {
-            let child_begin = self.begin + child_size * i as u64;
-            let child_end = child_begin + child_size;
-            children.push(Layer::new(child_begin, child_end));
-        }
-
-        self.children = Some(children.into_boxed_slice().try_into().unwrap());
-    }
-
     // Determines the index of the child that contains the given address.
     fn child_index(&self, addr: u64) -> usize {
         ((addr - self.begin) >> self.shift) as usize
+    }
+
+    fn build_histogram(&self, depth: usize, hist: &mut HashMap<usize, HashMap<usize, usize>>) {
+        let num_mappings = self.mappings.len();
+        let depth_hist = hist.entry(depth).or_insert_with(HashMap::new);
+        *depth_hist.entry(num_mappings).or_insert(0) += 1;
+
+        if self.has_children() {
+            for child in &self.children {
+                if let Some(child) = child {
+                    child.build_histogram(depth + 1, hist);
+                }
+            }
+        }
     }
 }
 
@@ -364,6 +383,12 @@ impl Trie {
             panic!("MMU only supports a 32bit address space");
         }
         self.root.remove(addr)
+    }
+
+    fn print_histogram(&self) {
+        let mut hist = HashMap::new();
+        self.root.build_histogram(0, &mut hist);
+        debug!("layer histogram: {:?}", hist);
     }
 }
 
@@ -416,6 +441,10 @@ impl Memory {
             heap: Heap::new(heap_begin, heap_end),
             allocations: BTreeMap::new(),
         }
+    }
+
+    pub fn print_histogram(&self) {
+        self.mmaps.print_histogram();
     }
 
     pub fn snapshot(&self) -> Self {
