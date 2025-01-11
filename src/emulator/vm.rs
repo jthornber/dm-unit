@@ -185,8 +185,9 @@ impl VM {
     }
 
     pub fn setup_stack(&mut self, size: u64) -> Result<()> {
-        // We put the stack just below the 4G mark.
-        let top = 1 << 32;
+        // We put the stack just below the 4G mark.  We subtract 16 so the
+        // end ptr doesn't cross the generation boundary.
+        let top = (1 << 32) - 16;
         let base = top - size;
         self.mem
             .mmap_zeroes(Addr(base), Addr(top), PERM_READ | PERM_WRITE)

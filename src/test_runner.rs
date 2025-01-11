@@ -198,7 +198,7 @@ fn run_test(mut fix: Fixture, t: Test, log_lines: Arc<Mutex<LogInner>>) -> TestR
                 } else {
                     String::new()
                 };
-                warn!("    0x{:x}+{:x} {}", heap_ptr, len, loc);
+                warn!("    0x{:?}+{:x} {}", heap_ptr, len, loc);
             }
             warn!("Source locations may be incorrect due to tail-call optimisation.");
             result = Err(anyhow!("Guest has memory leaks"));

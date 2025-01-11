@@ -711,8 +711,9 @@ fn load_dbg_sections(ss: &mut Sections) -> Result<DbgMems> {
     for s in ss {
         let mut s = s.borrow_mut();
         s.shdr.addr = 0;
+        let gig = 1024 * 1024 * 1024;
 
-        let mut mem = Memory::new(Addr(0), Addr(1024)); // heap not used
+        let mut mem = Memory::new(Addr(gig), Addr(gig + 1024)); // heap not used
         let len = s.shdr.size as usize;
         mem.mmap_bytes(Addr(0), s.data.clone(), PERM_READ | PERM_WRITE)
             .map_err(|_e| anyhow!("couldn't mmap section"))?;
